@@ -1,0 +1,159 @@
+{
+  "title": "Documentación de la API",
+  "subtitle": "Gestiona tus monitores de disponibilidad de forma programática con la API REST de Pulsy.",
+  "toc": {
+    "title": "En esta página",
+    "items": {
+      "intro": "Introducción",
+      "auth": "Autenticación",
+      "rate-limit": "Límite de tasa",
+      "errors": "Errores",
+      "pagination": "Paginación",
+      "endpoints": "Endpoints",
+      "monitor-object": "El objeto monitor",
+      "openapi": "Especificación OpenAPI"
+    }
+  },
+  "copy": {
+    "label": "Copiar código",
+    "copied": "Copiado"
+  },
+  "sections": {
+    "intro": {
+      "title": "Introducción",
+      "body": "La API REST de Pulsy te permite crear, inspeccionar y gestionar monitores de disponibilidad desde tus propios scripts y servicios. Es una API JSON: cada respuesta correcta envuelve su carga útil en un campo \"data\", y los errores usan una forma \"error\" coherente.",
+      "baseUrlLabel": "URL base"
+    },
+    "auth": {
+      "title": "Autenticación",
+      "body": "Cada solicitud se autentica con una clave de API Bearer. Crea una clave en el panel — el secreto se muestra una sola vez, así que cópialo en ese momento. Pulsy solo almacena un hash y nunca puede volver a mostrarlo; si pierdes una clave, revócala y crea una nueva.",
+      "headerLabel": "Envía tu clave en el encabezado Authorization",
+      "note": "Las claves de API autentican únicamente la API REST — nunca la sesión del panel — y pueden revocarse en cualquier momento.",
+      "createCta": "Crear una clave de API"
+    },
+    "rateLimit": {
+      "title": "Límite de tasa",
+      "body": "Las solicitudes se limitan por clave en una ventana fija de un minuto (60 solicitudes/minuto por defecto). Cada respuesta incluye encabezados de límite de tasa para que puedas regular el ritmo de tus llamadas.",
+      "tableHeaders": {
+        "header": "Encabezado",
+        "meaning": "Significado"
+      },
+      "headers": {
+        "limit": "Solicitudes permitidas por ventana.",
+        "remaining": "Solicitudes restantes en la ventana actual.",
+        "reset": "Tiempo Unix epoch (segundos) en que se reinicia la ventana.",
+        "retryAfter": "Solo en 429 — segundos a esperar antes de reintentar."
+      }
+    },
+    "errors": {
+      "title": "Errores",
+      "body": "Cada error comparte una misma forma. Los mensajes se localizan según el encabezado Accept-Language de la solicitud (en, ar, fr, de, es).",
+      "tableHeaders": {
+        "status": "HTTP",
+        "code": "Code",
+        "when": "Cuándo"
+      },
+      "rows": {
+        "unauthorized": "Clave ausente, mal formada, inválida o revocada.",
+        "forbidden": "Tu plan está por debajo del nivel de acceso requerido.",
+        "notFound": "El monitor no existe o no es tuyo.",
+        "validation": "Cuerpo o consulta inválidos, o un límite del plan (p. ej. intervalo demasiado frecuente, límite de monitores alcanzado).",
+        "rateLimited": "Se superó la ventana de límite de tasa por clave.",
+        "internal": "Error inesperado del servidor."
+      }
+    },
+    "pagination": {
+      "title": "Paginación",
+      "body": "Los endpoints de lista se paginan por cursor. Pasa \"limit\" (1–100, por defecto 20) y el \"cursor\" opaco del \"nextCursor\" de la respuesta anterior. Un \"nextCursor\" nulo significa que no hay más páginas."
+    },
+    "endpoints": {
+      "title": "Endpoints",
+      "groups": {
+        "monitors": "Monitores",
+        "data": "Comprobaciones, incidentes y estadísticas"
+      }
+    },
+    "monitorObject": {
+      "title": "El objeto monitor",
+      "body": "Las respuestas de monitor usan esta forma. Los campos de la página de estado nunca se exponen a través de la API REST — gestiónalos en el panel."
+    },
+    "openapi": {
+      "title": "Especificación OpenAPI",
+      "body": "¿Prefieres documentación legible por máquina? El contrato completo se incluye como una especificación OpenAPI 3.1 en el repositorio — impórtalo en Postman o Insomnia, o genera un cliente con openapi-generator."
+    }
+  },
+  "endpoint": {
+    "accessLabel": "Acceso",
+    "read": "lectura",
+    "write": "escritura",
+    "paramsTitle": "Parámetros",
+    "bodyTitle": "Cuerpo de la solicitud",
+    "bodyCreateNote": "name y url son obligatorios; todos los demás campos son opcionales.",
+    "bodyUpdateNote": "Todos los campos son opcionales — solo se actualizan los campos que envíes.",
+    "requestTitle": "Solicitud de ejemplo",
+    "responseTitle": "Respuesta de ejemplo",
+    "colName": "Nombre",
+    "colIn": "En",
+    "colType": "Tipo",
+    "colRequired": "Obligatorio",
+    "colDescription": "Descripción",
+    "colField": "Campo",
+    "required": "Obligatorio",
+    "optional": "Opcional",
+    "params": {
+      "id": "El ID del monitor.",
+      "limit": "Elementos por página (1–100, por defecto 20).",
+      "cursor": "Cursor opaco del nextCursor de la respuesta anterior.",
+      "days": "Ventana en días para el agregado (1–366, por defecto 30)."
+    },
+    "bodyFields": {
+      "name": "Una etiqueta para el monitor.",
+      "url": "La URL a comprobar.",
+      "method": "Método HTTP a usar. Por defecto GET.",
+      "expectedStatus": "Código de estado HTTP esperado (100–599). Por defecto 200.",
+      "timeout": "Tiempo de espera de la solicitud en milisegundos (1000–60000). Por defecto 10000.",
+      "interval": "Segundos entre comprobaciones: 30, 60, 300, 600, 1800 o 3600. Los valores más bajos pueden requerir un plan superior. Por defecto 300.",
+      "failureThreshold": "Fallos consecutivos antes de que se abra un incidente (1–10). Por defecto 3.",
+      "active": "Si el monitor se ejecuta. Por defecto true.",
+      "tags": "Hasta 10 etiquetas de cadena."
+    }
+  },
+  "endpointDocs": {
+    "listMonitors": {
+      "summary": "Listar monitores",
+      "description": "Devuelve tus monitores, del más reciente al más antiguo, paginados por cursor."
+    },
+    "createMonitor": {
+      "summary": "Crear un monitor",
+      "description": "Crea un monitor y programa su primera comprobación. Responde con 201 y el nuevo monitor."
+    },
+    "getMonitor": {
+      "summary": "Obtener un monitor",
+      "description": "Obtiene un único monitor por ID."
+    },
+    "updateMonitor": {
+      "summary": "Actualizar un monitor",
+      "description": "Actualiza la configuración del monitor. Envía solo los campos que quieras cambiar."
+    },
+    "deleteMonitor": {
+      "summary": "Eliminar un monitor",
+      "description": "Elimina permanentemente un monitor y propaga en cascada su historial de comprobaciones e incidentes."
+    },
+    "checkNow": {
+      "summary": "Ejecutar una comprobación ahora",
+      "description": "Desencadena una comprobación inmediata. El monitor debe estar activo."
+    },
+    "listChecks": {
+      "summary": "Listar registros de comprobación",
+      "description": "Devuelve los resultados de comprobación recientes de un monitor, del más reciente al más antiguo, paginados por cursor."
+    },
+    "listIncidents": {
+      "summary": "Listar incidentes",
+      "description": "Devuelve los incidentes de un monitor, del más reciente al más antiguo, paginados por cursor."
+    },
+    "getStats": {
+      "summary": "Obtener estadísticas del monitor",
+      "description": "Devuelve estadísticas agregadas de disponibilidad y tiempo de respuesta durante la ventana solicitada."
+    }
+  }
+}

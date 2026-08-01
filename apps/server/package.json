@@ -1,0 +1,52 @@
+{
+  "name": "@pulsy/server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-or-later",
+  "exports": {
+    ".": "./src/index.ts",
+    "./trpc": "./src/trpc/router.ts"
+  },
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "start": "tsx src/index.ts",
+    "seed": "tsx src/seed.ts",
+    "seed:superadmin": "tsx src/seed-superadmin.ts",
+    "backfill:orders": "tsx src/backfill-orders.ts",
+    "typecheck": "tsc --noEmit",
+    "build": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@pulsy/db": "workspace:*",
+    "@trpc/server": "11.18.0",
+    "better-auth": "1.6.23",
+    "cors": "2.8.6",
+    "drizzle-orm": "0.45.2",
+    "express": "5.2.1",
+    "helmet": "8.2.0",
+    "node-schedule": "2.1.1",
+    "nodemailer": "9.0.3",
+    "pdfkit": "0.19.1",
+    "resend": "6.17.2",
+    "superjson": "2.2.6",
+    "tsx": "4.22.4",
+    "zod": "4.4.3"
+  },
+  "devDependencies": {
+    "@testcontainers/postgresql": "12.0.4",
+    "@types/cors": "2.8.19",
+    "@types/express": "5.0.6",
+    "@types/node": "24.13.3",
+    "@types/node-schedule": "2.1.8",
+    "@types/nodemailer": "8.0.1",
+    "@types/pdfkit": "0.17.6",
+    "@vitest/coverage-v8": "4.1.10",
+    "nanoid": "5.1.11",
+    "postgres": "3.4.9",
+    "typescript": "5.9.3",
+    "vitest": "4.1.10"
+  }
+}

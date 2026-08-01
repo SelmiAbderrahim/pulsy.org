@@ -1,0 +1,15 @@
+# Install to /etc/systemd/system/pulsy-custom-domains.service
+# One-shot reconcile; scheduled by the paired .timer. Runs as root because it
+# writes /etc/nginx and invokes certbot + nginx.
+[Unit]
+Description=Pulsy custom status-page domain provisioner (nginx vhost + certbot)
+After=network-online.target nginx.service docker.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+# Config (DATABASE_URL, CERTBOT_EMAIL, CUSTOM_DOMAIN_*) is sourced from the
+# project .env by the script. NOTE: install.sh rewrites both paths below to the
+# repo's ACTUAL location at install time — these are only placeholders.
+Environment=ENV_FILE=/opt/pulsy/.env
+ExecStart=/opt/pulsy/ops/custom-domains/provision-daemon.sh

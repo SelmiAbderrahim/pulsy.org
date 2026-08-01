@@ -1,0 +1,159 @@
+{
+  "title": "API documentation",
+  "subtitle": "Manage your uptime monitors programmatically with the Pulsy REST API.",
+  "toc": {
+    "title": "On this page",
+    "items": {
+      "intro": "Introduction",
+      "auth": "Authentication",
+      "rate-limit": "Rate limiting",
+      "errors": "Errors",
+      "pagination": "Pagination",
+      "endpoints": "Endpoints",
+      "monitor-object": "The monitor object",
+      "openapi": "OpenAPI spec"
+    }
+  },
+  "copy": {
+    "label": "Copy code",
+    "copied": "Copied"
+  },
+  "sections": {
+    "intro": {
+      "title": "Introduction",
+      "body": "The Pulsy REST API lets you create, inspect, and manage uptime monitors from your own scripts and services. It is a JSON API: every successful response wraps its payload in a \"data\" field, and errors use a consistent \"error\" shape.",
+      "baseUrlLabel": "Base URL"
+    },
+    "auth": {
+      "title": "Authentication",
+      "body": "Every request authenticates with a Bearer API key. Create a key in the dashboard — the secret is shown once, so copy it then. Pulsy stores only a hash and can never show it again; if you lose a key, revoke it and create a new one.",
+      "headerLabel": "Send your key in the Authorization header",
+      "note": "API keys authenticate the REST API only — never the dashboard session — and can be revoked at any time.",
+      "createCta": "Create an API key"
+    },
+    "rateLimit": {
+      "title": "Rate limiting",
+      "body": "Requests are limited per key in a fixed one-minute window (60 requests/minute by default). Every response carries rate-limit headers so you can pace your calls.",
+      "tableHeaders": {
+        "header": "Header",
+        "meaning": "Meaning"
+      },
+      "headers": {
+        "limit": "Requests allowed per window.",
+        "remaining": "Requests left in the current window.",
+        "reset": "Unix epoch (seconds) when the window resets.",
+        "retryAfter": "On 429 only — seconds to wait before retrying."
+      }
+    },
+    "errors": {
+      "title": "Errors",
+      "body": "Every error shares one shape. Messages are localized from the request's Accept-Language header (en, ar, fr, de, es).",
+      "tableHeaders": {
+        "status": "HTTP",
+        "code": "Code",
+        "when": "When"
+      },
+      "rows": {
+        "unauthorized": "Missing, malformed, invalid, or revoked key.",
+        "forbidden": "Your plan is below the required access level.",
+        "notFound": "The monitor doesn't exist or isn't yours.",
+        "validation": "Invalid body or query, or a plan limit (e.g. interval too frequent, monitor cap reached).",
+        "rateLimited": "Per-key rate-limit window exceeded.",
+        "internal": "Unexpected server error."
+      }
+    },
+    "pagination": {
+      "title": "Pagination",
+      "body": "List endpoints are cursor-paginated. Pass \"limit\" (1–100, default 20) and the opaque \"cursor\" from the previous response's \"nextCursor\". A null \"nextCursor\" means there are no more pages."
+    },
+    "endpoints": {
+      "title": "Endpoints",
+      "groups": {
+        "monitors": "Monitors",
+        "data": "Checks, incidents & stats"
+      }
+    },
+    "monitorObject": {
+      "title": "The monitor object",
+      "body": "Monitor responses use this shape. Status-page fields are never exposed through the REST API — manage those in the dashboard."
+    },
+    "openapi": {
+      "title": "OpenAPI specification",
+      "body": "Prefer machine-readable docs? The full contract ships as an OpenAPI 3.1 spec in the repository — import it into Postman or Insomnia, or generate a client with openapi-generator."
+    }
+  },
+  "endpoint": {
+    "accessLabel": "Access",
+    "read": "read",
+    "write": "write",
+    "paramsTitle": "Parameters",
+    "bodyTitle": "Request body",
+    "bodyCreateNote": "name and url are required; all other fields are optional.",
+    "bodyUpdateNote": "All fields are optional — only the fields you send are updated.",
+    "requestTitle": "Example request",
+    "responseTitle": "Example response",
+    "colName": "Name",
+    "colIn": "In",
+    "colType": "Type",
+    "colRequired": "Required",
+    "colDescription": "Description",
+    "colField": "Field",
+    "required": "Required",
+    "optional": "Optional",
+    "params": {
+      "id": "The monitor's ID.",
+      "limit": "Items per page (1–100, default 20).",
+      "cursor": "Opaque cursor from the previous response's nextCursor.",
+      "days": "Window in days for the aggregate (1–366, default 30)."
+    },
+    "bodyFields": {
+      "name": "A label for the monitor.",
+      "url": "The URL to check.",
+      "method": "HTTP method to use. Default GET.",
+      "expectedStatus": "Expected HTTP status code (100–599). Default 200.",
+      "timeout": "Request timeout in milliseconds (1000–60000). Default 10000.",
+      "interval": "Seconds between checks: 30, 60, 300, 600, 1800, or 3600. Lower values may need a higher plan. Default 300.",
+      "failureThreshold": "Consecutive failures before an incident opens (1–10). Default 3.",
+      "active": "Whether the monitor runs. Default true.",
+      "tags": "Up to 10 string tags."
+    }
+  },
+  "endpointDocs": {
+    "listMonitors": {
+      "summary": "List monitors",
+      "description": "Returns your monitors, newest first, paginated by cursor."
+    },
+    "createMonitor": {
+      "summary": "Create a monitor",
+      "description": "Creates a monitor and schedules its first check. Responds with 201 and the new monitor."
+    },
+    "getMonitor": {
+      "summary": "Get a monitor",
+      "description": "Fetches a single monitor by ID."
+    },
+    "updateMonitor": {
+      "summary": "Update a monitor",
+      "description": "Updates monitor configuration. Send only the fields you want to change."
+    },
+    "deleteMonitor": {
+      "summary": "Delete a monitor",
+      "description": "Permanently deletes a monitor and cascades its check history and incidents."
+    },
+    "checkNow": {
+      "summary": "Run a check now",
+      "description": "Triggers an immediate check. The monitor must be active."
+    },
+    "listChecks": {
+      "summary": "List check logs",
+      "description": "Returns recent check results for a monitor, newest first, paginated by cursor."
+    },
+    "listIncidents": {
+      "summary": "List incidents",
+      "description": "Returns a monitor's incidents, newest first, paginated by cursor."
+    },
+    "getStats": {
+      "summary": "Get monitor stats",
+      "description": "Returns aggregate uptime and response-time statistics over the requested window."
+    }
+  }
+}

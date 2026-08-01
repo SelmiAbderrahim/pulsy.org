@@ -1,0 +1,95 @@
+{
+  "title": "Superadmin",
+  "subtitle": "Plattformbetrieb — Nutzer und Monitore.",
+  "accessDenied": "Sie haben keinen Zugriff auf diesen Bereich.",
+  "nav": {
+    "overview": "Übersicht",
+    "users": "Nutzer"
+  },
+  "common": {
+    "loading": "Wird geladen…",
+    "empty": "Nichts anzuzeigen",
+    "search": "Suchen",
+    "searchUsers": "Nach E-Mail oder Name suchen",
+    "previous": "Zurück",
+    "next": "Weiter",
+    "page": "Seite {{page}}",
+    "showing": "{{count}} von {{total}}",
+    "cancel": "Abbrechen",
+    "close": "Schließen",
+    "actions": "Aktionen",
+    "all": "Alle",
+    "loadError": "Daten konnten nicht geladen werden",
+    "na": "—"
+  },
+  "stats": {
+    "totalUsers": "Nutzer gesamt",
+    "newUsers": "Neu (30 Tage)",
+    "bannedUsers": "Gesperrt",
+    "superadmins": "Superadmins",
+    "grossRevenue": "Bruttoumsatz",
+    "netRevenue": "Nettoumsatz",
+    "refunded": "Erstattet",
+    "byStatus": "Monitore nach Status",
+    "totalMonitors": "Monitore",
+    "activeMonitors": "Aktive Monitore"
+  },
+  "users": {
+    "columns": {
+      "email": "E-Mail",
+      "name": "Name",
+      "role": "Rolle",
+      "status": "Status",
+      "joined": "Beigetreten",
+      "monitors": "Monitore"
+    },
+    "roles": {
+      "user": "Nutzer",
+      "superadmin": "Superadmin"
+    },
+    "filters": {
+      "role": "Rolle",
+      "banned": "Nur gesperrte"
+    },
+    "badges": {
+      "banned": "Gesperrt",
+      "verified": "Verifiziert",
+      "unverified": "Nicht verifiziert"
+    },
+    "actions": {
+      "promote": "Zum Superadmin machen",
+      "demote": "Superadmin entfernen",
+      "ban": "Sperren",
+      "unban": "Entsperren",
+      "delete": "Löschen"
+    },
+    "ban": {
+      "title": "{{email}} sperren?",
+      "description": "Die Sitzungen werden sofort widerrufen und eine erneute Anmeldung ist erst nach der Entsperrung möglich.",
+      "reason": "Grund (optional)",
+      "reasonPlaceholder": "Warum wird dieses Konto gesperrt?",
+      "confirm": "Nutzer sperren"
+    },
+    "delete": {
+      "title": "{{email}} löschen?",
+      "description": "Dadurch werden das Konto und alle zugehörigen Daten (Monitore, Abonnements, Bestellungen) dauerhaft gelöscht. Dies kann nicht rückgängig gemacht werden.",
+      "confirmLabel": "Geben Sie DELETE ein, um zu bestätigen",
+      "confirmWord": "DELETE",
+      "confirm": "Nutzer löschen"
+    },
+    "toast": {
+      "roleUpdated": "Rolle aktualisiert",
+      "banned": "Nutzer gesperrt",
+      "unbanned": "Nutzer entsperrt",
+      "deleted": "Nutzer gelöscht",
+      "error": "Aktion fehlgeschlagen"
+    }
+  },
+  "monitorStatus": {
+    "up": "Online",
+    "down": "Offline",
+    "degraded": "Beeinträchtigt",
+    "pending": "Ausstehend",
+    "paused": "Pausiert"
+  }
+}

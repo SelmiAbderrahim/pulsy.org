@@ -1,0 +1,277 @@
+import { createExpressMiddleware } from "@trpc/server/adapters/express";
+import cors from "cors";
+import express from "express";
+import helmet from "helmet";
+import { toNodeHandler } from "better-auth/node";
+import { scheduleJob } from "node-schedule";
+import { auth } from "./auth/auth";
+import { createContext } from "./trpc/trpc";
+import { appRouter } from "./trpc/router";
+import { closeDb } from "@pulsy/db";
+import {
+	cleanupOldCheckLogs,
+	cleanupOldIncidents,
+	cleanupOldNotificationLogs,
+	cleanupOldStatusChanges,
+	initializeAllMonitors,
+	migrateLegacyNotificationChannelSecrets,
+	runMonthlySlaReports,
+	shutdownScheduler,
+} from "./services/uptime";
+import { PUBLIC_WEB_URL } from "./lib/auth-config";
+import { authRateLimitFromEnv, createIpRateLimiter } from "./lib/ip-rate-limit";
+import { isEgressFilteringEnabled } from "./lib/ssrf";
+import { safeErrorSummary } from "./lib/safe-error";
+import { slaReportPdfHandler } from "./reports/sla-report-route";
+import { createV1Router } from "./api/v1/router";
+
+// ---------------------------------------------------------------------------
+// Express bootstrap. Env comes from the process / docker compose (no dotenv).
+// ---------------------------------------------------------------------------
+
+const PORT = Number(process.env.SERVER_PORT ?? 4000);
+// The public REST API can be disabled with API_V1_ENABLED=false.
+const API_V1_ENABLED = process.env.API_V1_ENABLED !== "false";
+const RETENTION_DAYS = Number(process.env.CHECK_LOG_RETENTION_DAYS ?? 30);
+
+function splitOrigins(value: string | undefined): string[] {
+	return (value ?? "")
+		.split(",")
+		.map((origin) => origin.trim())
+		.filter((origin): origin is string => origin.length > 0);
+}
+
+function localLoopbackAliases(origin: string): string[] {
+	try {
+		const url = new URL(origin);
+		if (url.hostname === "localhost") {
+			url.hostname = "127.0.0.1";
+			return [url.toString().replace(/\/$/, "")];
+		}
+		if (url.hostname === "127.0.0.1") {
+			url.hostname = "localhost";
+			return [url.toString().replace(/\/$/, "")];
+		}
+	} catch {
+		return [];
+	}
+	return [];
+}
+
+const allowedOrigins = new Set(
+	[PUBLIC_WEB_URL, ...splitOrigins(process.env.TRUSTED_ORIGINS)]
+		.filter((origin): origin is string => Boolean(origin))
+		.flatMap((origin) => [origin, ...localLoopbackAliases(origin)])
+		.map((origin) => origin.replace(/\/$/, "")),
+);
+
+const app = express();
+
+// Always deployed behind the web container's nginx (or an operator's reverse
+// proxy): trust the first proxy hop so `req.ip` reflects X-Forwarded-For.
+app.set("trust proxy", 1);
+
+// Baseline security headers for every API response. The SPA's headers (CSP
+// etc.) are set by nginx in docker/web.nginx.conf; this server only ever
+// returns JSON/PDF, so its own CSP would just be noise on top of nginx's.
+// HSTS is documented at the TLS-terminating reverse proxy instead of here —
+// this container only ever speaks plain HTTP behind nginx.
+app.use(
+	helmet({
+		contentSecurityPolicy: false,
+		hsts: false,
+		frameguard: { action: "deny" },
+	}),
+);
+
+app.use(
+	cors({
+		origin(origin, callback) {
+			if (!origin || allowedOrigins.has(origin)) {
+				callback(null, true);
+				return;
+			}
+			callback(new Error("Origin not allowed by CORS"));
+		},
+		credentials: true,
+	}),
+);
+
+// better-auth handler MUST be mounted BEFORE any body parser.
+// Express 5 (path-to-regexp v8): wildcards are named — "*splat", not "*".
+// Strict per-IP limiter in front — sign-in/sign-up/forgot-password are
+// brute-force and enumeration targets. Tune with AUTH_RATE_LIMIT_PER_MIN.
+app.all(
+	"/api/auth/*splat",
+	createIpRateLimiter({ limit: authRateLimitFromEnv() }),
+	toNodeHandler(auth),
+);
+
+// Body parser for everything else (tRPC reads JSON bodies). Explicit limit —
+// no legitimate Pulsy payload approaches 1 MB.
+app.use(express.json({ limit: "1mb" }));
+
+// Public REST API (Bearer API-key auth). Mounted AFTER `express.json()` and
+// BEFORE `/api/trpc`; its own CORS allows `Authorization` independently of the
+// credentialed cookie CORS above.
+if (API_V1_ENABLED) {
+	app.use("/api/v1", createV1Router());
+}
+
+// tRPC. Per-IP fixed-window limiter in front — this is the surface that
+// includes the unauthenticated public procedures (status pages, share links),
+// so it must not be free to hammer. Tune with TRPC_RATE_LIMIT_PER_MIN.
+app.use(
+	"/api/trpc",
+	createIpRateLimiter(),
+	createExpressMiddleware({
+		router: appRouter,
+		createContext,
+	}),
+);
+
+// Authenticated SLA-report PDF download. Mounted after `express.json()`; the
+// handler re-resolves the session and re-runs the ownership guard before
+// streaming the PDF.
+app.get("/api/reports/sla/:monitorId.pdf", slaReportPdfHandler);
+
+app.get("/health", (_req, res) => {
+	res.json({ status: "ok" });
+});
+
+async function runDailyCleanup(): Promise<void> {
+	try {
+		const logs = await cleanupOldCheckLogs(RETENTION_DAYS);
+		const statusChanges = await cleanupOldStatusChanges(RETENTION_DAYS);
+		const incidents = await cleanupOldIncidents(RETENTION_DAYS);
+		const notificationLogs = await cleanupOldNotificationLogs(RETENTION_DAYS);
+		console.info(
+			`[cleanup] Removed ${logs} check log(s), ${statusChanges} status change(s), ${incidents} incident(s), ${notificationLogs} notification log(s)`,
+		);
+	} catch (err) {
+		console.error(`[cleanup] Daily cleanup failed: ${safeErrorSummary(err)}`);
+	}
+}
+
+async function runMonthlySlaReportsJob(): Promise<void> {
+	try {
+		await runMonthlySlaReports();
+		console.info("[sla-report] Monthly SLA report run complete");
+	} catch (err) {
+		console.error(
+			`[sla-report] Monthly SLA report run failed: ${safeErrorSummary(err)}`,
+		);
+	}
+}
+
+// Schema migrations add the version marker; payload encryption requires the
+// application key, so legacy plaintext rows are upgraded here before the HTTP
+// listener or scheduler can read them. The transaction is idempotent and a
+// failure deliberately aborts startup rather than serving plaintext-backed
+// channels.
+const migratedNotificationChannels =
+	await migrateLegacyNotificationChannelSecrets();
+if (migratedNotificationChannels > 0) {
+	console.info(
+		`[server] Encrypted ${migratedNotificationChannels} legacy notification channel(s)`,
+	);
+}
+
+const server = app.listen(PORT, () => {
+	console.info(`[server] Pulsy server listening on :${PORT}`);
+
+	if (!isEgressFilteringEnabled()) {
+		console.warn(
+			"[server] BLOCK_PRIVATE_TARGETS is off: monitors, TLS probes, and " +
+				"webhooks may reach loopback/private/LAN addresses. That is the " +
+				"intended default for self-hosted internal monitoring — but set " +
+				"BLOCK_PRIVATE_TARGETS=true if untrusted users can sign up on " +
+				"this instance.",
+		);
+	}
+
+	// Schedule periodic checks for all active monitors.
+	initializeAllMonitors().catch((err) => {
+		console.error(
+			`[server] Failed to initialize monitors: ${safeErrorSummary(err)}`,
+		);
+	});
+
+	// Daily cleanup at 03:00 server time.
+	try {
+		scheduleJob("uptime-daily-cleanup", "0 3 * * *", () => {
+			void runDailyCleanup();
+		});
+	} catch (err) {
+		console.error(
+			`[server] Failed to schedule daily cleanup: ${safeErrorSummary(err)}`,
+		);
+	}
+
+	// Monthly SLA reports at 06:00 on the 1st (prior calendar month).
+	try {
+		scheduleJob("uptime-monthly-sla", "0 6 1 * *", () => {
+			void runMonthlySlaReportsJob();
+		});
+	} catch (err) {
+		console.error(
+			`[server] Failed to schedule monthly SLA reports: ${safeErrorSummary(err)}`,
+		);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Graceful shutdown & global safety nets
+//
+// On SIGTERM/SIGINT (every container redeploy) we stop accepting new HTTP,
+// cancel scheduled jobs, drain in-flight checks, and close the DB pool so no
+// task is orphaned mid-write. uncaughtException/unhandledRejection are logged;
+// an uncaught exception leaves the process in an undefined state, so we shut
+// down and let the supervisor (`restart: unless-stopped`) start a clean one.
+// ---------------------------------------------------------------------------
+
+let shuttingDown = false;
+
+async function gracefulShutdown(signal: string, exitCode = 0): Promise<void> {
+	if (shuttingDown) {
+		return;
+	}
+	shuttingDown = true;
+	console.info(`[server] ${signal} received — shutting down gracefully`);
+
+	// Force-exit if shutdown hangs (e.g. a stuck connection close).
+	const forceExit = setTimeout(() => {
+		console.error("[server] Graceful shutdown timed out — forcing exit");
+		process.exit(1);
+	}, 15000);
+	forceExit.unref();
+
+	try {
+		await new Promise<void>((resolve) => server.close(() => resolve()));
+		await shutdownScheduler();
+		await closeDb();
+		console.info("[server] Shutdown complete");
+		clearTimeout(forceExit);
+		process.exit(exitCode);
+	} catch (err) {
+		console.error(
+			`[server] Error during shutdown: ${safeErrorSummary(err)}`,
+		);
+		clearTimeout(forceExit);
+		process.exit(1);
+	}
+}
+
+process.on("SIGTERM", () => void gracefulShutdown("SIGTERM"));
+process.on("SIGINT", () => void gracefulShutdown("SIGINT"));
+
+process.on("unhandledRejection", (reason) => {
+	console.error(
+		`[server] Unhandled promise rejection: ${safeErrorSummary(reason)}`,
+	);
+});
+
+process.on("uncaughtException", (err) => {
+	console.error(`[server] Uncaught exception: ${safeErrorSummary(err)}`);
+	void gracefulShutdown("uncaughtException", 1);
+});

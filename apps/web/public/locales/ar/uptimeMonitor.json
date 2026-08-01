@@ -1,0 +1,666 @@
+{
+  "title": "مراقب وقت التشغيل",
+  "description": "راقب توفر تطبيقاتك وخدماتك.",
+  "navigation": {
+    "title": "مراقب وقت التشغيل"
+  },
+  "actions": {
+    "createMonitor": "مراقب جديد",
+    "moreActions": "المزيد",
+    "editMonitor": "تعديل المراقب",
+    "deleteMonitor": "حذف المراقب",
+    "checkNow": "فحص الآن",
+    "enable": "تفعيل",
+    "disable": "تعطيل",
+    "save": "حفظ",
+    "cancel": "إلغاء",
+    "test": "اختبار",
+    "edit": "تعديل",
+    "delete": "حذف",
+    "back": "رجوع",
+    "addChannel": "إضافة قناة",
+    "addProvider": "إضافة مزود"
+  },
+  "tabs": {
+    "overview": "نظرة عامة",
+    "incidents": "الحوادث",
+    "history": "السجل",
+    "notifications": "الإشعارات",
+    "settings": "الإعدادات",
+    "slaReport": "تقرير SLA"
+  },
+  "status": {
+    "up": "يعمل",
+    "down": "متوقف",
+    "degraded": "متدهور",
+    "pending": "قيد الانتظار",
+    "filterBy": "تصفية حسب الحالة",
+    "clearFilter": "مسح تصفية الحالة"
+  },
+  "dashboard": {
+    "totalMonitors": "إجمالي المراقبين",
+    "monitorsUp": "يعمل",
+    "monitorsDown": "متوقف",
+    "monitorsDegraded": "متدهور",
+    "monitorsPending": "قيد الانتظار",
+    "avgUptime": "متوسط وقت التشغيل"
+  },
+  "list": {
+    "empty": "لم يتم تكوين أي مراقبين بعد",
+    "emptyDescription": "أنشئ أول مراقب لوقت التشغيل لبدء تتبع التوفر.",
+    "columns": {
+      "name": "الاسم",
+      "url": "URL",
+      "status": "الحالة",
+      "responseTime": "وقت الاستجابة",
+      "uptime": "وقت التشغيل (30 يوم)",
+      "interval": "الفاصل الزمني",
+      "lastChecked": "آخر فحص",
+      "actions": "الإجراءات"
+    },
+    "sortBy": "الترتيب حسب {{column}}",
+    "collecting": "جارٍ الجمع…",
+    "view": {
+      "compact": "مضغوط",
+      "comfortable": "مريح",
+      "toggle": "كثافة الصفوف"
+    }
+  },
+  "create": {
+    "title": "إنشاء مراقب",
+    "description": "أضف عنوان URL جديدًا لمراقبة التوفر.",
+    "fields": {
+      "name": "الاسم",
+      "namePlaceholder": "واجهة برمجة التطبيقات الخاصة بي",
+      "nameDescription": "اسم مألوف لهذا المراقب.",
+      "url": "URL",
+      "urlPlaceholder": "https://api.example.com/health",
+      "urlDescription": "عنوان URL المراد مراقبته. يجب أن يكون متاحًا للعامة.",
+      "method": "طريقة HTTP",
+      "methodDescription": "طريقة HTTP المستخدمة للفحص.",
+      "expectedStatus": "رمز الحالة المتوقع",
+      "expectedStatusDescription": "رمز حالة HTTP الذي يشير إلى أن الخدمة تعمل بشكل سليم.",
+      "interval": "فاصل الفحص الزمني",
+      "intervalDescription": "مدى تكرار فحص عنوان URL.",
+      "timeout": "مهلة الانتظار",
+      "timeoutDescription": "أقصى وقت للانتظار للحصول على استجابة (مللي ثانية).",
+      "failureThreshold": "حد الفشل",
+      "failureThresholdDescription": "عدد حالات الفشل المتتالية قبل وضع علامة متوقف."
+    },
+    "success": "تم إنشاء المراقب بنجاح",
+    "error": "فشل إنشاء المراقب"
+  },
+  "edit": {
+    "title": "تعديل المراقب",
+    "success": "تم تحديث المراقب بنجاح",
+    "error": "فشل تحديث المراقب"
+  },
+  "delete": {
+    "title": "حذف المراقب",
+    "description": "هل أنت متأكد أنك تريد حذف \"{{name}}\"؟ سيؤدي هذا إلى إزالة جميع سجلات الفحص والحوادث.",
+    "confirm": "حذف",
+    "success": "تم حذف المراقب بنجاح",
+    "error": "فشل حذف المراقب"
+  },
+  "toggle": {
+    "enableSuccess": "تم تفعيل المراقب",
+    "disableSuccess": "تم تعطيل المراقب",
+    "error": "فشل تبديل حالة المراقب"
+  },
+  "checkNow": {
+    "success": "تم تشغيل الفحص بنجاح",
+    "error": "فشل تشغيل الفحص"
+  },
+  "detail": {
+    "createdAt": "تاريخ الإنشاء",
+    "lastChecked": "آخر فحص",
+    "nextCheck": "الفحص التالي",
+    "responseTime": "وقت الاستجابة",
+    "uptime30d": "وقت التشغيل (30 يوم)",
+    "consecutiveFailures": "حالات الفشل المتتالية",
+    "httpStatus": "حالة HTTP",
+    "method": "الطريقة",
+    "interval": "الفاصل الزمني",
+    "timeout": "مهلة الانتظار",
+    "failureThreshold": "حد الفشل",
+    "tls": {
+      "title": "شهادة TLS",
+      "expiresAt": "تنتهي في",
+      "expiresInDays": "تنتهي خلال {{days}} يوم",
+      "valid": "صالحة",
+      "expiring": "تنتهي قريبًا",
+      "expired": "منتهية الصلاحية",
+      "notHttps": "ليس HTTPS"
+    }
+  },
+  "overview": {
+    "uptimeBar": {
+      "title": "وقت التشغيل (90 يوم)",
+      "today": "اليوم",
+      "daysAgo": "قبل {{days}} يوم",
+      "percentUptime": "{{percent}}% وقت التشغيل"
+    },
+    "responseTime": {
+      "title": "وقت الاستجابة",
+      "avg": "المتوسط",
+      "min": "الأدنى",
+      "max": "الأقصى"
+    },
+    "stats": {
+      "totalChecks": "إجمالي عمليات الفحص",
+      "successRate": "معدل النجاح",
+      "avgResponse": "متوسط الاستجابة",
+      "incidents": "الحوادث"
+    }
+  },
+  "incidents": {
+    "title": "الحوادث",
+    "empty": "لم يتم تسجيل أي حوادث",
+    "emptyDescription": "هذا المراقب يعمل دون أي توقف.",
+    "status": {
+      "ongoing": "جارية",
+      "resolved": "تم الحل"
+    },
+    "columns": {
+      "status": "الحالة",
+      "startedAt": "بدأت في",
+      "resolvedAt": "تم الحل في",
+      "duration": "المدة",
+      "cause": "السبب"
+    },
+    "duration": {
+      "seconds": "{{count}} ث",
+      "minutes": "{{count}} د",
+      "hours": "{{count}} س {{minutes}} د",
+      "days": "{{count}} ي {{hours}} س"
+    }
+  },
+  "history": {
+    "title": "سجل الفحوصات",
+    "empty": "لا توجد سجلات فحص بعد",
+    "emptyDescription": "ستظهر الفحوصات هنا بمجرد بدء تشغيل المراقب.",
+    "columns": {
+      "time": "الوقت",
+      "status": "الحالة",
+      "httpStatus": "حالة HTTP",
+      "responseTime": "وقت الاستجابة",
+      "error": "خطأ"
+    }
+  },
+  "notifications": {
+    "title": "قنوات الإشعارات",
+    "empty": "لم يتم تكوين قنوات إشعارات",
+    "emptyDescription": "أضف قناة لتلقي التنبيهات عند تغيير حالة هذا المراقب.",
+    "channelTypes": {
+      "email": "البريد الإلكتروني",
+      "webhook": "Webhook",
+      "slack": "Slack",
+      "discord": "Discord",
+      "telegram": "Telegram"
+    },
+    "fields": {
+      "channelType": "نوع القناة",
+      "emailProvider": "مزود البريد الإلكتروني",
+      "recipients": "المستلمون",
+      "recipientsPlaceholder": "email@example.com",
+      "webhookUrl": "عنوان Webhook URL",
+      "webhookUrlPlaceholder": "https://hooks.example.com/alerts",
+      "webhookHeaders": "الرؤوس / الخيارات (JSON)",
+      "webhookHeadersPlaceholder": "{ \"X-Pulsy-Test\": \"true\" }",
+      "webhookHeadersHint": "كائن JSON اختياري. يجب أن تكون القيم نصوصا.",
+      "webhookHeadersInvalid": "يجب أن تكون الرؤوس كائن JSON بقيم نصية",
+      "telegramTarget": "هدف Telegram",
+      "telegramTargetPlaceholder": "123456:ABC:987654 أو https://api.telegram.org/bot...",
+      "telegramHeadersHint": "استخدم { \"chat_id\": \"123456\" } عندما لا يحتوي عنوان Telegram API على chat_id.",
+      "target": "الهدف",
+      "yes": "نعم",
+      "no": "لا",
+      "notifyOnDown": "إشعار عند التوقف",
+      "notifyOnRecovery": "إشعار عند الاستعادة",
+      "notifyOnTlsExpiry": "إشعار عند انتهاء TLS",
+      "tlsExpiryThresholdDays": "أيام تحذير انتهاء TLS"
+    },
+    "create": {
+      "title": "إضافة قناة إشعارات",
+      "success": "تمت إضافة القناة بنجاح",
+      "error": "فشل إضافة القناة",
+      "emailProviderRequired": "حدد مزود بريد إلكتروني قبل حفظ قناة بريد إلكتروني"
+    },
+    "edit": {
+      "title": "تعديل قناة الإشعارات",
+      "success": "تم تحديث القناة بنجاح",
+      "error": "فشل تحديث القناة"
+    },
+    "delete": {
+      "title": "إزالة القناة",
+      "description": "هل أنت متأكد أنك تريد إزالة قناة الإشعارات هذه؟",
+      "success": "تمت إزالة القناة",
+      "error": "فشل إزالة القناة"
+    },
+    "test": {
+      "success": "تم إرسال إشعار الاختبار",
+      "error": "فشل إرسال إشعار الاختبار"
+    },
+    "defaultsNotice_zero": "لا توجد قنوات افتراضية على مستوى الحساب تنبه لهذا المراقب. أدر القنوات الافتراضية من إعدادات الإشعارات في لوحة التحكم.",
+    "defaultsNotice_one": "قناة افتراضية واحدة على مستوى الحساب تنبه أيضًا لهذا المراقب. أدر القنوات الافتراضية من إعدادات الإشعارات في لوحة التحكم.",
+    "defaultsNotice_two": "قناتان افتراضيتان على مستوى الحساب تنبهان أيضًا لهذا المراقب. أدر القنوات الافتراضية من إعدادات الإشعارات في لوحة التحكم.",
+    "defaultsNotice_few": "{{count}} قنوات افتراضية على مستوى الحساب تنبه أيضًا لهذا المراقب. أدر القنوات الافتراضية من إعدادات الإشعارات في لوحة التحكم.",
+    "defaultsNotice_many": "{{count}} قناة افتراضية على مستوى الحساب تنبه أيضًا لهذا المراقب. أدر القنوات الافتراضية من إعدادات الإشعارات في لوحة التحكم.",
+    "defaultsNotice_other": "{{count}} قناة افتراضية على مستوى الحساب تنبه أيضًا لهذا المراقب. أدر القنوات الافتراضية من إعدادات الإشعارات في لوحة التحكم.",
+    "history": {
+      "title": "سجل الإرسال",
+      "description": "كل تنبيه حاولنا إرساله، مع نتيجة التسليم النهائية.",
+      "empty": "لم يتم إرسال أي إشعارات بعد",
+      "emptyDescription": "تظهر محاولات الإرسال هنا بمجرد تغيّر حالة هذا المراقب.",
+      "columns": {
+        "time": "الوقت",
+        "channel": "القناة",
+        "target": "الوجهة",
+        "event": "الحدث",
+        "outcome": "النتيجة",
+        "attempts": "المحاولات"
+      },
+      "outcome": {
+        "sent": "تم الإرسال",
+        "failed": "فشل"
+      },
+      "event": {
+        "down": "متوقف",
+        "recovery": "استعادة",
+        "tls_expiry": "انتهاء TLS"
+      },
+      "messageId": "المعرّف: {{id}}",
+      "pageInfo": "{{from}}–{{to}} من {{total}}"
+    }
+  },
+  "emailProviders": {
+    "title": "مزودو البريد الإلكتروني",
+    "description": "إدارة مزودي البريد الإلكتروني لإشعارات تنبيهات وقت التشغيل.",
+    "empty": "لم يتم تكوين مزودي بريد إلكتروني",
+    "emptyDescription": "أضف مزود بريد إلكتروني لإرسال إشعارات التنبيهات.",
+    "providerTypes": {
+      "resend": "Resend",
+      "sendgrid": "SendGrid",
+      "smtp": "SMTP"
+    },
+    "fields": {
+      "name": "الاسم",
+      "namePlaceholder": "مزود البريد الإلكتروني الخاص بي",
+      "providerType": "نوع المزود",
+      "apiKey": "مفتاح API",
+      "apiKeyPlaceholder": "re_...",
+      "fromAddress": "عنوان المرسل",
+      "fromAddressPlaceholder": "alerts@example.com",
+      "smtpHost": "مضيف SMTP",
+      "smtpHostPlaceholder": "smtp.example.com",
+      "smtpPort": "منفذ SMTP",
+      "smtpUsername": "اسم مستخدم SMTP",
+      "smtpPassword": "كلمة مرور SMTP",
+      "smtpSecure": "استخدام TLS"
+    },
+    "create": {
+      "title": "إضافة مزود بريد إلكتروني",
+      "success": "تمت إضافة المزود",
+      "error": "فشل إضافة المزود"
+    },
+    "edit": {
+      "title": "تعديل مزود البريد الإلكتروني",
+      "success": "تم تحديث المزود",
+      "error": "فشل تحديث المزود"
+    },
+    "delete": {
+      "title": "حذف المزود",
+      "description": "هل أنت متأكد أنك تريد حذف \"{{name}}\"؟",
+      "success": "تم حذف المزود",
+      "error": "فشل حذف المزود"
+    },
+    "test": {
+      "title": "اختبار مزود البريد الإلكتروني",
+      "emailPlaceholder": "test@example.com",
+      "success": "تم إرسال بريد الاختبار بنجاح! تحقق من صندوق الوارد.",
+      "error": "فشل إرسال بريد الاختبار. تحقق من بيانات الاعتماد."
+    },
+    "testCredentials": {
+      "label": "اختبار بيانات الاعتماد",
+      "testing": "جارٍ الاختبار..."
+    }
+  },
+  "bulk": {
+    "pause": "إيقاف مؤقت",
+    "resume": "استئناف",
+    "pauseSuccess": "تم إيقاف {{count}} مراقبين مؤقتًا بنجاح",
+    "resumeSuccess": "تم استئناف {{count}} مراقبين بنجاح",
+    "pauseFailed": "فشل إيقاف بعض المراقبين مؤقتًا",
+    "resumeFailed": "فشل استئناف بعض المراقبين",
+    "deleteSuccess": "تم حذف {{count}} مراقبين بنجاح",
+    "deletePartial": "تم حذف {{success}} من {{total}} مراقبين. فشل {{failed}}.",
+    "deleteError": "فشل حذف المراقبين",
+    "warningActive": "نشط حاليًا ويتحقق",
+    "edit": {
+      "button": "تعديل الإعدادات",
+      "title": "تعديل الإعدادات",
+      "description": "طبّق هذه الإعدادات على {{count}} مراقِبًا محددًا. لن تتغير سوى الحقول التي تفعّلها.",
+      "apply": "تطبيق",
+      "submit": "تطبيق على {{count}} مراقِبًا",
+      "success": "تم تحديث {{count}} مراقِبًا",
+      "error": "فشل تحديث المراقِبات",
+      "tagsReplaceHint": "يستبدل الوسوم الحالية في كل مراقِب محدد."
+    }
+  },
+  "intervals": {
+    "30": "30 ثانية",
+    "60": "دقيقة واحدة",
+    "300": "5 دقائق",
+    "600": "10 دقائق",
+    "1800": "30 دقيقة",
+    "3600": "ساعة واحدة"
+  },
+  "quickAdd": {
+    "button": "إضافة سريعة",
+    "title": "إضافة مراقب سريعة",
+    "description": "أضف مراقبًا بإعدادات افتراضية معقولة. خصّص الإعدادات لاحقًا.",
+    "urlPlaceholder": "https://example.com/health",
+    "namePlaceholder": "يتم إنشاؤه تلقائيًا من الرابط",
+    "defaults": "فحص كل 60 ثانية | الطريقة: GET | المتوقع: 200",
+    "defaultsWithInterval": "فحص كل {{interval}} | الطريقة: GET | المتوقع: 200",
+    "setupNotifications": "إعداد الإشعارات",
+    "changeDefaults": "غيّر الإعدادات الافتراضية في علامة تبويب الإعدادات بعد الإضافة",
+    "submit": "إضافة مراقب"
+  },
+  "bulkAdd": {
+    "button": "إضافة جماعية",
+    "title": "إضافة شاشات مراقبة بالجملة",
+    "description": "الصق رابطًا واحدًا في كل سطر. تتم تسمية كل شاشة مراقبة باسم مضيفها وتستخدم الإعدادات المشتركة أدناه.",
+    "urlsLabel": "الروابط",
+    "urlsPlaceholder": "https://example.com\nhttps://api.example.com/health\nhttps://blog.example.com",
+    "summary": "{{valid}} صالحة، {{skipped}} متخطاة",
+    "invalidLabel": "متخطاة (روابط غير صالحة):",
+    "tooMany": "الحد الأقصى {{max}} رابطًا في المرة الواحدة",
+    "submit": "إضافة {{count}} شاشات مراقبة",
+    "success": "تم إنشاء {{count}} شاشات مراقبة",
+    "error": "فشل إنشاء شاشات المراقبة"
+  },
+  "tags": {
+    "label": "الوسوم",
+    "placeholder": "أضف وسمًا...",
+    "remove": "إزالة {{tag}}",
+    "filterBy": "تصفية حسب الوسم",
+    "clearFilter": "مسح التصفية",
+    "noTags": "لا توجد وسوم"
+  },
+  "statusPage": {
+    "title": "حالة الخدمة",
+    "allOperational": "جميع الأنظمة تعمل بشكل طبيعي",
+    "degradedPerformance": "أداء متدهور",
+    "majorOutage": "انقطاع كبير",
+    "recentIncidents": "الحوادث الأخيرة",
+    "monitorsTitle": "المراقبون",
+    "noIncidents": "لا توجد حوادث حديثة",
+    "noMonitors": "لم يتم تكوين أي مراقبين",
+    "notFound": "صفحة الحالة غير موجودة",
+    "duration": "المدة: {{duration}}",
+    "resolved": "تم الحل",
+    "ongoing": "جارٍ",
+    "poweredBy": "مدعوم من {{productName}}",
+    "viewStatusPage": "عرض صفحة الحالة",
+    "showOnStatusPage": "عرض في صفحة الحالة",
+    "showOnStatusPageDescription": "اجعل هذا المراقب مرئيًا في صفحة الحالة العامة",
+    "uptimePercent": "{{percent}}% وقت التشغيل",
+    "unavailable": "صفحة الحالة غير متاحة."
+  },
+  "statusPages": {
+    "manageButton": "صفحات الحالة",
+    "title": "صفحات الحالة",
+    "description": "انشر مجموعة من المراقبات كصفحة حالة عامة.",
+    "create": "صفحة حالة جديدة",
+    "empty": "لا توجد صفحات حالة بعد.",
+    "published": "منشورة",
+    "draft": "مسودة",
+    "defaultBadge": "افتراضية",
+    "open": "فتح الصفحة",
+    "slugLockedHint": "لا يمكن تغيير معرّف الصفحة الافتراضية.",
+    "edit": "تعديل",
+    "delete": "حذف",
+    "deleteConfirm": "حذف صفحة الحالة هذه؟",
+    "deleted": "تم حذف صفحة الحالة",
+    "deleteError": "فشل حذف صفحة الحالة",
+    "fieldTitle": "العنوان",
+    "titlePlaceholder": "حالة Acme",
+    "fieldSlug": "المعرّف",
+    "fieldDescription": "الوصف",
+    "publish": "منشورة",
+    "monitors": "المراقبات",
+    "noMonitorsToPick": "لا توجد مراقبات لإضافتها بعد.",
+    "save": "حفظ",
+    "saved": "تم حفظ صفحة الحالة",
+    "saveError": "فشل حفظ صفحة الحالة",
+    "customDomain": "نطاق مخصص",
+    "verified": "تم التحقق",
+    "notVerified": "لم يتم التحقق",
+    "dnsRecord": "أضف سجل TXT هذا:",
+    "routingRecord": "١. وجّه نطاقك إلى هنا (سجل {{type}}):",
+    "dnsRecordOwnership": "٢. أضف سجل TXT هذا لإثبات الملكية:",
+    "domainLive": "مباشر",
+    "domainProvisioning": "جارٍ إصدار شهادة TLS… ستصبح صفحتك مباشرة خلال دقيقة. تأكد من أن سجل التوجيه أعلاه يشير إلى هذا الخادم.",
+    "domainProvisionFailed": "تعذّر إصدار الشهادة. تأكد من أن سجل التوجيه يشير إلى هذا الخادم، ثم أعد التحقق.",
+    "routingDnsOnly": "استخدم سجلاً بدون وكيل (DNS فقط) حتى يمكن إصدار الشهادة.",
+    "dnsStatusTitle": "سجلات DNS والحالة",
+    "recheck": "إعادة الفحص",
+    "checkOwnership": "الملكية (TXT)",
+    "checkRouting": "التوجيه (A/CNAME)",
+    "checkCertificate": "الشهادة",
+    "checkVerified": "تم التحقق",
+    "checkPending": "قيد الانتظار",
+    "routingNoTarget": "لا يوجد هدف توجيه مُهيّأ",
+    "routingMismatch": "تم الحصول على {{resolved}}، المتوقع {{expected}}",
+    "routingNothing": "لا شيء",
+    "certIssuing": "جارٍ الإصدار…",
+    "certWaiting": "في انتظار التحقق",
+    "copyRecord": "نسخ قيمة السجل",
+    "copied": "تم النسخ",
+    "verify": "تحقق",
+    "removeDomain": "إزالة",
+    "attach": "إرفاق",
+    "domainAttached": "تم إرفاق النطاق",
+    "domainError": "فشل تحديث النطاق",
+    "domainVerified": "تم التحقق من النطاق",
+    "domainNotVerified": "لم يتم التحقق من النطاق بعد",
+    "domainDetached": "تمت إزالة النطاق"
+  },
+  "tlsMonitoring": {
+    "title": "مراقبة شهادة TLS",
+    "description": "مراقبة انتهاء صلاحية شهادة TLS لنقاط HTTPS",
+    "enable": "تفعيل",
+    "active": "نشط"
+  },
+  "widget": {
+    "title": "مراقبة وقت التشغيل",
+    "monitors": "{{count}} مراقب",
+    "up": "{{count}} يعمل",
+    "down": "{{count}} متوقف",
+    "viewAll": "عرض الكل",
+    "setupCta": "إعداد المراقبة",
+    "setupDescription": "راقب خدماتك على مدار الساعة"
+  },
+  "emptyState": {
+    "title": "ابدأ مراقبة خدماتك",
+    "description": "أضف أول مراقب لوقت التشغيل لتتبع التوفر وأوقات الاستجابة وانتهاء صلاحية شهادات TLS عبر نقاط النهاية.",
+    "features": {
+      "healthChecks": "فحوصات صحة HTTP و HTTPS",
+      "intervals": "فترات فحص قابلة للتكوين",
+      "alerts": "تنبيهات عبر البريد الإلكتروني وSlack وDiscord والويب هوك",
+      "statusPage": "صفحة حالة عامة لعملائك"
+    },
+    "cta": "أضف أول مراقب لك"
+  },
+  "onboarding": {
+    "title": "جديد: مراقبة وقت التشغيل",
+    "description": "راقب نقاط نهاية HTTP وتتبع أوقات الاستجابة واحصل على تنبيهات عند توقف الخدمات.",
+    "getStarted": "ابدأ الآن",
+    "dismiss": "تجاهل"
+  },
+  "sidebar": {
+    "downCount": "{{count}} متوقف"
+  },
+  "errors": {
+    "monitorNotFound": "المراقب غير موجود",
+    "limitReached": "لقد وصلت إلى حد المراقبين المكوّن.",
+    "intervalNotAllowed": "فاصل الفحص الزمني هذا غير متاح على هذا الخادم."
+  },
+  "notificationSettings": {
+    "button": "إعدادات الإشعارات",
+    "title": "إعدادات الإشعارات",
+    "description": "قم بتكوين مزودي البريد الإلكتروني وإدارة قنوات التنبيهات لمراقبيك.",
+    "monitorAlerts": "تنبيهات المراقبين",
+    "monitorAlertsDescription": "قم بإعداد قنوات الإشعارات لكل مراقب.",
+    "configure": "تكوين",
+    "noMonitors": "أنشئ مراقبًا أولاً لتكوين التنبيهات.",
+    "defaults": {
+      "title": "القنوات الافتراضية",
+      "description": "قنوات تنبيه تُطبَّق تلقائيًا على جميع مراقباتك، بما في ذلك ما تنشئه لاحقًا.",
+      "add": "إضافة قناة افتراضية",
+      "empty": "لا توجد قنوات افتراضية بعد. أضف واحدة لتنبيه جميع المراقبات دون إعداد كل مراقب على حدة.",
+      "appliesToAll": "جميع المراقبات"
+    }
+  },
+  "apiKeys": {
+    "title": "مفاتيح API",
+    "description": "إنشاء وإدارة مفاتيح API لواجهة Pulsy REST API.",
+    "docsLink": "عرض وثائق API",
+    "badge": {
+      "label": "وصول API",
+      "limited": "محدود (قراءة فقط)",
+      "full": "كامل (قراءة وكتابة)"
+    },
+    "create": {
+      "button": "إنشاء مفتاح API",
+      "title": "إنشاء مفتاح API",
+      "description": "امنح مفتاحك اسمًا. يُعرض السر مرة واحدة فقط — احفظه في مكان آمن.",
+      "nameLabel": "الاسم",
+      "namePlaceholder": "مثال: خط أنابيب CI",
+      "submit": "إنشاء المفتاح",
+      "creating": "جارٍ الإنشاء…",
+      "cancel": "إلغاء",
+      "secretLabel": "مفتاح API الخاص بك",
+      "secretHint": "انسخه الآن. لن تتمكن من رؤيته مرة أخرى.",
+      "copy": "نسخ",
+      "copied": "تم النسخ",
+      "done": "تم",
+      "error": "تعذّر إنشاء مفتاح API",
+      "docsLink": "كيفية استخدام هذا المفتاح"
+    },
+    "list": {
+      "name": "الاسم",
+      "prefix": "المفتاح",
+      "created": "تاريخ الإنشاء",
+      "lastUsed": "آخر استخدام",
+      "never": "أبدًا",
+      "actions": "الإجراءات",
+      "empty": "لا توجد مفاتيح API بعد."
+    },
+    "revoke": {
+      "button": "إبطال",
+      "title": "إبطال مفتاح API",
+      "description": "إبطال \"{{name}}\" يُعطّل فورًا أي تكامل يستخدمه. لا يمكن التراجع عن هذا الإجراء.",
+      "confirmLabel": "اكتب REVOKE للتأكيد",
+      "confirmWord": "REVOKE",
+      "submit": "إبطال المفتاح",
+      "revoking": "جارٍ الإبطال…",
+      "cancel": "إلغاء",
+      "success": "تم إبطال مفتاح API",
+      "error": "تعذّر إبطال مفتاح API"
+    }
+  },
+  "share": {
+    "button": "مشاركة",
+    "manageButton": "روابط المشاركة",
+    "dialog": {
+      "title": "مشاركة {{count}} من المراقبات",
+      "description": "يمكن لأي شخص لديه الرابط نسخ إعدادات هذه المراقبات إلى حسابه الخاص.",
+      "moreItems": "+{{count}} أخرى",
+      "expiry": "تنتهي صلاحية الرابط خلال",
+      "expiry7": "7 أيام",
+      "expiry30": "30 يومًا",
+      "expiry90": "90 يومًا",
+      "create": "إنشاء الرابط",
+      "creating": "جارٍ الإنشاء...",
+      "cancel": "إلغاء",
+      "linkLabel": "رابط المشاركة",
+      "copy": "نسخ الرابط",
+      "copied": "تم نسخ الرابط",
+      "expiresOn": "تنتهي الصلاحية في {{date}}",
+      "done": "تم",
+      "error": "فشل إنشاء رابط المشاركة"
+    },
+    "manage": {
+      "title": "روابط المشاركة",
+      "description": "الروابط التي أنشأتها لمشاركة إعدادات المراقبات.",
+      "empty": "لا توجد روابط مشاركة بعد.",
+      "monitors": "{{count}} من المراقبات",
+      "expires": "تنتهي الصلاحية في {{date}}",
+      "expired": "منتهي الصلاحية",
+      "revoke": "إبطال",
+      "revokeConfirm": "هل تريد إبطال رابط المشاركة هذا؟ سيفقد أي شخص يحمله إمكانية الوصول.",
+      "revokeSuccess": "تم إبطال رابط المشاركة",
+      "revokeError": "فشل إبطال رابط المشاركة"
+    },
+    "claim": {
+      "pageTitle": "مراقبات مشتركة",
+      "title": "شارك {{name}} مراقبات معك",
+      "titleAnonymous": "شارك شخص ما مراقبات معك",
+      "description": "اختر المراقبات التي تريد إضافتها إلى حسابك. تبدأ من جديد دون أي سجل.",
+      "selectAll": "تحديد الكل",
+      "add": "إضافة {{count}} من المراقبات",
+      "adding": "جارٍ الإضافة...",
+      "later": "ربما لاحقًا",
+      "success": "تمت إضافة {{count}} من المراقبات",
+      "error": "فشلت إضافة المراقبات",
+      "empty": "المراقبات المشتركة لم تعد متوفرة.",
+      "unavailableTitle": "الرابط غير متاح",
+      "goToDashboard": "الانتقال إلى لوحة التحكم"
+    }
+  },
+  "search": {
+    "placeholder": "البحث في المراقبات...",
+    "clear": "مسح البحث",
+    "noMatches": "لا توجد مراقبات تطابق عوامل التصفية.",
+    "paletteTitle": "بحث",
+    "palettePlaceholder": "ابحث في المراقبات والحوادث...",
+    "paletteHint": "اكتب للبحث في المراقبات والحوادث.",
+    "paletteNoResults": "لا توجد نتائج.",
+    "groupMonitors": "المراقبات",
+    "groupIncidents": "الحوادث",
+    "incidentFallback": "حادث"
+  },
+  "slaReport": {
+    "title": "تقرير SLA / وقت التشغيل",
+    "empty": "لا تتوفر بيانات SLA",
+    "emptyDescription": "تظهر التقارير بمجرد أن يسجّل المراقب بعض الفحوصات.",
+    "download": "تنزيل PDF",
+    "uptime": "وقت التشغيل",
+    "totalChecks": "إجمالي الفحوصات",
+    "failedChecks": "الفحوصات الفاشلة",
+    "avgResponseTime": "متوسط الاستجابة",
+    "p95ResponseTime": "استجابة p95",
+    "incidents": "الحوادث",
+    "email": {
+      "title": "إرسال التقرير شهريًا بالبريد",
+      "description": "أرسل هذا التقرير بالبريد في اليوم الأول من كل شهر.",
+      "recipients": "المستلمون (مفصولون بفواصل)",
+      "invalidRecipients": "أدخل عنوان بريد إلكتروني صالحًا واحدًا أو أكثر.",
+      "provider": "مزوّد البريد",
+      "noProviders": "أضف مزوّد بريد أولًا لتفعيل التقارير الشهرية.",
+      "selectProvider": "اختر مزوّدًا",
+      "active": "إرسال شهري",
+      "save": "حفظ",
+      "sendNow": "إرسال الآن",
+      "remove": "إزالة",
+      "saved": "تم حفظ التقرير الشهري",
+      "saveError": "تعذّر حفظ الاشتراك",
+      "removed": "تمت إزالة التقرير الشهري",
+      "removeError": "تعذّر إزالة الاشتراك",
+      "sent": "تم إرسال التقرير",
+      "sendError": "تعذّر إرسال التقرير"
+    }
+  }
+}

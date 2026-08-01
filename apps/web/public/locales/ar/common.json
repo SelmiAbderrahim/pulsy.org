@@ -1,0 +1,73 @@
+{
+  "app": {
+    "name": "Pulsy",
+    "tagline": "مراقبة التشغيل ببساطة"
+  },
+  "nav": {
+    "dashboard": "لوحة التحكم",
+    "openMenu": "فتح القائمة",
+    "signOut": "تسجيل الخروج",
+    "language": "اللغة",
+    "search": "بحث",
+    "apiKeys": "مفاتيح API",
+    "apiDocs": "وثائق API"
+  },
+  "languages": {
+    "en": "English",
+    "ar": "العربية",
+    "fr": "Français",
+    "de": "Deutsch",
+    "es": "Español"
+  },
+  "theme": {
+    "switchToDark": "التبديل إلى الوضع الداكن",
+    "switchToLight": "التبديل إلى الوضع الفاتح"
+  },
+  "source": {
+    "offer": "الشيفرة المصدرية لهذا الإصدار"
+  },
+  "actions": {
+    "cancel": "إلغاء",
+    "save": "حفظ",
+    "delete": "حذف",
+    "close": "إغلاق",
+    "retry": "إعادة المحاولة"
+  },
+  "states": {
+    "loading": "جارٍ التحميل...",
+    "error": "حدث خطأ ما",
+    "notFound": "غير موجود"
+  },
+  "bulkSelection": {
+    "toolbar": "شريط التحديد",
+    "selected": "{{count}} محدد",
+    "selectAll": "تحديد الكل",
+    "clearSelection": "مسح",
+    "deleteCount": "حذف ({{count}})",
+    "deleting": "جارٍ الحذف...",
+    "itemTypes": {
+      "server": "خادم",
+      "servers": "خوادم",
+      "user": "مستخدم",
+      "users": "مستخدمون",
+      "monitor": "مراقب",
+      "monitors": "مراقبون",
+      "channel": "قناة",
+      "channels": "قنوات",
+      "account": "حساب",
+      "accounts": "حسابات"
+    },
+    "confirmDelete": {
+      "title": "حذف {{count}} {{type}}؟",
+      "warning": "لا يمكن التراجع عن هذا الإجراء.",
+      "itemsLabel": "أنت على وشك حذف:",
+      "moreItems": "+{{count}} أخرى",
+      "inputLabel": "اكتب \"DELETE {{count}}\" للتأكيد:",
+      "cancel": "إلغاء",
+      "confirm": "حذف {{count}} {{type}}"
+    },
+    "warnings": {
+      "someItemsHaveConstraints": "{{count}} {{type}} لديها قيود قد تتطلب تنظيفًا يدويًا."
+    }
+  }
+}

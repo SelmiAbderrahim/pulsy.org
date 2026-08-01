@@ -1,0 +1,46 @@
+# syntax=docker/dockerfile:1
+# Build context = repo root. Builds the Vite SPA and serves it with nginx,
+# proxying /api/* to the server container (same-origin cookies).
+FROM node:24-slim AS build
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+RUN corepack enable
+WORKDIR /app
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY packages/db/package.json packages/db/package.json
+COPY apps/server/package.json apps/server/package.json
+COPY apps/web/package.json apps/web/package.json
+RUN pnpm install --frozen-lockfile
+COPY . .
+# Client-exposed build-time config. VITE_-prefixed vars are baked into the
+# bundle by Vite; unset means analytics is disabled.
+ARG VITE_SERVER_URL=""
+ARG VITE_GA_MEASUREMENT_ID=""
+# Canonical app host: any other host is treated as a custom status-page domain.
+ARG VITE_APP_URL=""
+# Routing target advertised when a user attaches a custom domain (CNAME/A).
+ARG VITE_CUSTOM_DOMAIN_CNAME_TARGET=""
+ARG VITE_CUSTOM_DOMAIN_IP=""
+# Free-text operator notice rendered on the login page (demo instances).
+ARG VITE_DEMO_NOTICE=""
+# Public corresponding source for this build. Release builds override this
+# with their exact commit; source builds can override it through Compose.
+ARG VITE_SOURCE_CODE_URL="https://github.com/SelmiAbderrahim/pulsy"
+ENV VITE_SERVER_URL=$VITE_SERVER_URL
+ENV VITE_GA_MEASUREMENT_ID=$VITE_GA_MEASUREMENT_ID
+ENV VITE_APP_URL=$VITE_APP_URL
+ENV VITE_CUSTOM_DOMAIN_CNAME_TARGET=$VITE_CUSTOM_DOMAIN_CNAME_TARGET
+ENV VITE_CUSTOM_DOMAIN_IP=$VITE_CUSTOM_DOMAIN_IP
+ENV VITE_DEMO_NOTICE=$VITE_DEMO_NOTICE
+ENV VITE_SOURCE_CODE_URL=$VITE_SOURCE_CODE_URL
+# The TanStack Router plugin refreshes routeTree.gen.ts during build. Running
+# the build before tsc keeps plain `tsc --noEmit` aligned with generated routes.
+RUN pnpm --filter @pulsy/web build
+RUN pnpm --filter @pulsy/web typecheck
+RUN pnpm --filter @pulsy/web test
+
+# Unprivileged nginx: master process runs as UID 101 (nginx), listens on 8080.
+FROM nginxinc/nginx-unprivileged:1.29-alpine AS runtime
+COPY docker/web.nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=build /app/apps/web/dist /usr/share/nginx/html
+EXPOSE 8080

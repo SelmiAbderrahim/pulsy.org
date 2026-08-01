@@ -1,0 +1,27 @@
+packages:
+  - "apps/*"
+  - "packages/*"
+
+# Security floor for transitive Vite/Vitest consumers (GHSA-r28c-9q8g-f849).
+overrides:
+  postcss: 8.5.18
+  "@esbuild-kit/core-utils>esbuild": 0.25.4
+
+# pnpm's automatic node_modules-vs-lockfile check wants to purge/reinstall
+# when it thinks they've drifted, which normally asks for interactive
+# confirmation before removing node_modules — `docker compose exec` sessions
+# don't have a TTY, so `make typecheck`/`make test` would abort with
+# ERR_PNPM_ABORTED_REMOVE_MODULES_DIR_NO_TTY. The image already runs a real
+# `pnpm install --frozen-lockfile` at build time, so auto-confirming here is safe.
+confirmModulesPurge: false
+
+# esbuild's postinstall downloads its platform binary — required (drizzle-kit
+# / better-auth dev tooling). The other three are transitive devDependencies
+# of testcontainers' optional SSH/gRPC remote-Docker-host support, unused by
+# this repo's tests (which only spin up a local Postgres container) — decline
+# their native builds rather than trust postinstall scripts we don't need.
+allowBuilds:
+  cpu-features: false
+  esbuild: true
+  protobufjs: false
+  ssh2: false

@@ -1,0 +1,662 @@
+{
+  "title": "Uptime Monitor",
+  "description": "Monitor your applications and services availability.",
+  "navigation": {
+    "title": "Uptime Monitor"
+  },
+  "actions": {
+    "createMonitor": "New Monitor",
+    "moreActions": "More",
+    "editMonitor": "Edit Monitor",
+    "deleteMonitor": "Delete Monitor",
+    "checkNow": "Check Now",
+    "enable": "Enable",
+    "disable": "Disable",
+    "save": "Save",
+    "cancel": "Cancel",
+    "test": "Test",
+    "edit": "Edit",
+    "delete": "Delete",
+    "back": "Back",
+    "addChannel": "Add Channel",
+    "addProvider": "Add Provider"
+  },
+  "tabs": {
+    "overview": "Overview",
+    "incidents": "Incidents",
+    "history": "History",
+    "notifications": "Notifications",
+    "settings": "Settings",
+    "slaReport": "SLA Report"
+  },
+  "status": {
+    "up": "Up",
+    "down": "Down",
+    "degraded": "Degraded",
+    "pending": "Pending",
+    "filterBy": "Filter by status",
+    "clearFilter": "Clear status filter"
+  },
+  "dashboard": {
+    "totalMonitors": "Total Monitors",
+    "monitorsUp": "Up",
+    "monitorsDown": "Down",
+    "monitorsDegraded": "Degraded",
+    "monitorsPending": "Pending",
+    "avgUptime": "Avg Uptime"
+  },
+  "list": {
+    "empty": "No monitors configured yet",
+    "emptyDescription": "Create your first uptime monitor to start tracking availability.",
+    "columns": {
+      "name": "Name",
+      "url": "URL",
+      "status": "Status",
+      "responseTime": "Response Time",
+      "uptime": "Uptime (30d)",
+      "interval": "Interval",
+      "lastChecked": "Last Checked",
+      "actions": "Actions"
+    },
+    "sortBy": "Sort by {{column}}",
+    "collecting": "collecting…",
+    "view": {
+      "compact": "Compact",
+      "comfortable": "Comfortable",
+      "toggle": "Row density"
+    }
+  },
+  "create": {
+    "title": "Create Monitor",
+    "description": "Add a new URL to monitor for availability.",
+    "fields": {
+      "name": "Name",
+      "namePlaceholder": "My API",
+      "nameDescription": "A friendly name for this monitor.",
+      "url": "URL",
+      "urlPlaceholder": "https://api.example.com/health",
+      "urlDescription": "The URL to monitor. Must be publicly accessible.",
+      "method": "HTTP Method",
+      "methodDescription": "The HTTP method to use for the check.",
+      "expectedStatus": "Expected Status",
+      "expectedStatusDescription": "The HTTP status code that indicates the service is healthy.",
+      "interval": "Check Interval",
+      "intervalDescription": "How often to check the URL.",
+      "timeout": "Timeout",
+      "timeoutDescription": "Maximum time to wait for a response (ms).",
+      "failureThreshold": "Failure Threshold",
+      "failureThresholdDescription": "Number of consecutive failures before marking as down."
+    },
+    "success": "Monitor created successfully",
+    "error": "Failed to create monitor"
+  },
+  "edit": {
+    "title": "Edit Monitor",
+    "success": "Monitor updated successfully",
+    "error": "Failed to update monitor"
+  },
+  "delete": {
+    "title": "Delete Monitor",
+    "description": "Are you sure you want to delete \"{{name}}\"? This will remove all check history and incidents.",
+    "confirm": "Delete",
+    "success": "Monitor deleted successfully",
+    "error": "Failed to delete monitor"
+  },
+  "toggle": {
+    "enableSuccess": "Monitor enabled",
+    "disableSuccess": "Monitor disabled",
+    "error": "Failed to toggle monitor"
+  },
+  "checkNow": {
+    "success": "Check triggered successfully",
+    "error": "Failed to trigger check"
+  },
+  "detail": {
+    "createdAt": "Created",
+    "lastChecked": "Last Checked",
+    "nextCheck": "Next Check",
+    "responseTime": "Response Time",
+    "uptime30d": "Uptime (30 days)",
+    "consecutiveFailures": "Consecutive Failures",
+    "httpStatus": "HTTP Status",
+    "method": "Method",
+    "interval": "Interval",
+    "timeout": "Timeout",
+    "failureThreshold": "Failure Threshold",
+    "tls": {
+      "title": "TLS Certificate",
+      "expiresAt": "Expires",
+      "expiresInDays": "Expires in {{days}} days",
+      "valid": "Valid",
+      "expiring": "Expiring Soon",
+      "expired": "Expired",
+      "notHttps": "Not HTTPS"
+    }
+  },
+  "overview": {
+    "uptimeBar": {
+      "title": "Uptime (90 days)",
+      "today": "Today",
+      "daysAgo": "{{days}} days ago",
+      "percentUptime": "{{percent}}% uptime"
+    },
+    "responseTime": {
+      "title": "Response Time",
+      "avg": "Avg",
+      "min": "Min",
+      "max": "Max"
+    },
+    "stats": {
+      "totalChecks": "Total Checks",
+      "successRate": "Success Rate",
+      "avgResponse": "Avg Response",
+      "incidents": "Incidents"
+    }
+  },
+  "incidents": {
+    "title": "Incidents",
+    "empty": "No incidents recorded",
+    "emptyDescription": "This monitor has been running without any downtime.",
+    "status": {
+      "ongoing": "Ongoing",
+      "resolved": "Resolved"
+    },
+    "columns": {
+      "status": "Status",
+      "startedAt": "Started",
+      "resolvedAt": "Resolved",
+      "duration": "Duration",
+      "cause": "Cause"
+    },
+    "duration": {
+      "seconds": "{{count}}s",
+      "minutes": "{{count}}m",
+      "hours": "{{count}}h {{minutes}}m",
+      "days": "{{count}}d {{hours}}h"
+    }
+  },
+  "history": {
+    "title": "Check History",
+    "empty": "No check logs yet",
+    "emptyDescription": "Checks will appear here once the monitor starts running.",
+    "columns": {
+      "time": "Time",
+      "status": "Status",
+      "httpStatus": "HTTP Status",
+      "responseTime": "Response Time",
+      "error": "Error"
+    }
+  },
+  "notifications": {
+    "title": "Notification Channels",
+    "empty": "No notification channels configured",
+    "emptyDescription": "Add a channel to receive alerts when this monitor's status changes.",
+    "channelTypes": {
+      "email": "Email",
+      "webhook": "Webhook",
+      "slack": "Slack",
+      "discord": "Discord",
+      "telegram": "Telegram"
+    },
+    "fields": {
+      "channelType": "Channel Type",
+      "emailProvider": "Email Provider",
+      "recipients": "Recipients",
+      "recipientsPlaceholder": "email@example.com",
+      "webhookUrl": "Webhook URL",
+      "webhookUrlPlaceholder": "https://hooks.example.com/alerts",
+      "webhookHeaders": "Headers / Options (JSON)",
+      "webhookHeadersPlaceholder": "{ \"X-Pulsy-Test\": \"true\" }",
+      "webhookHeadersHint": "Optional JSON object. Values must be strings.",
+      "webhookHeadersInvalid": "Headers must be a JSON object with string values",
+      "telegramTarget": "Telegram Target",
+      "telegramTargetPlaceholder": "123456:ABC:987654 or https://api.telegram.org/bot...",
+      "telegramHeadersHint": "Use { \"chat_id\": \"123456\" } when the Telegram API URL does not include chat_id.",
+      "target": "Target",
+      "yes": "Yes",
+      "no": "No",
+      "notifyOnDown": "Notify on Down",
+      "notifyOnRecovery": "Notify on Recovery",
+      "notifyOnTlsExpiry": "Notify on TLS Expiry",
+      "tlsExpiryThresholdDays": "TLS Expiry Warning Days"
+    },
+    "create": {
+      "title": "Add Notification Channel",
+      "success": "Channel added successfully",
+      "error": "Failed to add channel",
+      "emailProviderRequired": "Select an email provider before saving an email channel"
+    },
+    "edit": {
+      "title": "Edit Notification Channel",
+      "success": "Channel updated successfully",
+      "error": "Failed to update channel"
+    },
+    "delete": {
+      "title": "Remove Channel",
+      "description": "Are you sure you want to remove this notification channel?",
+      "success": "Channel removed",
+      "error": "Failed to remove channel"
+    },
+    "test": {
+      "success": "Test notification sent",
+      "error": "Failed to send test notification"
+    },
+    "defaultsNotice_one": "{{count}} account-wide default channel also alerts for this monitor. Manage default channels in Notification Settings on the dashboard.",
+    "defaultsNotice_other": "{{count}} account-wide default channels also alert for this monitor. Manage default channels in Notification Settings on the dashboard.",
+    "history": {
+      "title": "Delivery history",
+      "description": "Every alert we tried to send, with the final delivery result.",
+      "empty": "No notifications sent yet",
+      "emptyDescription": "Delivery attempts appear here once this monitor changes state.",
+      "columns": {
+        "time": "Time",
+        "channel": "Channel",
+        "target": "Target",
+        "event": "Event",
+        "outcome": "Outcome",
+        "attempts": "Attempts"
+      },
+      "outcome": {
+        "sent": "Sent",
+        "failed": "Failed"
+      },
+      "event": {
+        "down": "Down",
+        "recovery": "Recovery",
+        "tls_expiry": "TLS expiry"
+      },
+      "messageId": "ID: {{id}}",
+      "pageInfo": "{{from}}–{{to}} of {{total}}"
+    }
+  },
+  "emailProviders": {
+    "title": "Email Providers",
+    "description": "Manage email providers for uptime alert notifications.",
+    "empty": "No email providers configured",
+    "emptyDescription": "Add an email provider to send alert notifications.",
+    "providerTypes": {
+      "resend": "Resend",
+      "sendgrid": "SendGrid",
+      "smtp": "SMTP"
+    },
+    "fields": {
+      "name": "Name",
+      "namePlaceholder": "My Email Provider",
+      "providerType": "Provider Type",
+      "apiKey": "API Key",
+      "apiKeyPlaceholder": "re_...",
+      "fromAddress": "From Address",
+      "fromAddressPlaceholder": "alerts@example.com",
+      "smtpHost": "SMTP Host",
+      "smtpHostPlaceholder": "smtp.example.com",
+      "smtpPort": "SMTP Port",
+      "smtpUsername": "SMTP Username",
+      "smtpPassword": "SMTP Password",
+      "smtpSecure": "Use TLS"
+    },
+    "create": {
+      "title": "Add Email Provider",
+      "success": "Provider added",
+      "error": "Failed to add provider"
+    },
+    "edit": {
+      "title": "Edit Email Provider",
+      "success": "Provider updated",
+      "error": "Failed to update provider"
+    },
+    "delete": {
+      "title": "Delete Provider",
+      "description": "Are you sure you want to delete \"{{name}}\"?",
+      "success": "Provider deleted",
+      "error": "Failed to delete provider"
+    },
+    "test": {
+      "title": "Test Email Provider",
+      "emailPlaceholder": "test@example.com",
+      "success": "Test email sent successfully! Check your inbox.",
+      "error": "Failed to send test email. Check your credentials."
+    },
+    "testCredentials": {
+      "label": "Test Credentials",
+      "testing": "Testing..."
+    }
+  },
+  "bulk": {
+    "pause": "Pause",
+    "resume": "Resume",
+    "pauseSuccess": "Successfully paused {{count}} monitors",
+    "resumeSuccess": "Successfully resumed {{count}} monitors",
+    "pauseFailed": "Failed to pause some monitors",
+    "resumeFailed": "Failed to resume some monitors",
+    "deleteSuccess": "Successfully deleted {{count}} monitors",
+    "deletePartial": "Deleted {{success}} of {{total}} monitors. {{failed}} failed.",
+    "deleteError": "Failed to delete monitors",
+    "warningActive": "Currently active and checking",
+    "edit": {
+      "button": "Edit settings",
+      "title": "Edit settings",
+      "description": "Apply these settings to {{count}} selected monitors. Only the fields you enable are changed.",
+      "apply": "Apply",
+      "submit": "Apply to {{count}} monitors",
+      "success": "Updated {{count}} monitors",
+      "error": "Failed to update monitors",
+      "tagsReplaceHint": "Replaces existing tags on every selected monitor."
+    }
+  },
+  "intervals": {
+    "30": "30 seconds",
+    "60": "1 minute",
+    "300": "5 minutes",
+    "600": "10 minutes",
+    "1800": "30 minutes",
+    "3600": "1 hour"
+  },
+  "quickAdd": {
+    "button": "Quick Add",
+    "title": "Quick Add Monitor",
+    "description": "Add a monitor with sensible defaults. Customize settings later.",
+    "urlPlaceholder": "https://example.com/health",
+    "namePlaceholder": "Auto-generated from URL",
+    "defaults": "Checks every 60s | Method: GET | Expect: 200",
+    "defaultsWithInterval": "Checks every {{interval}} | Method: GET | Expect: 200",
+    "setupNotifications": "Set up notifications",
+    "changeDefaults": "Change defaults in Settings tab after adding",
+    "submit": "Add Monitor"
+  },
+  "bulkAdd": {
+    "button": "Bulk Add",
+    "title": "Bulk Add Monitors",
+    "description": "Paste one URL per line. Each monitor is named from its hostname and uses the shared settings below.",
+    "urlsLabel": "URLs",
+    "urlsPlaceholder": "https://example.com\nhttps://api.example.com/health\nhttps://blog.example.com",
+    "summary": "{{valid}} valid, {{skipped}} skipped",
+    "invalidLabel": "Skipped (not valid URLs):",
+    "tooMany": "Maximum {{max}} URLs at once",
+    "submit": "Add {{count}} Monitors",
+    "success": "Created {{count}} monitors",
+    "error": "Failed to create monitors"
+  },
+  "tags": {
+    "label": "Tags",
+    "placeholder": "Add a tag...",
+    "remove": "Remove {{tag}}",
+    "filterBy": "Filter by tag",
+    "clearFilter": "Clear filter",
+    "noTags": "No tags"
+  },
+  "statusPage": {
+    "title": "Service Status",
+    "allOperational": "All systems operational",
+    "degradedPerformance": "Degraded performance",
+    "majorOutage": "Major outage",
+    "recentIncidents": "Recent Incidents",
+    "monitorsTitle": "Monitors",
+    "noIncidents": "No recent incidents",
+    "noMonitors": "No monitors configured",
+    "notFound": "Status page not found",
+    "duration": "Duration: {{duration}}",
+    "resolved": "Resolved",
+    "ongoing": "Ongoing",
+    "poweredBy": "Powered by {{productName}}",
+    "viewStatusPage": "View Status Page",
+    "showOnStatusPage": "Show on Status Page",
+    "showOnStatusPageDescription": "Make this monitor visible on the public status page",
+    "uptimePercent": "{{percent}}% uptime",
+    "unavailable": "Status page is unavailable."
+  },
+  "statusPages": {
+    "manageButton": "Status pages",
+    "title": "Status pages",
+    "description": "Publish a selection of monitors as a public status page.",
+    "create": "New status page",
+    "empty": "No status pages yet.",
+    "published": "Published",
+    "draft": "Draft",
+    "defaultBadge": "Default",
+    "open": "Open page",
+    "slugLockedHint": "The default page slug can't be changed.",
+    "edit": "Edit",
+    "delete": "Delete",
+    "deleteConfirm": "Delete this status page?",
+    "deleted": "Status page deleted",
+    "deleteError": "Failed to delete status page",
+    "fieldTitle": "Title",
+    "titlePlaceholder": "Acme Status",
+    "fieldSlug": "Slug",
+    "fieldDescription": "Description",
+    "publish": "Published",
+    "monitors": "Monitors",
+    "noMonitorsToPick": "No monitors to add yet.",
+    "save": "Save",
+    "saved": "Status page saved",
+    "saveError": "Failed to save status page",
+    "customDomain": "Custom domain",
+    "verified": "Verified",
+    "notVerified": "Not verified",
+    "dnsRecord": "Add this TXT record:",
+    "routingRecord": "1. Point your domain here ({{type}} record):",
+    "dnsRecordOwnership": "2. Add this TXT record to prove ownership:",
+    "domainLive": "Live",
+    "domainProvisioning": "Issuing TLS certificate… your page goes live in a minute. Make sure the routing record above points at this server.",
+    "domainProvisionFailed": "Could not issue a certificate. Check that the routing record points at this server, then re-verify.",
+    "routingDnsOnly": "Use a DNS-only record (no proxy) so the certificate can be issued.",
+    "dnsStatusTitle": "DNS records & status",
+    "recheck": "Re-check",
+    "checkOwnership": "Ownership (TXT)",
+    "checkRouting": "Routing (A/CNAME)",
+    "checkCertificate": "Certificate",
+    "checkVerified": "verified",
+    "checkPending": "pending",
+    "routingNoTarget": "no routing target configured",
+    "routingMismatch": "resolved {{resolved}}, expected {{expected}}",
+    "routingNothing": "nothing",
+    "certIssuing": "issuing…",
+    "certWaiting": "waiting for verification",
+    "copyRecord": "Copy record value",
+    "copied": "Copied",
+    "verify": "Verify",
+    "removeDomain": "Remove",
+    "attach": "Attach",
+    "domainAttached": "Domain attached",
+    "domainError": "Failed to update domain",
+    "domainVerified": "Domain verified",
+    "domainNotVerified": "Domain not verified yet",
+    "domainDetached": "Domain removed"
+  },
+  "tlsMonitoring": {
+    "title": "TLS Certificate Monitoring",
+    "description": "Monitor TLS certificate expiry for HTTPS endpoints",
+    "enable": "Enable",
+    "active": "Active"
+  },
+  "widget": {
+    "title": "Uptime Monitoring",
+    "monitors": "{{count}} monitors",
+    "up": "{{count}} up",
+    "down": "{{count}} down",
+    "viewAll": "View All",
+    "setupCta": "Set Up Monitoring",
+    "setupDescription": "Monitor your services 24/7"
+  },
+  "emptyState": {
+    "title": "Start Monitoring Your Services",
+    "description": "Add your first uptime monitor to track availability, response times, and TLS certificate expiry across your endpoints.",
+    "features": {
+      "healthChecks": "HTTP & HTTPS health checks",
+      "intervals": "Configurable check intervals",
+      "alerts": "Email, Slack, Discord & webhook alerts",
+      "statusPage": "Public status page for your customers"
+    },
+    "cta": "Add Your First Monitor"
+  },
+  "onboarding": {
+    "title": "New: Uptime Monitoring",
+    "description": "Monitor HTTP endpoints, track response times, and get alerts when services go down.",
+    "getStarted": "Get Started",
+    "dismiss": "Dismiss"
+  },
+  "sidebar": {
+    "downCount": "{{count}} down"
+  },
+  "errors": {
+    "monitorNotFound": "Monitor not found",
+    "limitReached": "You have reached the configured monitor limit.",
+    "intervalNotAllowed": "This check interval is not available on this server."
+  },
+  "notificationSettings": {
+    "button": "Notification Settings",
+    "title": "Notification Settings",
+    "description": "Configure email providers and manage alert channels for your monitors.",
+    "monitorAlerts": "Monitor Alerts",
+    "monitorAlertsDescription": "Set up notification channels for each monitor.",
+    "configure": "Configure",
+    "noMonitors": "Create a monitor first to configure alerts.",
+    "defaults": {
+      "title": "Default Channels",
+      "description": "Alert channels that apply to all your monitors automatically, including ones you create later.",
+      "add": "Add default channel",
+      "empty": "No default channels yet. Add one to alert every monitor without per-monitor setup.",
+      "appliesToAll": "All monitors"
+    }
+  },
+  "share": {
+    "button": "Share",
+    "manageButton": "Share Links",
+    "dialog": {
+      "title": "Share {{count}} monitors",
+      "description": "Anyone with the link can copy these monitor configurations into their own account.",
+      "moreItems": "+{{count}} more",
+      "expiry": "Link expires in",
+      "expiry7": "7 days",
+      "expiry30": "30 days",
+      "expiry90": "90 days",
+      "create": "Create link",
+      "creating": "Creating...",
+      "cancel": "Cancel",
+      "linkLabel": "Share link",
+      "copy": "Copy link",
+      "copied": "Link copied",
+      "expiresOn": "Expires {{date}}",
+      "done": "Done",
+      "error": "Failed to create share link"
+    },
+    "manage": {
+      "title": "Share Links",
+      "description": "Links you created to share monitor configurations.",
+      "empty": "No share links yet.",
+      "monitors": "{{count}} monitors",
+      "expires": "Expires {{date}}",
+      "expired": "Expired",
+      "revoke": "Revoke",
+      "revokeConfirm": "Revoke this share link? Anyone holding it will lose access.",
+      "revokeSuccess": "Share link revoked",
+      "revokeError": "Failed to revoke share link"
+    },
+    "claim": {
+      "pageTitle": "Shared monitors",
+      "title": "{{name}} shared monitors with you",
+      "titleAnonymous": "Someone shared monitors with you",
+      "description": "Choose which monitors to add to your account. They start fresh with no history.",
+      "selectAll": "Select all",
+      "add": "Add {{count}} monitors",
+      "adding": "Adding...",
+      "later": "Maybe later",
+      "success": "Added {{count}} monitors",
+      "error": "Failed to add monitors",
+      "empty": "The shared monitors are no longer available.",
+      "unavailableTitle": "Link unavailable",
+      "goToDashboard": "Go to dashboard"
+    }
+  },
+  "search": {
+    "placeholder": "Search monitors...",
+    "clear": "Clear search",
+    "noMatches": "No monitors match your filters.",
+    "paletteTitle": "Search",
+    "palettePlaceholder": "Search monitors and incidents...",
+    "paletteHint": "Type to search monitors and incidents.",
+    "paletteNoResults": "No results found.",
+    "groupMonitors": "Monitors",
+    "groupIncidents": "Incidents",
+    "incidentFallback": "Incident"
+  },
+  "slaReport": {
+    "title": "SLA / Uptime Report",
+    "empty": "No SLA data available",
+    "emptyDescription": "Reports appear once the monitor has recorded some checks.",
+    "download": "Download PDF",
+    "uptime": "Uptime",
+    "totalChecks": "Total checks",
+    "failedChecks": "Failed checks",
+    "avgResponseTime": "Avg response",
+    "p95ResponseTime": "p95 response",
+    "incidents": "Incidents",
+    "email": {
+      "title": "Email monthly report",
+      "description": "Send this report by email on the 1st of every month.",
+      "recipients": "Recipients (comma-separated)",
+      "invalidRecipients": "Enter one or more valid email addresses.",
+      "provider": "Email provider",
+      "noProviders": "Add an email provider first to enable monthly reports.",
+      "selectProvider": "Select a provider",
+      "active": "Send monthly",
+      "save": "Save",
+      "sendNow": "Send now",
+      "remove": "Remove",
+      "saved": "Monthly report saved",
+      "saveError": "Could not save the subscription",
+      "removed": "Monthly report removed",
+      "removeError": "Could not remove the subscription",
+      "sent": "Report sent",
+      "sendError": "Could not send the report"
+    }
+  },
+  "apiKeys": {
+    "title": "API Keys",
+    "description": "Create and manage API keys for the Pulsy REST API.",
+    "docsLink": "View API documentation",
+    "badge": {
+      "label": "API access",
+      "limited": "Limited (read-only)",
+      "full": "Full (read & write)"
+    },
+    "create": {
+      "button": "Create API key",
+      "title": "Create API key",
+      "description": "Give your key a name. The secret is shown once — store it somewhere safe.",
+      "nameLabel": "Name",
+      "namePlaceholder": "e.g. CI pipeline",
+      "submit": "Create key",
+      "creating": "Creating…",
+      "cancel": "Cancel",
+      "secretLabel": "Your API key",
+      "secretHint": "Copy this now. You won't be able to see it again.",
+      "copy": "Copy",
+      "copied": "Copied",
+      "done": "Done",
+      "error": "Failed to create API key",
+      "docsLink": "How to use this key"
+    },
+    "list": {
+      "name": "Name",
+      "prefix": "Key",
+      "created": "Created",
+      "lastUsed": "Last used",
+      "never": "Never",
+      "actions": "Actions",
+      "empty": "No API keys yet."
+    },
+    "revoke": {
+      "button": "Revoke",
+      "title": "Revoke API key",
+      "description": "Revoking \"{{name}}\" immediately breaks any integration using it. This cannot be undone.",
+      "confirmLabel": "Type REVOKE to confirm",
+      "confirmWord": "REVOKE",
+      "submit": "Revoke key",
+      "revoking": "Revoking…",
+      "cancel": "Cancel",
+      "success": "API key revoked",
+      "error": "Failed to revoke API key"
+    }
+  }
+}

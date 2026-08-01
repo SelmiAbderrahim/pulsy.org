@@ -1,0 +1,17 @@
+# gitleaks configuration — extends the default ruleset.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Exact fake Resend fixtures used by unit tests"
+regexTarget = "match"
+regexes = [
+  '''re_(abcdef123456|mine_123456|newkey_123456)''',
+]
+
+[[allowlists]]
+description = "Historical prose describing an expected invalid-Bearer response"
+regexTarget = "line"
+regexes = [
+  '''Auth middleware.*missing/garbage/revoked Bearer''',
+]

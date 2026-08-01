@@ -1,0 +1,95 @@
+{
+  "title": "Super-administrateur",
+  "subtitle": "Opérations de la plateforme — utilisateurs et moniteurs.",
+  "accessDenied": "Vous n'avez pas accès à cette zone.",
+  "nav": {
+    "overview": "Vue d'ensemble",
+    "users": "Utilisateurs"
+  },
+  "common": {
+    "loading": "Chargement…",
+    "empty": "Rien à afficher",
+    "search": "Rechercher",
+    "searchUsers": "Rechercher par e-mail ou par nom",
+    "previous": "Précédent",
+    "next": "Suivant",
+    "page": "Page {{page}}",
+    "showing": "{{count}} sur {{total}}",
+    "cancel": "Annuler",
+    "close": "Fermer",
+    "actions": "Actions",
+    "all": "Tous",
+    "loadError": "Impossible de charger les données",
+    "na": "—"
+  },
+  "stats": {
+    "totalUsers": "Total des utilisateurs",
+    "newUsers": "Nouveaux (30 jours)",
+    "bannedUsers": "Bannis",
+    "superadmins": "Super-administrateurs",
+    "grossRevenue": "Revenu brut",
+    "netRevenue": "Revenu net",
+    "refunded": "Remboursé",
+    "byStatus": "Moniteurs par statut",
+    "totalMonitors": "Moniteurs",
+    "activeMonitors": "Moniteurs actifs"
+  },
+  "users": {
+    "columns": {
+      "email": "E-mail",
+      "name": "Nom",
+      "role": "Rôle",
+      "status": "Statut",
+      "joined": "Inscrit le",
+      "monitors": "Moniteurs"
+    },
+    "roles": {
+      "user": "Utilisateur",
+      "superadmin": "Super-administrateur"
+    },
+    "filters": {
+      "role": "Rôle",
+      "banned": "Bannis uniquement"
+    },
+    "badges": {
+      "banned": "Banni",
+      "verified": "Vérifié",
+      "unverified": "Non vérifié"
+    },
+    "actions": {
+      "promote": "Promouvoir super-administrateur",
+      "demote": "Retirer le rôle de super-administrateur",
+      "ban": "Bannir",
+      "unban": "Réactiver",
+      "delete": "Supprimer"
+    },
+    "ban": {
+      "title": "Bannir {{email}} ?",
+      "description": "Ses sessions sont révoquées immédiatement et il ne pourra plus se reconnecter tant qu'il n'aura pas été réactivé.",
+      "reason": "Motif (facultatif)",
+      "reasonPlaceholder": "Pourquoi ce compte est-il banni ?",
+      "confirm": "Bannir l'utilisateur"
+    },
+    "delete": {
+      "title": "Supprimer {{email}} ?",
+      "description": "Cela supprime définitivement le compte et tout ce qu'il possède (moniteurs, abonnements, commandes). Cette action est irréversible.",
+      "confirmLabel": "Saisissez DELETE pour confirmer",
+      "confirmWord": "DELETE",
+      "confirm": "Supprimer l'utilisateur"
+    },
+    "toast": {
+      "roleUpdated": "Rôle mis à jour",
+      "banned": "Utilisateur banni",
+      "unbanned": "Utilisateur réactivé",
+      "deleted": "Utilisateur supprimé",
+      "error": "Échec de l'action"
+    }
+  },
+  "monitorStatus": {
+    "up": "En ligne",
+    "down": "Hors ligne",
+    "degraded": "Dégradé",
+    "pending": "En attente",
+    "paused": "En pause"
+  }
+}

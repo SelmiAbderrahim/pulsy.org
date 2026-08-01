@@ -1,0 +1,1 @@
+ALTER TABLE "uptime_notification_channel" ADD COLUMN "secretVersion" integer DEFAULT 0 NOT NULL;

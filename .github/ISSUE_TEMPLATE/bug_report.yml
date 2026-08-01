@@ -1,0 +1,93 @@
+name: Bug report
+description: Report a problem with Pulsy
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug report! Please do **not** include
+        secrets (your `ENCRYPTION_KEY`, `BETTER_AUTH_SECRET`, API keys, passwords) in
+        any field below.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear and concise description of the bug.
+      placeholder: When I ... , Pulsy ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      description: What did you expect to happen instead?
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Step-by-step instructions to reproduce the behavior.
+      placeholder: |
+        1. Go to ...
+        2. Click ...
+        3. See error
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Pulsy is affected?
+      options:
+        - Web (UI / dashboard / status page)
+        - Server (API / scheduler / auth)
+        - Notifications (email / webhook / Slack / Discord / Telegram)
+        - Database / migrations
+        - Docker / deployment
+        - Other / not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Pulsy version / commit
+      description: Release tag or commit SHA you are running.
+      placeholder: "0.1.0 or abc1234"
+    validations:
+      required: true
+  - type: dropdown
+    id: deployment
+    attributes:
+      label: How are you running Pulsy?
+      options:
+        - Docker Compose (built from source)
+        - Docker Compose (GHCR images)
+        - Other container deployment
+    validations:
+      required: true
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Docker/Compose version, browser, and reverse proxy (if relevant).
+      placeholder: |
+        - OS: Ubuntu 24.04
+        - Docker: 27.x
+        - Browser: Firefox 138
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs
+      description: Output of `make logs` or browser console. Redact any secrets.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: I removed all secrets (keys, tokens, passwords) from this report.
+          required: true

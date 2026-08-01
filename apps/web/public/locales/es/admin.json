@@ -1,0 +1,95 @@
+{
+  "title": "Superadministrador",
+  "subtitle": "Operaciones de la plataforma: usuarios y monitores.",
+  "accessDenied": "No tienes acceso a esta área.",
+  "nav": {
+    "overview": "Resumen",
+    "users": "Usuarios"
+  },
+  "common": {
+    "loading": "Cargando…",
+    "empty": "Nada que mostrar",
+    "search": "Buscar",
+    "searchUsers": "Buscar por correo electrónico o nombre",
+    "previous": "Anterior",
+    "next": "Siguiente",
+    "page": "Página {{page}}",
+    "showing": "{{count}} de {{total}}",
+    "cancel": "Cancelar",
+    "close": "Cerrar",
+    "actions": "Acciones",
+    "all": "Todos",
+    "loadError": "No se pudieron cargar los datos",
+    "na": "—"
+  },
+  "stats": {
+    "totalUsers": "Total de usuarios",
+    "newUsers": "Nuevos (30 días)",
+    "bannedUsers": "Bloqueados",
+    "superadmins": "Superadministradores",
+    "grossRevenue": "Ingresos brutos",
+    "netRevenue": "Ingresos netos",
+    "refunded": "Reembolsado",
+    "byStatus": "Monitores por estado",
+    "totalMonitors": "Monitores",
+    "activeMonitors": "Monitores activos"
+  },
+  "users": {
+    "columns": {
+      "email": "Correo electrónico",
+      "name": "Nombre",
+      "role": "Rol",
+      "status": "Estado",
+      "joined": "Se unió",
+      "monitors": "Monitores"
+    },
+    "roles": {
+      "user": "Usuario",
+      "superadmin": "Superadministrador"
+    },
+    "filters": {
+      "role": "Rol",
+      "banned": "Solo bloqueados"
+    },
+    "badges": {
+      "banned": "Bloqueado",
+      "verified": "Verificado",
+      "unverified": "Sin verificar"
+    },
+    "actions": {
+      "promote": "Convertir en superadministrador",
+      "demote": "Quitar superadministrador",
+      "ban": "Bloquear",
+      "unban": "Desbloquear",
+      "delete": "Eliminar"
+    },
+    "ban": {
+      "title": "¿Bloquear a {{email}}?",
+      "description": "Sus sesiones se revocan de inmediato y no podrá volver a iniciar sesión hasta que se le desbloquee.",
+      "reason": "Motivo (opcional)",
+      "reasonPlaceholder": "¿Por qué se bloquea esta cuenta?",
+      "confirm": "Bloquear usuario"
+    },
+    "delete": {
+      "title": "¿Eliminar a {{email}}?",
+      "description": "Esto elimina permanentemente la cuenta y todo lo que le pertenece (monitores, suscripciones, pedidos). Esta acción no se puede deshacer.",
+      "confirmLabel": "Escribe DELETE para confirmar",
+      "confirmWord": "DELETE",
+      "confirm": "Eliminar usuario"
+    },
+    "toast": {
+      "roleUpdated": "Rol actualizado",
+      "banned": "Usuario bloqueado",
+      "unbanned": "Usuario desbloqueado",
+      "deleted": "Usuario eliminado",
+      "error": "La acción falló"
+    }
+  },
+  "monitorStatus": {
+    "up": "Activo",
+    "down": "Caído",
+    "degraded": "Degradado",
+    "pending": "Pendiente",
+    "paused": "Pausado"
+  }
+}

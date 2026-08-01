@@ -1,0 +1,159 @@
+{
+  "title": "API-Dokumentation",
+  "subtitle": "Verwalten Sie Ihre Verfügbarkeits-Monitore programmgesteuert mit der Pulsy REST API.",
+  "toc": {
+    "title": "Auf dieser Seite",
+    "items": {
+      "intro": "Einführung",
+      "auth": "Authentifizierung",
+      "rate-limit": "Ratenbegrenzung",
+      "errors": "Fehler",
+      "pagination": "Paginierung",
+      "endpoints": "Endpunkte",
+      "monitor-object": "Das Monitor-Objekt",
+      "openapi": "OpenAPI-Spezifikation"
+    }
+  },
+  "copy": {
+    "label": "Code kopieren",
+    "copied": "Kopiert"
+  },
+  "sections": {
+    "intro": {
+      "title": "Einführung",
+      "body": "Mit der Pulsy REST API können Sie Verfügbarkeits-Monitore aus Ihren eigenen Skripten und Diensten erstellen, prüfen und verwalten. Es ist eine JSON-API: Jede erfolgreiche Antwort kapselt ihre Nutzlast in einem Feld \"data\", und Fehler verwenden eine einheitliche \"error\"-Form.",
+      "baseUrlLabel": "Basis-URL"
+    },
+    "auth": {
+      "title": "Authentifizierung",
+      "body": "Jede Anfrage authentifiziert sich mit einem Bearer-API-Schlüssel. Erstellen Sie einen Schlüssel im Dashboard — das Geheimnis wird nur einmal angezeigt, kopieren Sie es also sofort. Pulsy speichert nur einen Hash und kann es nie wieder anzeigen; wenn Sie einen Schlüssel verlieren, widerrufen Sie ihn und erstellen Sie einen neuen.",
+      "headerLabel": "Senden Sie Ihren Schlüssel im Authorization-Header",
+      "note": "API-Schlüssel authentifizieren ausschließlich die REST API — niemals die Dashboard-Sitzung — und können jederzeit widerrufen werden.",
+      "createCta": "Einen API-Schlüssel erstellen"
+    },
+    "rateLimit": {
+      "title": "Ratenbegrenzung",
+      "body": "Anfragen werden pro Schlüssel in einem festen Zeitfenster von einer Minute begrenzt (standardmäßig 60 Anfragen/Minute). Jede Antwort enthält Ratenbegrenzungs-Header, damit Sie Ihre Aufrufe steuern können.",
+      "tableHeaders": {
+        "header": "Header",
+        "meaning": "Bedeutung"
+      },
+      "headers": {
+        "limit": "Pro Zeitfenster zulässige Anfragen.",
+        "remaining": "Im aktuellen Zeitfenster verbleibende Anfragen.",
+        "reset": "Unix-Epoch (Sekunden), wann das Zeitfenster zurückgesetzt wird.",
+        "retryAfter": "Nur bei 429 — Sekunden, die vor einem erneuten Versuch zu warten sind."
+      }
+    },
+    "errors": {
+      "title": "Fehler",
+      "body": "Jeder Fehler hat dieselbe Form. Nachrichten werden anhand des Accept-Language-Headers der Anfrage lokalisiert (en, ar, fr, de, es).",
+      "tableHeaders": {
+        "status": "HTTP",
+        "code": "Code",
+        "when": "Wann"
+      },
+      "rows": {
+        "unauthorized": "Fehlender, fehlerhafter, ungültiger oder widerrufener Schlüssel.",
+        "forbidden": "Ihr Tarif liegt unter der erforderlichen Zugriffsebene.",
+        "notFound": "Der Monitor existiert nicht oder gehört Ihnen nicht.",
+        "validation": "Ungültiger Body oder ungültige Abfrage oder ein Tariflimit (z. B. Intervall zu häufig, Monitor-Obergrenze erreicht).",
+        "rateLimited": "Ratenbegrenzungs-Zeitfenster pro Schlüssel überschritten.",
+        "internal": "Unerwarteter Serverfehler."
+      }
+    },
+    "pagination": {
+      "title": "Paginierung",
+      "body": "Listen-Endpunkte sind cursorbasiert paginiert. Übergeben Sie \"limit\" (1–100, Standard 20) und den opaken \"cursor\" aus dem \"nextCursor\" der vorherigen Antwort. Ein \"nextCursor\" von null bedeutet, dass es keine weiteren Seiten gibt."
+    },
+    "endpoints": {
+      "title": "Endpunkte",
+      "groups": {
+        "monitors": "Monitore",
+        "data": "Prüfungen, Vorfälle & Statistiken"
+      }
+    },
+    "monitorObject": {
+      "title": "Das Monitor-Objekt",
+      "body": "Monitor-Antworten verwenden diese Form. Statusseiten-Felder werden niemals über die REST API offengelegt — verwalten Sie diese im Dashboard."
+    },
+    "openapi": {
+      "title": "OpenAPI-Spezifikation",
+      "body": "Bevorzugen Sie maschinenlesbare Dokumentation? Der vollständige Vertrag wird als OpenAPI 3.1-Spezifikation im Repository ausgeliefert — importieren Sie ihn in Postman oder Insomnia oder generieren Sie einen Client mit openapi-generator."
+    }
+  },
+  "endpoint": {
+    "accessLabel": "Zugriff",
+    "read": "Lesen",
+    "write": "Schreiben",
+    "paramsTitle": "Parameter",
+    "bodyTitle": "Anfrage-Body",
+    "bodyCreateNote": "name und url sind erforderlich; alle anderen Felder sind optional.",
+    "bodyUpdateNote": "Alle Felder sind optional — es werden nur die Felder aktualisiert, die Sie senden.",
+    "requestTitle": "Beispielanfrage",
+    "responseTitle": "Beispielantwort",
+    "colName": "Name",
+    "colIn": "In",
+    "colType": "Typ",
+    "colRequired": "Erforderlich",
+    "colDescription": "Beschreibung",
+    "colField": "Feld",
+    "required": "Erforderlich",
+    "optional": "Optional",
+    "params": {
+      "id": "Die ID des Monitors.",
+      "limit": "Elemente pro Seite (1–100, Standard 20).",
+      "cursor": "Opaker Cursor aus dem nextCursor der vorherigen Antwort.",
+      "days": "Zeitfenster in Tagen für die Aggregation (1–366, Standard 30)."
+    },
+    "bodyFields": {
+      "name": "Eine Bezeichnung für den Monitor.",
+      "url": "Die zu prüfende URL.",
+      "method": "Zu verwendende HTTP-Methode. Standard GET.",
+      "expectedStatus": "Erwarteter HTTP-Statuscode (100–599). Standard 200.",
+      "timeout": "Anfrage-Timeout in Millisekunden (1000–60000). Standard 10000.",
+      "interval": "Sekunden zwischen den Prüfungen: 30, 60, 300, 600, 1800 oder 3600. Niedrigere Werte erfordern möglicherweise einen höheren Tarif. Standard 300.",
+      "failureThreshold": "Aufeinanderfolgende Fehlschläge, bevor ein Vorfall geöffnet wird (1–10). Standard 3.",
+      "active": "Ob der Monitor läuft. Standard true.",
+      "tags": "Bis zu 10 String-Tags."
+    }
+  },
+  "endpointDocs": {
+    "listMonitors": {
+      "summary": "Monitore auflisten",
+      "description": "Gibt Ihre Monitore zurück, neueste zuerst, per Cursor paginiert."
+    },
+    "createMonitor": {
+      "summary": "Einen Monitor erstellen",
+      "description": "Erstellt einen Monitor und plant seine erste Prüfung. Antwortet mit 201 und dem neuen Monitor."
+    },
+    "getMonitor": {
+      "summary": "Einen Monitor abrufen",
+      "description": "Ruft einen einzelnen Monitor anhand der ID ab."
+    },
+    "updateMonitor": {
+      "summary": "Einen Monitor aktualisieren",
+      "description": "Aktualisiert die Monitor-Konfiguration. Senden Sie nur die Felder, die Sie ändern möchten."
+    },
+    "deleteMonitor": {
+      "summary": "Einen Monitor löschen",
+      "description": "Löscht einen Monitor dauerhaft und entfernt kaskadierend seinen Prüfverlauf und seine Vorfälle."
+    },
+    "checkNow": {
+      "summary": "Jetzt eine Prüfung ausführen",
+      "description": "Löst eine sofortige Prüfung aus. Der Monitor muss aktiv sein."
+    },
+    "listChecks": {
+      "summary": "Prüfprotokolle auflisten",
+      "description": "Gibt die neuesten Prüfergebnisse eines Monitors zurück, neueste zuerst, per Cursor paginiert."
+    },
+    "listIncidents": {
+      "summary": "Vorfälle auflisten",
+      "description": "Gibt die Vorfälle eines Monitors zurück, neueste zuerst, per Cursor paginiert."
+    },
+    "getStats": {
+      "summary": "Monitor-Statistiken abrufen",
+      "description": "Gibt aggregierte Verfügbarkeits- und Antwortzeit-Statistiken über das angeforderte Zeitfenster zurück."
+    }
+  }
+}

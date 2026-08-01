@@ -1,0 +1,61 @@
+name: Feature request
+description: Suggest an idea or improvement for Pulsy
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for suggesting an improvement! Please keep in mind that Pulsy is intentionally
+        a self-hosted uptime monitor that is fully featured and free — every capability is
+        available to every user, so proposals must not gate any capability.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / motivation
+      description: What problem would this feature solve? What are you trying to do?
+      placeholder: I'm always frustrated when ...
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: Describe what you'd like to happen.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any alternative solutions or workarounds you've considered.
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      description: Which part of Pulsy does this relate to?
+      options:
+        - Monitoring / checks
+        - Notifications (email / webhook / Slack / Discord / Telegram)
+        - Public status pages
+        - Web UI / dashboard
+        - Internationalization / a new locale
+        - Server / scheduler / API
+        - Docker / deployment
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Mockups, links, or anything else that helps explain the request.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmation
+      options:
+        - label: I searched existing issues and this is not a duplicate.
+          required: true
+        - label: This fits Pulsy's self-hosted scope and does not gate default-build features.
+          required: true

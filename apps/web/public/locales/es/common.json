@@ -1,0 +1,73 @@
+{
+  "app": {
+    "name": "Pulsy",
+    "tagline": "Monitoreo de disponibilidad sencillo"
+  },
+  "nav": {
+    "dashboard": "Panel",
+    "openMenu": "Abrir menú",
+    "signOut": "Cerrar sesión",
+    "language": "Idioma",
+    "search": "Buscar",
+    "apiKeys": "Claves API",
+    "apiDocs": "Docs API"
+  },
+  "languages": {
+    "en": "English",
+    "ar": "العربية",
+    "fr": "Français",
+    "de": "Deutsch",
+    "es": "Español"
+  },
+  "theme": {
+    "switchToDark": "Cambiar al modo oscuro",
+    "switchToLight": "Cambiar al modo claro"
+  },
+  "source": {
+    "offer": "Código fuente de esta versión"
+  },
+  "actions": {
+    "cancel": "Cancelar",
+    "save": "Guardar",
+    "delete": "Eliminar",
+    "close": "Cerrar",
+    "retry": "Reintentar"
+  },
+  "states": {
+    "loading": "Cargando...",
+    "error": "Algo salió mal",
+    "notFound": "No encontrado"
+  },
+  "bulkSelection": {
+    "toolbar": "Barra de selección",
+    "selected": "{{count}} seleccionados",
+    "selectAll": "Seleccionar todo",
+    "clearSelection": "Limpiar",
+    "deleteCount": "Eliminar ({{count}})",
+    "deleting": "Eliminando...",
+    "itemTypes": {
+      "server": "servidor",
+      "servers": "servidores",
+      "user": "usuario",
+      "users": "usuarios",
+      "monitor": "monitor",
+      "monitors": "monitores",
+      "channel": "canal",
+      "channels": "canales",
+      "account": "cuenta",
+      "accounts": "cuentas"
+    },
+    "confirmDelete": {
+      "title": "¿Eliminar {{count}} {{type}}?",
+      "warning": "Esta acción no se puede deshacer.",
+      "itemsLabel": "Estás a punto de eliminar:",
+      "moreItems": "+{{count}} más",
+      "inputLabel": "Escribe \"DELETE {{count}}\" para confirmar:",
+      "cancel": "Cancelar",
+      "confirm": "Eliminar {{count}} {{type}}"
+    },
+    "warnings": {
+      "someItemsHaveConstraints": "{{count}} {{type}} tienen restricciones que pueden requerir limpieza manual."
+    }
+  }
+}

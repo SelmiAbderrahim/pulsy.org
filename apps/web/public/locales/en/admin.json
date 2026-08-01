@@ -1,0 +1,95 @@
+{
+  "title": "Superadmin",
+  "subtitle": "Platform operations — users and monitors.",
+  "accessDenied": "You do not have access to this area.",
+  "nav": {
+    "overview": "Overview",
+    "users": "Users"
+  },
+  "common": {
+    "loading": "Loading…",
+    "empty": "Nothing to show",
+    "search": "Search",
+    "searchUsers": "Search by email or name",
+    "previous": "Previous",
+    "next": "Next",
+    "page": "Page {{page}}",
+    "showing": "{{count}} of {{total}}",
+    "cancel": "Cancel",
+    "close": "Close",
+    "actions": "Actions",
+    "all": "All",
+    "loadError": "Could not load data",
+    "na": "—"
+  },
+  "stats": {
+    "totalUsers": "Total users",
+    "newUsers": "New (30 days)",
+    "bannedUsers": "Banned",
+    "superadmins": "Superadmins",
+    "grossRevenue": "Gross revenue",
+    "netRevenue": "Net revenue",
+    "refunded": "Refunded",
+    "byStatus": "Monitors by status",
+    "totalMonitors": "Monitors",
+    "activeMonitors": "Active monitors"
+  },
+  "users": {
+    "columns": {
+      "email": "Email",
+      "name": "Name",
+      "role": "Role",
+      "status": "Status",
+      "joined": "Joined",
+      "monitors": "Monitors"
+    },
+    "roles": {
+      "user": "User",
+      "superadmin": "Superadmin"
+    },
+    "filters": {
+      "role": "Role",
+      "banned": "Banned only"
+    },
+    "badges": {
+      "banned": "Banned",
+      "verified": "Verified",
+      "unverified": "Unverified"
+    },
+    "actions": {
+      "promote": "Make superadmin",
+      "demote": "Remove superadmin",
+      "ban": "Ban",
+      "unban": "Unban",
+      "delete": "Delete"
+    },
+    "ban": {
+      "title": "Ban {{email}}?",
+      "description": "Their sessions are revoked immediately and they cannot sign back in until unbanned.",
+      "reason": "Reason (optional)",
+      "reasonPlaceholder": "Why is this account being banned?",
+      "confirm": "Ban user"
+    },
+    "delete": {
+      "title": "Delete {{email}}?",
+      "description": "This permanently deletes the account and everything it owns (monitors, subscriptions, orders). This cannot be undone.",
+      "confirmLabel": "Type DELETE to confirm",
+      "confirmWord": "DELETE",
+      "confirm": "Delete user"
+    },
+    "toast": {
+      "roleUpdated": "Role updated",
+      "banned": "User banned",
+      "unbanned": "User unbanned",
+      "deleted": "User deleted",
+      "error": "Action failed"
+    }
+  },
+  "monitorStatus": {
+    "up": "Up",
+    "down": "Down",
+    "degraded": "Degraded",
+    "pending": "Pending",
+    "paused": "Paused"
+  }
+}

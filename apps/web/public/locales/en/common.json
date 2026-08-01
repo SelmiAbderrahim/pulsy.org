@@ -1,0 +1,73 @@
+{
+  "app": {
+    "name": "Pulsy",
+    "tagline": "Uptime monitoring made simple"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "openMenu": "Open menu",
+    "signOut": "Sign out",
+    "language": "Language",
+    "search": "Search",
+    "apiKeys": "API Keys",
+    "apiDocs": "API Docs"
+  },
+  "languages": {
+    "en": "English",
+    "ar": "العربية",
+    "fr": "Français",
+    "de": "Deutsch",
+    "es": "Español"
+  },
+  "theme": {
+    "switchToDark": "Switch to dark mode",
+    "switchToLight": "Switch to light mode"
+  },
+  "source": {
+    "offer": "Source code for this version"
+  },
+  "actions": {
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "close": "Close",
+    "retry": "Retry"
+  },
+  "states": {
+    "loading": "Loading...",
+    "error": "Something went wrong",
+    "notFound": "Not found"
+  },
+  "bulkSelection": {
+    "toolbar": "Selection toolbar",
+    "selected": "{{count}} selected",
+    "selectAll": "Select all",
+    "clearSelection": "Clear",
+    "deleteCount": "Delete ({{count}})",
+    "deleting": "Deleting...",
+    "itemTypes": {
+      "server": "server",
+      "servers": "servers",
+      "user": "user",
+      "users": "users",
+      "monitor": "monitor",
+      "monitors": "monitors",
+      "channel": "channel",
+      "channels": "channels",
+      "account": "account",
+      "accounts": "accounts"
+    },
+    "confirmDelete": {
+      "title": "Delete {{count}} {{type}}?",
+      "warning": "This action cannot be undone.",
+      "itemsLabel": "You are about to delete:",
+      "moreItems": "+{{count}} more",
+      "inputLabel": "Type \"DELETE {{count}}\" to confirm:",
+      "cancel": "Cancel",
+      "confirm": "Delete {{count}} {{type}}"
+    },
+    "warnings": {
+      "someItemsHaveConstraints": "{{count}} {{type}} have constraints that may require manual cleanup."
+    }
+  }
+}

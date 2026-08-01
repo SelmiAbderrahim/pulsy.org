@@ -1,0 +1,73 @@
+{
+  "app": {
+    "name": "Pulsy",
+    "tagline": "La surveillance de disponibilité simplifiée"
+  },
+  "nav": {
+    "dashboard": "Tableau de bord",
+    "openMenu": "Ouvrir le menu",
+    "signOut": "Se déconnecter",
+    "language": "Langue",
+    "search": "Rechercher",
+    "apiKeys": "Clés API",
+    "apiDocs": "Docs API"
+  },
+  "languages": {
+    "en": "English",
+    "ar": "العربية",
+    "fr": "Français",
+    "de": "Deutsch",
+    "es": "Español"
+  },
+  "theme": {
+    "switchToDark": "Passer au mode sombre",
+    "switchToLight": "Passer au mode clair"
+  },
+  "source": {
+    "offer": "Code source de cette version"
+  },
+  "actions": {
+    "cancel": "Annuler",
+    "save": "Enregistrer",
+    "delete": "Supprimer",
+    "close": "Fermer",
+    "retry": "Réessayer"
+  },
+  "states": {
+    "loading": "Chargement...",
+    "error": "Une erreur est survenue",
+    "notFound": "Introuvable"
+  },
+  "bulkSelection": {
+    "toolbar": "Barre de sélection",
+    "selected": "{{count}} sélectionné(s)",
+    "selectAll": "Tout sélectionner",
+    "clearSelection": "Effacer",
+    "deleteCount": "Supprimer ({{count}})",
+    "deleting": "Suppression...",
+    "itemTypes": {
+      "server": "serveur",
+      "servers": "serveurs",
+      "user": "utilisateur",
+      "users": "utilisateurs",
+      "monitor": "moniteur",
+      "monitors": "moniteurs",
+      "channel": "canal",
+      "channels": "canaux",
+      "account": "compte",
+      "accounts": "comptes"
+    },
+    "confirmDelete": {
+      "title": "Supprimer {{count}} {{type}} ?",
+      "warning": "Cette action est irréversible.",
+      "itemsLabel": "Vous êtes sur le point de supprimer :",
+      "moreItems": "+{{count}} de plus",
+      "inputLabel": "Tapez « DELETE {{count}} » pour confirmer :",
+      "cancel": "Annuler",
+      "confirm": "Supprimer {{count}} {{type}}"
+    },
+    "warnings": {
+      "someItemsHaveConstraints": "{{count}} {{type}} ont des contraintes pouvant nécessiter un nettoyage manuel."
+    }
+  }
+}

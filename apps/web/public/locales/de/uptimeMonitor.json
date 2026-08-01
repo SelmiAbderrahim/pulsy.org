@@ -1,0 +1,662 @@
+{
+  "title": "Verfügbarkeitsmonitor",
+  "description": "Überwachen Sie die Verfügbarkeit Ihrer Anwendungen und Dienste.",
+  "navigation": {
+    "title": "Verfügbarkeitsmonitor"
+  },
+  "actions": {
+    "createMonitor": "Neuer Monitor",
+    "moreActions": "Mehr",
+    "editMonitor": "Monitor bearbeiten",
+    "deleteMonitor": "Monitor löschen",
+    "checkNow": "Jetzt prüfen",
+    "enable": "Aktivieren",
+    "disable": "Deaktivieren",
+    "save": "Speichern",
+    "cancel": "Abbrechen",
+    "test": "Testen",
+    "edit": "Bearbeiten",
+    "delete": "Löschen",
+    "back": "Zurück",
+    "addChannel": "Kanal hinzufügen",
+    "addProvider": "Anbieter hinzufügen"
+  },
+  "tabs": {
+    "overview": "Übersicht",
+    "incidents": "Vorfälle",
+    "history": "Verlauf",
+    "notifications": "Benachrichtigungen",
+    "settings": "Einstellungen",
+    "slaReport": "SLA-Bericht"
+  },
+  "status": {
+    "up": "Online",
+    "down": "Offline",
+    "degraded": "Beeinträchtigt",
+    "pending": "Ausstehend",
+    "filterBy": "Nach Status filtern",
+    "clearFilter": "Statusfilter löschen"
+  },
+  "dashboard": {
+    "totalMonitors": "Monitore gesamt",
+    "monitorsUp": "Online",
+    "monitorsDown": "Offline",
+    "monitorsDegraded": "Beeinträchtigt",
+    "monitorsPending": "Ausstehend",
+    "avgUptime": "Durchschn. Verfügbarkeit"
+  },
+  "list": {
+    "empty": "Noch keine Monitore konfiguriert",
+    "emptyDescription": "Erstellen Sie Ihren ersten Verfügbarkeitsmonitor, um die Erreichbarkeit zu verfolgen.",
+    "columns": {
+      "name": "Name",
+      "url": "URL",
+      "status": "Status",
+      "responseTime": "Antwortzeit",
+      "uptime": "Verfügbarkeit (30T)",
+      "interval": "Intervall",
+      "lastChecked": "Letzte Prüfung",
+      "actions": "Aktionen"
+    },
+    "sortBy": "Sortieren nach {{column}}",
+    "collecting": "wird erfasst…",
+    "view": {
+      "compact": "Kompakt",
+      "comfortable": "Komfortabel",
+      "toggle": "Zeilendichte"
+    }
+  },
+  "create": {
+    "title": "Monitor erstellen",
+    "description": "Fügen Sie eine neue URL zur Verfügbarkeitsüberwachung hinzu.",
+    "fields": {
+      "name": "Name",
+      "namePlaceholder": "Meine API",
+      "nameDescription": "Ein sprechender Name für diesen Monitor.",
+      "url": "URL",
+      "urlPlaceholder": "https://api.example.com/health",
+      "urlDescription": "Die zu überwachende URL. Muss öffentlich erreichbar sein.",
+      "method": "HTTP-Methode",
+      "methodDescription": "Die HTTP-Methode für die Prüfung.",
+      "expectedStatus": "Erwarteter Status",
+      "expectedStatusDescription": "Der HTTP-Statuscode, der anzeigt, dass der Dienst funktioniert.",
+      "interval": "Prüfintervall",
+      "intervalDescription": "Wie oft die URL geprüft werden soll.",
+      "timeout": "Zeitüberschreitung",
+      "timeoutDescription": "Maximale Wartezeit auf eine Antwort (ms).",
+      "failureThreshold": "Fehlerschwelle",
+      "failureThresholdDescription": "Anzahl aufeinanderfolgender Fehler, bevor als offline markiert wird."
+    },
+    "success": "Monitor erfolgreich erstellt",
+    "error": "Monitor konnte nicht erstellt werden"
+  },
+  "edit": {
+    "title": "Monitor bearbeiten",
+    "success": "Monitor erfolgreich aktualisiert",
+    "error": "Monitor konnte nicht aktualisiert werden"
+  },
+  "delete": {
+    "title": "Monitor löschen",
+    "description": "Sind Sie sicher, dass Sie \"{{name}}\" löschen möchten? Dadurch werden der gesamte Prüfverlauf und alle Vorfälle entfernt.",
+    "confirm": "Löschen",
+    "success": "Monitor erfolgreich gelöscht",
+    "error": "Monitor konnte nicht gelöscht werden"
+  },
+  "toggle": {
+    "enableSuccess": "Monitor aktiviert",
+    "disableSuccess": "Monitor deaktiviert",
+    "error": "Monitor konnte nicht umgeschaltet werden"
+  },
+  "checkNow": {
+    "success": "Prüfung erfolgreich ausgelöst",
+    "error": "Prüfung konnte nicht ausgelöst werden"
+  },
+  "detail": {
+    "createdAt": "Erstellt",
+    "lastChecked": "Letzte Prüfung",
+    "nextCheck": "Nächste Prüfung",
+    "responseTime": "Antwortzeit",
+    "uptime30d": "Verfügbarkeit (30 Tage)",
+    "consecutiveFailures": "Aufeinanderfolgende Fehler",
+    "httpStatus": "HTTP-Status",
+    "method": "Methode",
+    "interval": "Intervall",
+    "timeout": "Zeitüberschreitung",
+    "failureThreshold": "Fehlerschwelle",
+    "tls": {
+      "title": "TLS-Zertifikat",
+      "expiresAt": "Läuft ab am",
+      "expiresInDays": "Läuft in {{days}} Tagen ab",
+      "valid": "Gültig",
+      "expiring": "Läuft bald ab",
+      "expired": "Abgelaufen",
+      "notHttps": "Kein HTTPS"
+    }
+  },
+  "overview": {
+    "uptimeBar": {
+      "title": "Verfügbarkeit (90 Tage)",
+      "today": "Heute",
+      "daysAgo": "Vor {{days}} Tagen",
+      "percentUptime": "{{percent}}% Verfügbarkeit"
+    },
+    "responseTime": {
+      "title": "Antwortzeit",
+      "avg": "Durchschn.",
+      "min": "Min",
+      "max": "Max"
+    },
+    "stats": {
+      "totalChecks": "Prüfungen gesamt",
+      "successRate": "Erfolgsrate",
+      "avgResponse": "Durchschn. Antwort",
+      "incidents": "Vorfälle"
+    }
+  },
+  "incidents": {
+    "title": "Vorfälle",
+    "empty": "Keine Vorfälle verzeichnet",
+    "emptyDescription": "Dieser Monitor läuft ohne Ausfallzeiten.",
+    "status": {
+      "ongoing": "Andauernd",
+      "resolved": "Behoben"
+    },
+    "columns": {
+      "status": "Status",
+      "startedAt": "Beginn",
+      "resolvedAt": "Behoben am",
+      "duration": "Dauer",
+      "cause": "Ursache"
+    },
+    "duration": {
+      "seconds": "{{count}}s",
+      "minutes": "{{count}}m",
+      "hours": "{{count}}h {{minutes}}m",
+      "days": "{{count}}T {{hours}}h"
+    }
+  },
+  "history": {
+    "title": "Prüfverlauf",
+    "empty": "Noch keine Prüfprotokolle",
+    "emptyDescription": "Prüfungen werden hier angezeigt, sobald der Monitor gestartet wird.",
+    "columns": {
+      "time": "Zeit",
+      "status": "Status",
+      "httpStatus": "HTTP-Status",
+      "responseTime": "Antwortzeit",
+      "error": "Fehler"
+    }
+  },
+  "notifications": {
+    "title": "Benachrichtigungskanäle",
+    "empty": "Keine Benachrichtigungskanäle konfiguriert",
+    "emptyDescription": "Fügen Sie einen Kanal hinzu, um Warnungen bei Statusänderungen dieses Monitors zu erhalten.",
+    "channelTypes": {
+      "email": "E-Mail",
+      "webhook": "Webhook",
+      "slack": "Slack",
+      "discord": "Discord",
+      "telegram": "Telegram"
+    },
+    "fields": {
+      "channelType": "Kanaltyp",
+      "emailProvider": "E-Mail-Anbieter",
+      "recipients": "Empfänger",
+      "recipientsPlaceholder": "email@example.com",
+      "webhookUrl": "Webhook URL",
+      "webhookUrlPlaceholder": "https://hooks.example.com/alerts",
+      "webhookHeaders": "Header / Optionen (JSON)",
+      "webhookHeadersPlaceholder": "{ \"X-Pulsy-Test\": \"true\" }",
+      "webhookHeadersHint": "Optionales JSON-Objekt. Werte müssen Zeichenfolgen sein.",
+      "webhookHeadersInvalid": "Header müssen ein JSON-Objekt mit Zeichenfolgenwerten sein",
+      "telegramTarget": "Telegram-Ziel",
+      "telegramTargetPlaceholder": "123456:ABC:987654 oder https://api.telegram.org/bot...",
+      "telegramHeadersHint": "Verwenden Sie { \"chat_id\": \"123456\" }, wenn die Telegram-API-URL keine chat_id enthält.",
+      "target": "Ziel",
+      "yes": "Ja",
+      "no": "Nein",
+      "notifyOnDown": "Bei Ausfall benachrichtigen",
+      "notifyOnRecovery": "Bei Wiederherstellung benachrichtigen",
+      "notifyOnTlsExpiry": "Bei TLS-Ablauf benachrichtigen",
+      "tlsExpiryThresholdDays": "TLS-Ablauf Warntage"
+    },
+    "create": {
+      "title": "Benachrichtigungskanal hinzufügen",
+      "success": "Kanal erfolgreich hinzugefügt",
+      "error": "Kanal konnte nicht hinzugefügt werden",
+      "emailProviderRequired": "Wählen Sie einen E-Mail-Anbieter aus, bevor Sie einen E-Mail-Kanal speichern"
+    },
+    "edit": {
+      "title": "Benachrichtigungskanal bearbeiten",
+      "success": "Kanal erfolgreich aktualisiert",
+      "error": "Kanal konnte nicht aktualisiert werden"
+    },
+    "delete": {
+      "title": "Kanal entfernen",
+      "description": "Sind Sie sicher, dass Sie diesen Benachrichtigungskanal entfernen möchten?",
+      "success": "Kanal entfernt",
+      "error": "Kanal konnte nicht entfernt werden"
+    },
+    "test": {
+      "success": "Testbenachrichtigung gesendet",
+      "error": "Testbenachrichtigung konnte nicht gesendet werden"
+    },
+    "defaultsNotice_one": "{{count}} kontoweiter Standardkanal alarmiert ebenfalls für diesen Monitor. Verwalten Sie Standardkanäle in den Benachrichtigungseinstellungen des Dashboards.",
+    "defaultsNotice_other": "{{count}} kontoweite Standardkanäle alarmieren ebenfalls für diesen Monitor. Verwalten Sie Standardkanäle in den Benachrichtigungseinstellungen des Dashboards.",
+    "history": {
+      "title": "Zustellverlauf",
+      "description": "Jede Benachrichtigung, die wir zu senden versucht haben, mit dem endgültigen Ergebnis.",
+      "empty": "Noch keine Benachrichtigungen gesendet",
+      "emptyDescription": "Zustellversuche erscheinen hier, sobald dieser Monitor seinen Status ändert.",
+      "columns": {
+        "time": "Zeit",
+        "channel": "Kanal",
+        "target": "Ziel",
+        "event": "Ereignis",
+        "outcome": "Ergebnis",
+        "attempts": "Versuche"
+      },
+      "outcome": {
+        "sent": "Gesendet",
+        "failed": "Fehlgeschlagen"
+      },
+      "event": {
+        "down": "Ausfall",
+        "recovery": "Wiederherstellung",
+        "tls_expiry": "TLS-Ablauf"
+      },
+      "messageId": "ID: {{id}}",
+      "pageInfo": "{{from}}–{{to}} von {{total}}"
+    }
+  },
+  "emailProviders": {
+    "title": "E-Mail-Anbieter",
+    "description": "Verwalten Sie E-Mail-Anbieter für Verfügbarkeits-Benachrichtigungen.",
+    "empty": "Keine E-Mail-Anbieter konfiguriert",
+    "emptyDescription": "Fügen Sie einen E-Mail-Anbieter hinzu, um Warnbenachrichtigungen zu senden.",
+    "providerTypes": {
+      "resend": "Resend",
+      "sendgrid": "SendGrid",
+      "smtp": "SMTP"
+    },
+    "fields": {
+      "name": "Name",
+      "namePlaceholder": "Mein E-Mail-Anbieter",
+      "providerType": "Anbietertyp",
+      "apiKey": "API-Schlüssel",
+      "apiKeyPlaceholder": "re_...",
+      "fromAddress": "Absenderadresse",
+      "fromAddressPlaceholder": "alerts@example.com",
+      "smtpHost": "SMTP-Host",
+      "smtpHostPlaceholder": "smtp.example.com",
+      "smtpPort": "SMTP-Port",
+      "smtpUsername": "SMTP-Benutzername",
+      "smtpPassword": "SMTP-Passwort",
+      "smtpSecure": "TLS verwenden"
+    },
+    "create": {
+      "title": "E-Mail-Anbieter hinzufügen",
+      "success": "Anbieter hinzugefügt",
+      "error": "Anbieter konnte nicht hinzugefügt werden"
+    },
+    "edit": {
+      "title": "E-Mail-Anbieter bearbeiten",
+      "success": "Anbieter aktualisiert",
+      "error": "Anbieter konnte nicht aktualisiert werden"
+    },
+    "delete": {
+      "title": "Anbieter löschen",
+      "description": "Sind Sie sicher, dass Sie \"{{name}}\" löschen möchten?",
+      "success": "Anbieter gelöscht",
+      "error": "Anbieter konnte nicht gelöscht werden"
+    },
+    "test": {
+      "title": "E-Mail-Anbieter testen",
+      "emailPlaceholder": "test@example.com",
+      "success": "Test-E-Mail erfolgreich gesendet! Überprüfen Sie Ihren Posteingang.",
+      "error": "Test-E-Mail konnte nicht gesendet werden. Überprüfen Sie Ihre Zugangsdaten."
+    },
+    "testCredentials": {
+      "label": "Zugangsdaten testen",
+      "testing": "Wird getestet..."
+    }
+  },
+  "bulk": {
+    "pause": "Pausieren",
+    "resume": "Fortsetzen",
+    "pauseSuccess": "{{count}} Monitore erfolgreich pausiert",
+    "resumeSuccess": "{{count}} Monitore erfolgreich fortgesetzt",
+    "pauseFailed": "Einige Monitore konnten nicht pausiert werden",
+    "resumeFailed": "Einige Monitore konnten nicht fortgesetzt werden",
+    "deleteSuccess": "{{count}} Monitore erfolgreich gelöscht",
+    "deletePartial": "{{success}} von {{total}} Monitoren gelöscht. {{failed}} fehlgeschlagen.",
+    "deleteError": "Monitore konnten nicht gelöscht werden",
+    "warningActive": "Derzeit aktiv und prüfend",
+    "edit": {
+      "button": "Einstellungen bearbeiten",
+      "title": "Einstellungen bearbeiten",
+      "description": "Diese Einstellungen auf {{count}} ausgewählte Monitore anwenden. Nur die aktivierten Felder werden geändert.",
+      "apply": "Anwenden",
+      "submit": "Auf {{count}} Monitore anwenden",
+      "success": "{{count}} Monitore aktualisiert",
+      "error": "Monitore konnten nicht aktualisiert werden",
+      "tagsReplaceHint": "Ersetzt vorhandene Tags bei jedem ausgewählten Monitor."
+    }
+  },
+  "intervals": {
+    "30": "30 Sekunden",
+    "60": "1 Minute",
+    "300": "5 Minuten",
+    "600": "10 Minuten",
+    "1800": "30 Minuten",
+    "3600": "1 Stunde"
+  },
+  "quickAdd": {
+    "button": "Schnell hinzufügen",
+    "title": "Monitor schnell hinzufügen",
+    "description": "Fügen Sie einen Monitor mit sinnvollen Standardeinstellungen hinzu. Passen Sie die Einstellungen später an.",
+    "urlPlaceholder": "https://example.com/health",
+    "namePlaceholder": "Automatisch aus URL generiert",
+    "defaults": "Prüfung alle 60s | Methode: GET | Erwartet: 200",
+    "defaultsWithInterval": "Prüfung alle {{interval}} | Methode: GET | Erwartet: 200",
+    "setupNotifications": "Benachrichtigungen einrichten",
+    "changeDefaults": "Ändern Sie die Standardeinstellungen im Einstellungen-Tab nach dem Hinzufügen",
+    "submit": "Monitor hinzufügen"
+  },
+  "bulkAdd": {
+    "button": "Massen-Hinzufügen",
+    "title": "Monitore in Massen hinzufügen",
+    "description": "Fügen Sie eine URL pro Zeile ein. Jeder Monitor wird nach seinem Hostnamen benannt und verwendet die gemeinsamen Einstellungen unten.",
+    "urlsLabel": "URLs",
+    "urlsPlaceholder": "https://example.com\nhttps://api.example.com/health\nhttps://blog.example.com",
+    "summary": "{{valid}} gültig, {{skipped}} übersprungen",
+    "invalidLabel": "Übersprungen (keine gültigen URLs):",
+    "tooMany": "Maximal {{max}} URLs auf einmal",
+    "submit": "{{count}} Monitore hinzufügen",
+    "success": "{{count}} Monitore erstellt",
+    "error": "Monitore konnten nicht erstellt werden"
+  },
+  "tags": {
+    "label": "Tags",
+    "placeholder": "Tag hinzufügen...",
+    "remove": "{{tag}} entfernen",
+    "filterBy": "Nach Tag filtern",
+    "clearFilter": "Filter löschen",
+    "noTags": "Keine Tags"
+  },
+  "statusPage": {
+    "title": "Dienststatus",
+    "allOperational": "Alle Systeme betriebsbereit",
+    "degradedPerformance": "Eingeschränkte Leistung",
+    "majorOutage": "Größerer Ausfall",
+    "recentIncidents": "Aktuelle Vorfälle",
+    "monitorsTitle": "Monitore",
+    "noIncidents": "Keine aktuellen Vorfälle",
+    "noMonitors": "Keine Monitore konfiguriert",
+    "notFound": "Statusseite nicht gefunden",
+    "duration": "Dauer: {{duration}}",
+    "resolved": "Behoben",
+    "ongoing": "Laufend",
+    "poweredBy": "Betrieben von {{productName}}",
+    "viewStatusPage": "Statusseite anzeigen",
+    "showOnStatusPage": "Auf Statusseite anzeigen",
+    "showOnStatusPageDescription": "Diesen Monitor auf der öffentlichen Statusseite sichtbar machen",
+    "uptimePercent": "{{percent}}% Verfügbarkeit",
+    "unavailable": "Die Statusseite ist nicht verfügbar."
+  },
+  "statusPages": {
+    "manageButton": "Statusseiten",
+    "title": "Statusseiten",
+    "description": "Veröffentlichen Sie eine Auswahl von Monitoren als öffentliche Statusseite.",
+    "create": "Neue Statusseite",
+    "empty": "Noch keine Statusseiten.",
+    "published": "Veröffentlicht",
+    "draft": "Entwurf",
+    "defaultBadge": "Standard",
+    "open": "Seite öffnen",
+    "slugLockedHint": "Der Slug der Standardseite kann nicht geändert werden.",
+    "edit": "Bearbeiten",
+    "delete": "Löschen",
+    "deleteConfirm": "Diese Statusseite löschen?",
+    "deleted": "Statusseite gelöscht",
+    "deleteError": "Statusseite konnte nicht gelöscht werden",
+    "fieldTitle": "Titel",
+    "titlePlaceholder": "Acme-Status",
+    "fieldSlug": "Slug",
+    "fieldDescription": "Beschreibung",
+    "publish": "Veröffentlicht",
+    "monitors": "Monitore",
+    "noMonitorsToPick": "Noch keine Monitore zum Hinzufügen.",
+    "save": "Speichern",
+    "saved": "Statusseite gespeichert",
+    "saveError": "Statusseite konnte nicht gespeichert werden",
+    "customDomain": "Benutzerdefinierte Domain",
+    "verified": "Verifiziert",
+    "notVerified": "Nicht verifiziert",
+    "dnsRecord": "Fügen Sie diesen TXT-Eintrag hinzu:",
+    "routingRecord": "1. Verweisen Sie Ihre Domain hierher ({{type}}-Eintrag):",
+    "dnsRecordOwnership": "2. Fügen Sie diesen TXT-Eintrag zum Eigentumsnachweis hinzu:",
+    "domainLive": "Live",
+    "domainProvisioning": "TLS-Zertifikat wird ausgestellt… Ihre Seite ist in einer Minute live. Stellen Sie sicher, dass der obige Routing-Eintrag auf diesen Server verweist.",
+    "domainProvisionFailed": "Zertifikat konnte nicht ausgestellt werden. Prüfen Sie, ob der Routing-Eintrag auf diesen Server verweist, und verifizieren Sie erneut.",
+    "routingDnsOnly": "Verwenden Sie einen reinen DNS-Eintrag (ohne Proxy), damit das Zertifikat ausgestellt werden kann.",
+    "dnsStatusTitle": "DNS-Einträge & Status",
+    "recheck": "Erneut prüfen",
+    "checkOwnership": "Eigentum (TXT)",
+    "checkRouting": "Routing (A/CNAME)",
+    "checkCertificate": "Zertifikat",
+    "checkVerified": "verifiziert",
+    "checkPending": "ausstehend",
+    "routingNoTarget": "kein Routing-Ziel konfiguriert",
+    "routingMismatch": "aufgelöst {{resolved}}, erwartet {{expected}}",
+    "routingNothing": "nichts",
+    "certIssuing": "wird ausgestellt…",
+    "certWaiting": "wartet auf Verifizierung",
+    "copyRecord": "Eintragswert kopieren",
+    "copied": "Kopiert",
+    "verify": "Verifizieren",
+    "removeDomain": "Entfernen",
+    "attach": "Anhängen",
+    "domainAttached": "Domain angehängt",
+    "domainError": "Domain konnte nicht aktualisiert werden",
+    "domainVerified": "Domain verifiziert",
+    "domainNotVerified": "Domain noch nicht verifiziert",
+    "domainDetached": "Domain entfernt"
+  },
+  "tlsMonitoring": {
+    "title": "TLS-Zertifikatsüberwachung",
+    "description": "Ablauf von TLS-Zertifikaten für HTTPS-Endpunkte überwachen",
+    "enable": "Aktivieren",
+    "active": "Aktiv"
+  },
+  "widget": {
+    "title": "Verfügbarkeitsüberwachung",
+    "monitors": "{{count}} Monitore",
+    "up": "{{count}} online",
+    "down": "{{count}} offline",
+    "viewAll": "Alle anzeigen",
+    "setupCta": "Überwachung einrichten",
+    "setupDescription": "Überwachen Sie Ihre Dienste rund um die Uhr"
+  },
+  "emptyState": {
+    "title": "Beginnen Sie mit der Überwachung Ihrer Dienste",
+    "description": "Fügen Sie Ihren ersten Verfügbarkeitsmonitor hinzu, um Verfügbarkeit, Antwortzeiten und TLS-Zertifikatsablauf Ihrer Endpunkte zu verfolgen.",
+    "features": {
+      "healthChecks": "HTTP- und HTTPS-Gesundheitsprüfungen",
+      "intervals": "Konfigurierbare Prüfintervalle",
+      "alerts": "Benachrichtigungen per E-Mail, Slack, Discord und Webhook",
+      "statusPage": "Öffentliche Statusseite für Ihre Kunden"
+    },
+    "cta": "Ersten Monitor hinzufügen"
+  },
+  "onboarding": {
+    "title": "Neu: Verfügbarkeitsüberwachung",
+    "description": "Überwachen Sie HTTP-Endpunkte, verfolgen Sie Antwortzeiten und erhalten Sie Benachrichtigungen bei Dienstausfällen.",
+    "getStarted": "Loslegen",
+    "dismiss": "Schließen"
+  },
+  "sidebar": {
+    "downCount": "{{count}} offline"
+  },
+  "errors": {
+    "monitorNotFound": "Monitor nicht gefunden",
+    "limitReached": "Sie haben das konfigurierte Monitor-Limit erreicht.",
+    "intervalNotAllowed": "Dieses Prüfintervall ist in Ihrem Plan nicht verfügbar."
+  },
+  "notificationSettings": {
+    "button": "Benachrichtigungseinstellungen",
+    "title": "Benachrichtigungseinstellungen",
+    "description": "Konfigurieren Sie E-Mail-Anbieter und verwalten Sie Benachrichtigungskanäle für Ihre Monitore.",
+    "monitorAlerts": "Monitor-Benachrichtigungen",
+    "monitorAlertsDescription": "Richten Sie Benachrichtigungskanäle für jeden Monitor ein.",
+    "configure": "Konfigurieren",
+    "noMonitors": "Erstellen Sie zuerst einen Monitor, um Benachrichtigungen zu konfigurieren.",
+    "defaults": {
+      "title": "Standardkanäle",
+      "description": "Alarmkanäle, die automatisch für alle Ihre Monitore gelten, auch für später erstellte.",
+      "add": "Standardkanal hinzufügen",
+      "empty": "Noch keine Standardkanäle. Fügen Sie einen hinzu, um alle Monitore ohne Einzelkonfiguration zu alarmieren.",
+      "appliesToAll": "Alle Monitore"
+    }
+  },
+  "apiKeys": {
+    "title": "API-Schlüssel",
+    "description": "Erstellen und verwalten Sie API-Schlüssel für die Pulsy-REST-API.",
+    "docsLink": "API-Dokumentation ansehen",
+    "badge": {
+      "label": "API-Zugriff",
+      "limited": "Eingeschränkt (nur Lesen)",
+      "full": "Voll (Lesen & Schreiben)"
+    },
+    "create": {
+      "button": "API-Schlüssel erstellen",
+      "title": "API-Schlüssel erstellen",
+      "description": "Geben Sie Ihrem Schlüssel einen Namen. Das Geheimnis wird nur einmal angezeigt — bewahren Sie es sicher auf.",
+      "nameLabel": "Name",
+      "namePlaceholder": "z. B. CI-Pipeline",
+      "submit": "Schlüssel erstellen",
+      "creating": "Wird erstellt…",
+      "cancel": "Abbrechen",
+      "secretLabel": "Ihr API-Schlüssel",
+      "secretHint": "Kopieren Sie ihn jetzt. Sie können ihn nicht erneut anzeigen.",
+      "copy": "Kopieren",
+      "copied": "Kopiert",
+      "done": "Fertig",
+      "error": "API-Schlüssel konnte nicht erstellt werden",
+      "docsLink": "So verwenden Sie diesen Schlüssel"
+    },
+    "list": {
+      "name": "Name",
+      "prefix": "Schlüssel",
+      "created": "Erstellt",
+      "lastUsed": "Zuletzt verwendet",
+      "never": "Nie",
+      "actions": "Aktionen",
+      "empty": "Noch keine API-Schlüssel."
+    },
+    "revoke": {
+      "button": "Widerrufen",
+      "title": "API-Schlüssel widerrufen",
+      "description": "Das Widerrufen von „{{name}}“ unterbricht sofort jede Integration, die ihn verwendet. Dies kann nicht rückgängig gemacht werden.",
+      "confirmLabel": "Geben Sie REVOKE ein, um zu bestätigen",
+      "confirmWord": "REVOKE",
+      "submit": "Schlüssel widerrufen",
+      "revoking": "Wird widerrufen…",
+      "cancel": "Abbrechen",
+      "success": "API-Schlüssel widerrufen",
+      "error": "API-Schlüssel konnte nicht widerrufen werden"
+    }
+  },
+  "share": {
+    "button": "Teilen",
+    "manageButton": "Freigabelinks",
+    "dialog": {
+      "title": "{{count}} Monitore teilen",
+      "description": "Jeder mit dem Link kann diese Monitor-Konfigurationen in sein eigenes Konto kopieren.",
+      "moreItems": "+{{count}} weitere",
+      "expiry": "Link läuft ab in",
+      "expiry7": "7 Tagen",
+      "expiry30": "30 Tagen",
+      "expiry90": "90 Tagen",
+      "create": "Link erstellen",
+      "creating": "Wird erstellt...",
+      "cancel": "Abbrechen",
+      "linkLabel": "Freigabelink",
+      "copy": "Link kopieren",
+      "copied": "Link kopiert",
+      "expiresOn": "Läuft ab am {{date}}",
+      "done": "Fertig",
+      "error": "Freigabelink konnte nicht erstellt werden"
+    },
+    "manage": {
+      "title": "Freigabelinks",
+      "description": "Links, die Sie zum Teilen von Monitor-Konfigurationen erstellt haben.",
+      "empty": "Noch keine Freigabelinks.",
+      "monitors": "{{count}} Monitore",
+      "expires": "Läuft ab am {{date}}",
+      "expired": "Abgelaufen",
+      "revoke": "Widerrufen",
+      "revokeConfirm": "Diesen Freigabelink widerrufen? Jeder, der ihn besitzt, verliert den Zugriff.",
+      "revokeSuccess": "Freigabelink widerrufen",
+      "revokeError": "Freigabelink konnte nicht widerrufen werden"
+    },
+    "claim": {
+      "pageTitle": "Geteilte Monitore",
+      "title": "{{name}} hat Monitore mit Ihnen geteilt",
+      "titleAnonymous": "Jemand hat Monitore mit Ihnen geteilt",
+      "description": "Wählen Sie, welche Monitore Sie Ihrem Konto hinzufügen möchten. Sie starten neu ohne Verlauf.",
+      "selectAll": "Alle auswählen",
+      "add": "{{count}} Monitore hinzufügen",
+      "adding": "Wird hinzugefügt...",
+      "later": "Vielleicht später",
+      "success": "{{count}} Monitore hinzugefügt",
+      "error": "Monitore konnten nicht hinzugefügt werden",
+      "empty": "Die geteilten Monitore sind nicht mehr verfügbar.",
+      "unavailableTitle": "Link nicht verfügbar",
+      "goToDashboard": "Zum Dashboard"
+    }
+  },
+  "search": {
+    "placeholder": "Monitore suchen...",
+    "clear": "Suche löschen",
+    "noMatches": "Keine Monitore entsprechen Ihren Filtern.",
+    "paletteTitle": "Suchen",
+    "palettePlaceholder": "Monitore und Vorfälle suchen...",
+    "paletteHint": "Tippen, um Monitore und Vorfälle zu suchen.",
+    "paletteNoResults": "Keine Ergebnisse gefunden.",
+    "groupMonitors": "Monitore",
+    "groupIncidents": "Vorfälle",
+    "incidentFallback": "Vorfall"
+  },
+  "slaReport": {
+    "title": "SLA-/Verfügbarkeitsbericht",
+    "empty": "Keine SLA-Daten verfügbar",
+    "emptyDescription": "Berichte erscheinen, sobald der Monitor einige Prüfungen aufgezeichnet hat.",
+    "download": "PDF herunterladen",
+    "uptime": "Verfügbarkeit",
+    "totalChecks": "Prüfungen gesamt",
+    "failedChecks": "Fehlgeschlagene Prüfungen",
+    "avgResponseTime": "Ø Antwort",
+    "p95ResponseTime": "p95-Antwort",
+    "incidents": "Vorfälle",
+    "email": {
+      "title": "Monatsbericht per E-Mail",
+      "description": "Diesen Bericht am 1. jedes Monats per E-Mail senden.",
+      "recipients": "Empfänger (durch Kommas getrennt)",
+      "invalidRecipients": "Geben Sie eine oder mehrere gültige E-Mail-Adressen ein.",
+      "provider": "E-Mail-Anbieter",
+      "noProviders": "Fügen Sie zuerst einen E-Mail-Anbieter hinzu, um Monatsberichte zu aktivieren.",
+      "selectProvider": "Anbieter auswählen",
+      "active": "Monatlich senden",
+      "save": "Speichern",
+      "sendNow": "Jetzt senden",
+      "remove": "Entfernen",
+      "saved": "Monatsbericht gespeichert",
+      "saveError": "Abonnement konnte nicht gespeichert werden",
+      "removed": "Monatsbericht entfernt",
+      "removeError": "Abonnement konnte nicht entfernt werden",
+      "sent": "Bericht gesendet",
+      "sendError": "Bericht konnte nicht gesendet werden"
+    }
+  }
+}

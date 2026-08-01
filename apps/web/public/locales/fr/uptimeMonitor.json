@@ -1,0 +1,662 @@
+{
+  "title": "Moniteur de disponibilité",
+  "description": "Surveillez la disponibilité de vos applications et services.",
+  "navigation": {
+    "title": "Moniteur de disponibilité"
+  },
+  "actions": {
+    "createMonitor": "Nouveau moniteur",
+    "moreActions": "Plus",
+    "editMonitor": "Modifier le moniteur",
+    "deleteMonitor": "Supprimer le moniteur",
+    "checkNow": "Vérifier maintenant",
+    "enable": "Activer",
+    "disable": "Désactiver",
+    "save": "Enregistrer",
+    "cancel": "Annuler",
+    "test": "Tester",
+    "edit": "Modifier",
+    "delete": "Supprimer",
+    "back": "Retour",
+    "addChannel": "Ajouter un canal",
+    "addProvider": "Ajouter un fournisseur"
+  },
+  "tabs": {
+    "overview": "Aperçu",
+    "incidents": "Incidents",
+    "history": "Historique",
+    "notifications": "Notifications",
+    "settings": "Paramètres",
+    "slaReport": "Rapport SLA"
+  },
+  "status": {
+    "up": "En ligne",
+    "down": "Hors ligne",
+    "degraded": "Dégradé",
+    "pending": "En attente",
+    "filterBy": "Filtrer par statut",
+    "clearFilter": "Effacer le filtre de statut"
+  },
+  "dashboard": {
+    "totalMonitors": "Total des moniteurs",
+    "monitorsUp": "En ligne",
+    "monitorsDown": "Hors ligne",
+    "monitorsDegraded": "Dégradé",
+    "monitorsPending": "En attente",
+    "avgUptime": "Disponibilité moyenne"
+  },
+  "list": {
+    "empty": "Aucun moniteur configuré",
+    "emptyDescription": "Créez votre premier moniteur de disponibilité pour commencer le suivi.",
+    "columns": {
+      "name": "Nom",
+      "url": "URL",
+      "status": "Statut",
+      "responseTime": "Temps de réponse",
+      "uptime": "Disponibilité (30j)",
+      "interval": "Intervalle",
+      "lastChecked": "Dernière vérification",
+      "actions": "Actions"
+    },
+    "sortBy": "Trier par {{column}}",
+    "collecting": "collecte…",
+    "view": {
+      "compact": "Compact",
+      "comfortable": "Confortable",
+      "toggle": "Densité des lignes"
+    }
+  },
+  "create": {
+    "title": "Créer un moniteur",
+    "description": "Ajoutez une nouvelle URL à surveiller pour la disponibilité.",
+    "fields": {
+      "name": "Nom",
+      "namePlaceholder": "Mon API",
+      "nameDescription": "Un nom convivial pour ce moniteur.",
+      "url": "URL",
+      "urlPlaceholder": "https://api.example.com/health",
+      "urlDescription": "L'URL à surveiller. Doit être accessible publiquement.",
+      "method": "Méthode HTTP",
+      "methodDescription": "La méthode HTTP à utiliser pour la vérification.",
+      "expectedStatus": "Statut attendu",
+      "expectedStatusDescription": "Le code de statut HTTP indiquant que le service est fonctionnel.",
+      "interval": "Intervalle de vérification",
+      "intervalDescription": "Fréquence de vérification de l'URL.",
+      "timeout": "Délai d'expiration",
+      "timeoutDescription": "Temps maximum d'attente pour une réponse (ms).",
+      "failureThreshold": "Seuil d'échec",
+      "failureThresholdDescription": "Nombre d'échecs consécutifs avant de marquer comme hors ligne."
+    },
+    "success": "Moniteur créé avec succès",
+    "error": "Échec de la création du moniteur"
+  },
+  "edit": {
+    "title": "Modifier le moniteur",
+    "success": "Moniteur mis à jour avec succès",
+    "error": "Échec de la mise à jour du moniteur"
+  },
+  "delete": {
+    "title": "Supprimer le moniteur",
+    "description": "Êtes-vous sûr de vouloir supprimer \"{{name}}\" ? Cela supprimera tout l'historique des vérifications et les incidents.",
+    "confirm": "Supprimer",
+    "success": "Moniteur supprimé avec succès",
+    "error": "Échec de la suppression du moniteur"
+  },
+  "toggle": {
+    "enableSuccess": "Moniteur activé",
+    "disableSuccess": "Moniteur désactivé",
+    "error": "Échec du basculement du moniteur"
+  },
+  "checkNow": {
+    "success": "Vérification déclenchée avec succès",
+    "error": "Échec du déclenchement de la vérification"
+  },
+  "detail": {
+    "createdAt": "Créé le",
+    "lastChecked": "Dernière vérification",
+    "nextCheck": "Prochaine vérification",
+    "responseTime": "Temps de réponse",
+    "uptime30d": "Disponibilité (30 jours)",
+    "consecutiveFailures": "Échecs consécutifs",
+    "httpStatus": "Statut HTTP",
+    "method": "Méthode",
+    "interval": "Intervalle",
+    "timeout": "Délai d'expiration",
+    "failureThreshold": "Seuil d'échec",
+    "tls": {
+      "title": "Certificat TLS",
+      "expiresAt": "Expire le",
+      "expiresInDays": "Expire dans {{days}} jours",
+      "valid": "Valide",
+      "expiring": "Expiration prochaine",
+      "expired": "Expiré",
+      "notHttps": "Non HTTPS"
+    }
+  },
+  "overview": {
+    "uptimeBar": {
+      "title": "Disponibilité (90 jours)",
+      "today": "Aujourd'hui",
+      "daysAgo": "Il y a {{days}} jours",
+      "percentUptime": "{{percent}}% de disponibilité"
+    },
+    "responseTime": {
+      "title": "Temps de réponse",
+      "avg": "Moy",
+      "min": "Min",
+      "max": "Max"
+    },
+    "stats": {
+      "totalChecks": "Total des vérifications",
+      "successRate": "Taux de réussite",
+      "avgResponse": "Réponse moyenne",
+      "incidents": "Incidents"
+    }
+  },
+  "incidents": {
+    "title": "Incidents",
+    "empty": "Aucun incident enregistré",
+    "emptyDescription": "Ce moniteur fonctionne sans interruption.",
+    "status": {
+      "ongoing": "En cours",
+      "resolved": "Résolu"
+    },
+    "columns": {
+      "status": "Statut",
+      "startedAt": "Début",
+      "resolvedAt": "Résolu le",
+      "duration": "Durée",
+      "cause": "Cause"
+    },
+    "duration": {
+      "seconds": "{{count}}s",
+      "minutes": "{{count}}m",
+      "hours": "{{count}}h {{minutes}}m",
+      "days": "{{count}}j {{hours}}h"
+    }
+  },
+  "history": {
+    "title": "Historique des vérifications",
+    "empty": "Aucun journal de vérification",
+    "emptyDescription": "Les vérifications apparaîtront ici une fois le moniteur démarré.",
+    "columns": {
+      "time": "Heure",
+      "status": "Statut",
+      "httpStatus": "Statut HTTP",
+      "responseTime": "Temps de réponse",
+      "error": "Erreur"
+    }
+  },
+  "notifications": {
+    "title": "Canaux de notification",
+    "empty": "Aucun canal de notification configuré",
+    "emptyDescription": "Ajoutez un canal pour recevoir des alertes lorsque le statut de ce moniteur change.",
+    "channelTypes": {
+      "email": "E-mail",
+      "webhook": "Webhook",
+      "slack": "Slack",
+      "discord": "Discord",
+      "telegram": "Telegram"
+    },
+    "fields": {
+      "channelType": "Type de canal",
+      "emailProvider": "Fournisseur d'e-mail",
+      "recipients": "Destinataires",
+      "recipientsPlaceholder": "email@example.com",
+      "webhookUrl": "URL Webhook",
+      "webhookUrlPlaceholder": "https://hooks.example.com/alerts",
+      "webhookHeaders": "En-têtes / options (JSON)",
+      "webhookHeadersPlaceholder": "{ \"X-Pulsy-Test\": \"true\" }",
+      "webhookHeadersHint": "Objet JSON facultatif. Les valeurs doivent être des chaînes.",
+      "webhookHeadersInvalid": "Les en-têtes doivent être un objet JSON avec des valeurs texte",
+      "telegramTarget": "Cible Telegram",
+      "telegramTargetPlaceholder": "123456:ABC:987654 ou https://api.telegram.org/bot...",
+      "telegramHeadersHint": "Utilisez { \"chat_id\": \"123456\" } lorsque l'URL de l'API Telegram ne contient pas chat_id.",
+      "target": "Cible",
+      "yes": "Oui",
+      "no": "Non",
+      "notifyOnDown": "Notifier en cas de panne",
+      "notifyOnRecovery": "Notifier en cas de rétablissement",
+      "notifyOnTlsExpiry": "Notifier à l'expiration TLS",
+      "tlsExpiryThresholdDays": "Jours d'avertissement d'expiration TLS"
+    },
+    "create": {
+      "title": "Ajouter un canal de notification",
+      "success": "Canal ajouté avec succès",
+      "error": "Échec de l'ajout du canal",
+      "emailProviderRequired": "Sélectionnez un fournisseur d'e-mail avant d'enregistrer un canal e-mail"
+    },
+    "edit": {
+      "title": "Modifier le canal de notification",
+      "success": "Canal mis à jour avec succès",
+      "error": "Échec de la mise à jour du canal"
+    },
+    "delete": {
+      "title": "Supprimer le canal",
+      "description": "Êtes-vous sûr de vouloir supprimer ce canal de notification ?",
+      "success": "Canal supprimé",
+      "error": "Échec de la suppression du canal"
+    },
+    "test": {
+      "success": "Notification de test envoyée",
+      "error": "Échec de l'envoi de la notification de test"
+    },
+    "defaultsNotice_one": "{{count}} canal par défaut du compte alerte aussi pour ce moniteur. Gérez les canaux par défaut dans les paramètres de notification du tableau de bord.",
+    "defaultsNotice_other": "{{count}} canaux par défaut du compte alertent aussi pour ce moniteur. Gérez les canaux par défaut dans les paramètres de notification du tableau de bord.",
+    "history": {
+      "title": "Historique d'envoi",
+      "description": "Chaque alerte que nous avons tenté d'envoyer, avec le résultat final.",
+      "empty": "Aucune notification envoyée",
+      "emptyDescription": "Les tentatives d'envoi apparaissent ici dès que ce moniteur change d'état.",
+      "columns": {
+        "time": "Heure",
+        "channel": "Canal",
+        "target": "Destinataire",
+        "event": "Événement",
+        "outcome": "Résultat",
+        "attempts": "Tentatives"
+      },
+      "outcome": {
+        "sent": "Envoyé",
+        "failed": "Échec"
+      },
+      "event": {
+        "down": "Hors ligne",
+        "recovery": "Rétabli",
+        "tls_expiry": "Expiration TLS"
+      },
+      "messageId": "ID : {{id}}",
+      "pageInfo": "{{from}}–{{to}} sur {{total}}"
+    }
+  },
+  "emailProviders": {
+    "title": "Fournisseurs d'e-mail",
+    "description": "Gérez les fournisseurs d'e-mail pour les notifications d'alertes de disponibilité.",
+    "empty": "Aucun fournisseur d'e-mail configuré",
+    "emptyDescription": "Ajoutez un fournisseur d'e-mail pour envoyer des notifications d'alertes.",
+    "providerTypes": {
+      "resend": "Resend",
+      "sendgrid": "SendGrid",
+      "smtp": "SMTP"
+    },
+    "fields": {
+      "name": "Nom",
+      "namePlaceholder": "Mon fournisseur d'e-mail",
+      "providerType": "Type de fournisseur",
+      "apiKey": "Clé API",
+      "apiKeyPlaceholder": "re_...",
+      "fromAddress": "Adresse d'expédition",
+      "fromAddressPlaceholder": "alerts@example.com",
+      "smtpHost": "Hôte SMTP",
+      "smtpHostPlaceholder": "smtp.example.com",
+      "smtpPort": "Port SMTP",
+      "smtpUsername": "Nom d'utilisateur SMTP",
+      "smtpPassword": "Mot de passe SMTP",
+      "smtpSecure": "Utiliser TLS"
+    },
+    "create": {
+      "title": "Ajouter un fournisseur d'e-mail",
+      "success": "Fournisseur ajouté",
+      "error": "Échec de l'ajout du fournisseur"
+    },
+    "edit": {
+      "title": "Modifier le fournisseur d'e-mail",
+      "success": "Fournisseur mis à jour",
+      "error": "Échec de la mise à jour du fournisseur"
+    },
+    "delete": {
+      "title": "Supprimer le fournisseur",
+      "description": "Êtes-vous sûr de vouloir supprimer \"{{name}}\" ?",
+      "success": "Fournisseur supprimé",
+      "error": "Échec de la suppression du fournisseur"
+    },
+    "test": {
+      "title": "Tester le fournisseur d'e-mail",
+      "emailPlaceholder": "test@example.com",
+      "success": "E-mail de test envoyé avec succès ! Vérifiez votre boîte de réception.",
+      "error": "Échec de l'envoi de l'e-mail de test. Vérifiez vos identifiants."
+    },
+    "testCredentials": {
+      "label": "Tester les identifiants",
+      "testing": "Test en cours..."
+    }
+  },
+  "bulk": {
+    "pause": "Pause",
+    "resume": "Reprendre",
+    "pauseSuccess": "{{count}} moniteurs mis en pause avec succès",
+    "resumeSuccess": "{{count}} moniteurs repris avec succès",
+    "pauseFailed": "Échec de la mise en pause de certains moniteurs",
+    "resumeFailed": "Échec de la reprise de certains moniteurs",
+    "deleteSuccess": "{{count}} moniteurs supprimés avec succès",
+    "deletePartial": "{{success}} sur {{total}} moniteurs supprimés. {{failed}} ont échoué.",
+    "deleteError": "Échec de la suppression des moniteurs",
+    "warningActive": "Actuellement actif et en vérification",
+    "edit": {
+      "button": "Modifier les paramètres",
+      "title": "Modifier les paramètres",
+      "description": "Appliquer ces paramètres à {{count}} moniteurs sélectionnés. Seuls les champs que vous activez sont modifiés.",
+      "apply": "Appliquer",
+      "submit": "Appliquer à {{count}} moniteurs",
+      "success": "{{count}} moniteurs mis à jour",
+      "error": "Échec de la mise à jour des moniteurs",
+      "tagsReplaceHint": "Remplace les étiquettes existantes sur chaque moniteur sélectionné."
+    }
+  },
+  "intervals": {
+    "30": "30 secondes",
+    "60": "1 minute",
+    "300": "5 minutes",
+    "600": "10 minutes",
+    "1800": "30 minutes",
+    "3600": "1 heure"
+  },
+  "quickAdd": {
+    "button": "Ajout rapide",
+    "title": "Ajout rapide de moniteur",
+    "description": "Ajoutez un moniteur avec des paramètres par défaut. Personnalisez les paramètres plus tard.",
+    "urlPlaceholder": "https://example.com/health",
+    "namePlaceholder": "Généré automatiquement à partir de l'URL",
+    "defaults": "Vérification toutes les 60s | Méthode : GET | Attendu : 200",
+    "defaultsWithInterval": "Vérification toutes les {{interval}} | Méthode : GET | Attendu : 200",
+    "setupNotifications": "Configurer les notifications",
+    "changeDefaults": "Modifiez les paramètres par défaut dans l'onglet Paramètres après l'ajout",
+    "submit": "Ajouter le moniteur"
+  },
+  "bulkAdd": {
+    "button": "Ajout groupé",
+    "title": "Ajouter des moniteurs en masse",
+    "description": "Collez une URL par ligne. Chaque moniteur est nommé d'après son nom d'hôte et utilise les paramètres partagés ci-dessous.",
+    "urlsLabel": "URL",
+    "urlsPlaceholder": "https://example.com\nhttps://api.example.com/health\nhttps://blog.example.com",
+    "summary": "{{valid}} valides, {{skipped}} ignorées",
+    "invalidLabel": "Ignorées (URL non valides) :",
+    "tooMany": "Maximum {{max}} URL à la fois",
+    "submit": "Ajouter {{count}} moniteurs",
+    "success": "{{count}} moniteurs créés",
+    "error": "Échec de la création des moniteurs"
+  },
+  "tags": {
+    "label": "Tags",
+    "placeholder": "Ajouter un tag...",
+    "remove": "Supprimer {{tag}}",
+    "filterBy": "Filtrer par tag",
+    "clearFilter": "Effacer le filtre",
+    "noTags": "Aucun tag"
+  },
+  "statusPage": {
+    "title": "État des services",
+    "allOperational": "Tous les systèmes sont opérationnels",
+    "degradedPerformance": "Performances dégradées",
+    "majorOutage": "Panne majeure",
+    "recentIncidents": "Incidents récents",
+    "monitorsTitle": "Moniteurs",
+    "noIncidents": "Aucun incident récent",
+    "noMonitors": "Aucun moniteur configuré",
+    "notFound": "Page de statut introuvable",
+    "duration": "Durée : {{duration}}",
+    "resolved": "Résolu",
+    "ongoing": "En cours",
+    "poweredBy": "Propulsé par {{productName}}",
+    "viewStatusPage": "Voir la page de statut",
+    "showOnStatusPage": "Afficher sur la page de statut",
+    "showOnStatusPageDescription": "Rendre ce moniteur visible sur la page de statut publique",
+    "uptimePercent": "{{percent}}% de disponibilité",
+    "unavailable": "La page de statut est indisponible."
+  },
+  "statusPages": {
+    "manageButton": "Pages de statut",
+    "title": "Pages de statut",
+    "description": "Publiez une sélection de moniteurs sous forme de page de statut publique.",
+    "create": "Nouvelle page de statut",
+    "empty": "Aucune page de statut pour le moment.",
+    "published": "Publiée",
+    "draft": "Brouillon",
+    "defaultBadge": "Par défaut",
+    "open": "Ouvrir la page",
+    "slugLockedHint": "Le slug de la page par défaut ne peut pas être modifié.",
+    "edit": "Modifier",
+    "delete": "Supprimer",
+    "deleteConfirm": "Supprimer cette page de statut ?",
+    "deleted": "Page de statut supprimée",
+    "deleteError": "Échec de la suppression de la page de statut",
+    "fieldTitle": "Titre",
+    "titlePlaceholder": "Statut Acme",
+    "fieldSlug": "Identifiant",
+    "fieldDescription": "Description",
+    "publish": "Publiée",
+    "monitors": "Moniteurs",
+    "noMonitorsToPick": "Aucun moniteur à ajouter pour le moment.",
+    "save": "Enregistrer",
+    "saved": "Page de statut enregistrée",
+    "saveError": "Échec de l'enregistrement de la page de statut",
+    "customDomain": "Domaine personnalisé",
+    "verified": "Vérifié",
+    "notVerified": "Non vérifié",
+    "dnsRecord": "Ajoutez cet enregistrement TXT :",
+    "routingRecord": "1. Pointez votre domaine ici (enregistrement {{type}}) :",
+    "dnsRecordOwnership": "2. Ajoutez cet enregistrement TXT pour prouver la propriété :",
+    "domainLive": "En ligne",
+    "domainProvisioning": "Émission du certificat TLS… votre page sera en ligne dans une minute. Vérifiez que l'enregistrement de routage ci-dessus pointe vers ce serveur.",
+    "domainProvisionFailed": "Impossible d'émettre un certificat. Vérifiez que l'enregistrement de routage pointe vers ce serveur, puis revérifiez.",
+    "routingDnsOnly": "Utilisez un enregistrement DNS uniquement (sans proxy) pour que le certificat puisse être émis.",
+    "dnsStatusTitle": "Enregistrements DNS et état",
+    "recheck": "Revérifier",
+    "checkOwnership": "Propriété (TXT)",
+    "checkRouting": "Routage (A/CNAME)",
+    "checkCertificate": "Certificat",
+    "checkVerified": "vérifié",
+    "checkPending": "en attente",
+    "routingNoTarget": "aucune cible de routage configurée",
+    "routingMismatch": "résolu {{resolved}}, attendu {{expected}}",
+    "routingNothing": "rien",
+    "certIssuing": "émission…",
+    "certWaiting": "en attente de vérification",
+    "copyRecord": "Copier la valeur de l'enregistrement",
+    "copied": "Copié",
+    "verify": "Vérifier",
+    "removeDomain": "Retirer",
+    "attach": "Attacher",
+    "domainAttached": "Domaine attaché",
+    "domainError": "Échec de la mise à jour du domaine",
+    "domainVerified": "Domaine vérifié",
+    "domainNotVerified": "Domaine pas encore vérifié",
+    "domainDetached": "Domaine retiré"
+  },
+  "tlsMonitoring": {
+    "title": "Surveillance des certificats TLS",
+    "description": "Surveiller l'expiration des certificats TLS pour les points HTTPS",
+    "enable": "Activer",
+    "active": "Actif"
+  },
+  "widget": {
+    "title": "Surveillance de disponibilité",
+    "monitors": "{{count}} moniteurs",
+    "up": "{{count}} en ligne",
+    "down": "{{count}} hors ligne",
+    "viewAll": "Tout afficher",
+    "setupCta": "Configurer la surveillance",
+    "setupDescription": "Surveillez vos services 24h/24"
+  },
+  "emptyState": {
+    "title": "Commencez à surveiller vos services",
+    "description": "Ajoutez votre premier moniteur de disponibilité pour suivre la disponibilité, les temps de réponse et l'expiration des certificats TLS de vos endpoints.",
+    "features": {
+      "healthChecks": "Vérifications de santé HTTP et HTTPS",
+      "intervals": "Intervalles de vérification configurables",
+      "alerts": "Alertes par e-mail, Slack, Discord et webhook",
+      "statusPage": "Page de statut publique pour vos clients"
+    },
+    "cta": "Ajouter votre premier moniteur"
+  },
+  "onboarding": {
+    "title": "Nouveau : Surveillance de disponibilité",
+    "description": "Surveillez les endpoints HTTP, suivez les temps de réponse et recevez des alertes lorsque les services tombent en panne.",
+    "getStarted": "Commencer",
+    "dismiss": "Fermer"
+  },
+  "sidebar": {
+    "downCount": "{{count}} hors ligne"
+  },
+  "errors": {
+    "monitorNotFound": "Moniteur introuvable",
+    "limitReached": "Vous avez atteint la limite de moniteurs configurée.",
+    "intervalNotAllowed": "Cet intervalle de vérification n'est pas disponible sur ce serveur."
+  },
+  "notificationSettings": {
+    "button": "Paramètres de notification",
+    "title": "Paramètres de notification",
+    "description": "Configurez les fournisseurs d'e-mail et gérez les canaux d'alerte pour vos moniteurs.",
+    "monitorAlerts": "Alertes des moniteurs",
+    "monitorAlertsDescription": "Configurez les canaux de notification pour chaque moniteur.",
+    "configure": "Configurer",
+    "noMonitors": "Créez d'abord un moniteur pour configurer les alertes.",
+    "defaults": {
+      "title": "Canaux par défaut",
+      "description": "Canaux d'alerte appliqués automatiquement à tous vos moniteurs, y compris ceux créés ultérieurement.",
+      "add": "Ajouter un canal par défaut",
+      "empty": "Aucun canal par défaut. Ajoutez-en un pour alerter tous les moniteurs sans configuration individuelle.",
+      "appliesToAll": "Tous les moniteurs"
+    }
+  },
+  "apiKeys": {
+    "title": "Clés API",
+    "description": "Créez et gérez des clés API pour l'API REST de Pulsy.",
+    "docsLink": "Voir la documentation de l'API",
+    "badge": {
+      "label": "Accès API",
+      "limited": "Limité (lecture seule)",
+      "full": "Complet (lecture et écriture)"
+    },
+    "create": {
+      "button": "Créer une clé API",
+      "title": "Créer une clé API",
+      "description": "Donnez un nom à votre clé. Le secret n'est affiché qu'une seule fois — conservez-le en lieu sûr.",
+      "nameLabel": "Nom",
+      "namePlaceholder": "ex. pipeline CI",
+      "submit": "Créer la clé",
+      "creating": "Création…",
+      "cancel": "Annuler",
+      "secretLabel": "Votre clé API",
+      "secretHint": "Copiez-la maintenant. Vous ne pourrez plus la revoir.",
+      "copy": "Copier",
+      "copied": "Copié",
+      "done": "Terminé",
+      "error": "Échec de la création de la clé API",
+      "docsLink": "Comment utiliser cette clé"
+    },
+    "list": {
+      "name": "Nom",
+      "prefix": "Clé",
+      "created": "Créée le",
+      "lastUsed": "Dernière utilisation",
+      "never": "Jamais",
+      "actions": "Actions",
+      "empty": "Aucune clé API pour le moment."
+    },
+    "revoke": {
+      "button": "Révoquer",
+      "title": "Révoquer la clé API",
+      "description": "Révoquer « {{name}} » rompt immédiatement toute intégration qui l'utilise. Cette action est irréversible.",
+      "confirmLabel": "Saisissez REVOKE pour confirmer",
+      "confirmWord": "REVOKE",
+      "submit": "Révoquer la clé",
+      "revoking": "Révocation…",
+      "cancel": "Annuler",
+      "success": "Clé API révoquée",
+      "error": "Échec de la révocation de la clé API"
+    }
+  },
+  "share": {
+    "button": "Partager",
+    "manageButton": "Liens de partage",
+    "dialog": {
+      "title": "Partager {{count}} moniteurs",
+      "description": "Toute personne disposant du lien peut copier ces configurations de moniteurs dans son propre compte.",
+      "moreItems": "+{{count}} de plus",
+      "expiry": "Le lien expire dans",
+      "expiry7": "7 jours",
+      "expiry30": "30 jours",
+      "expiry90": "90 jours",
+      "create": "Créer le lien",
+      "creating": "Création...",
+      "cancel": "Annuler",
+      "linkLabel": "Lien de partage",
+      "copy": "Copier le lien",
+      "copied": "Lien copié",
+      "expiresOn": "Expire le {{date}}",
+      "done": "Terminé",
+      "error": "Échec de la création du lien de partage"
+    },
+    "manage": {
+      "title": "Liens de partage",
+      "description": "Les liens que vous avez créés pour partager des configurations de moniteurs.",
+      "empty": "Aucun lien de partage pour le moment.",
+      "monitors": "{{count}} moniteurs",
+      "expires": "Expire le {{date}}",
+      "expired": "Expiré",
+      "revoke": "Révoquer",
+      "revokeConfirm": "Révoquer ce lien de partage ? Quiconque le détient perdra l'accès.",
+      "revokeSuccess": "Lien de partage révoqué",
+      "revokeError": "Échec de la révocation du lien de partage"
+    },
+    "claim": {
+      "pageTitle": "Moniteurs partagés",
+      "title": "{{name}} a partagé des moniteurs avec vous",
+      "titleAnonymous": "Quelqu'un a partagé des moniteurs avec vous",
+      "description": "Choisissez les moniteurs à ajouter à votre compte. Ils repartent de zéro, sans historique.",
+      "selectAll": "Tout sélectionner",
+      "add": "Ajouter {{count}} moniteurs",
+      "adding": "Ajout...",
+      "later": "Peut-être plus tard",
+      "success": "{{count}} moniteurs ajoutés",
+      "error": "Échec de l'ajout des moniteurs",
+      "empty": "Les moniteurs partagés ne sont plus disponibles.",
+      "unavailableTitle": "Lien indisponible",
+      "goToDashboard": "Aller au tableau de bord"
+    }
+  },
+  "search": {
+    "placeholder": "Rechercher des moniteurs...",
+    "clear": "Effacer la recherche",
+    "noMatches": "Aucun moniteur ne correspond à vos filtres.",
+    "paletteTitle": "Rechercher",
+    "palettePlaceholder": "Rechercher des moniteurs et des incidents...",
+    "paletteHint": "Tapez pour rechercher des moniteurs et des incidents.",
+    "paletteNoResults": "Aucun résultat trouvé.",
+    "groupMonitors": "Moniteurs",
+    "groupIncidents": "Incidents",
+    "incidentFallback": "Incident"
+  },
+  "slaReport": {
+    "title": "Rapport SLA / disponibilité",
+    "empty": "Aucune donnée SLA disponible",
+    "emptyDescription": "Les rapports apparaissent dès que le moniteur a enregistré des vérifications.",
+    "download": "Télécharger le PDF",
+    "uptime": "Disponibilité",
+    "totalChecks": "Vérifications totales",
+    "failedChecks": "Vérifications échouées",
+    "avgResponseTime": "Réponse moy.",
+    "p95ResponseTime": "Réponse p95",
+    "incidents": "Incidents",
+    "email": {
+      "title": "Rapport mensuel par e-mail",
+      "description": "Envoyer ce rapport par e-mail le 1er de chaque mois.",
+      "recipients": "Destinataires (séparés par des virgules)",
+      "invalidRecipients": "Saisissez une ou plusieurs adresses e-mail valides.",
+      "provider": "Fournisseur d'e-mail",
+      "noProviders": "Ajoutez d'abord un fournisseur d'e-mail pour activer les rapports mensuels.",
+      "selectProvider": "Sélectionner un fournisseur",
+      "active": "Envoi mensuel",
+      "save": "Enregistrer",
+      "sendNow": "Envoyer maintenant",
+      "remove": "Supprimer",
+      "saved": "Rapport mensuel enregistré",
+      "saveError": "Impossible d'enregistrer l'abonnement",
+      "removed": "Rapport mensuel supprimé",
+      "removeError": "Impossible de supprimer l'abonnement",
+      "sent": "Rapport envoyé",
+      "sendError": "Impossible d'envoyer le rapport"
+    }
+  }
+}

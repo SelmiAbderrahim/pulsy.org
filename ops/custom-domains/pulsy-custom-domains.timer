@@ -1,0 +1,13 @@
+# Install to /etc/systemd/system/pulsy-custom-domains.timer
+# Reconciles roughly once a minute so a newly-verified (and correctly pointed)
+# domain goes live within ~60s.
+[Unit]
+Description=Run the Pulsy custom-domain provisioner periodically
+
+[Timer]
+OnBootSec=60
+OnUnitActiveSec=60
+AccuracySec=15
+
+[Install]
+WantedBy=timers.target

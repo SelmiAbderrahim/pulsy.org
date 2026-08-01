@@ -1,0 +1,36 @@
+name: Question
+description: Ask for help with setup, configuration, or self-hosting
+title: "[Question]: "
+labels: ["question"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please check the README and docs first. Never include passwords, API
+        keys, private URLs, or an unredacted `.env` file.
+  - type: textarea
+    id: question
+    attributes:
+      label: Question
+      description: What are you trying to accomplish, and where are you stuck?
+    validations:
+      required: true
+  - type: textarea
+    id: attempted
+    attributes:
+      label: What have you tried?
+      description: Include relevant commands and sanitized output.
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: Pulsy version/commit, OS, Docker version, and reverse proxy if relevant.
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Confirmation
+      options:
+        - label: I checked the README, documentation, and existing issues.
+          required: true
+        - label: I removed all secrets and private data from this report.
+          required: true

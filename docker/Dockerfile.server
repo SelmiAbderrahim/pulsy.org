@@ -1,0 +1,65 @@
+# syntax=docker/dockerfile:1
+# Build context = repo root. Runs the server with tsx (no separate compile step).
+#
+# Targets:
+#   dev  (compose default) — full dependency set so `make test` / `make
+#        typecheck` can exec vitest/tsc inside the running container.
+#   prod (published image)  — production-only dependencies, no tests, non-root.
+FROM node:24-slim AS base
+ENV PNPM_HOME=/pnpm
+ENV PATH=$PNPM_HOME:$PATH
+RUN corepack enable && apt-get update \
+	&& apt-get install -y --no-install-recommends ca-certificates \
+	&& rm -rf /var/lib/apt/lists/*
+WORKDIR /app
+
+# --- Install full workspace deps (cached on lockfile) ---
+FROM base AS deps
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY packages/db/package.json packages/db/package.json
+COPY apps/server/package.json apps/server/package.json
+COPY apps/web/package.json apps/web/package.json
+RUN pnpm install --frozen-lockfile
+
+# --- dev: everything, for local compose + in-container checks ---
+FROM base AS dev
+ENV NODE_ENV=production
+COPY --from=deps --chown=node:node /app/node_modules ./node_modules
+COPY --from=deps --chown=node:node /app/packages/db/node_modules ./packages/db/node_modules
+COPY --from=deps --chown=node:node /app/apps/server/node_modules ./apps/server/node_modules
+COPY --chown=node:node . .
+# COPY --chown only covers copied entries; /app itself is created root-owned by
+# WORKDIR. The runtime user needs it writable (coverage output, tmp files).
+RUN chown node:node /app
+USER node
+EXPOSE 4000
+ENTRYPOINT ["docker/entrypoint.server.sh"]
+
+# --- Production-only install ---
+FROM base AS prod-deps
+COPY pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY packages/db/package.json packages/db/package.json
+COPY apps/server/package.json apps/server/package.json
+COPY apps/web/package.json apps/web/package.json
+RUN pnpm install --frozen-lockfile --prod
+
+# --- prod: lean published image (GHCR) ---
+FROM base AS prod
+ENV NODE_ENV=production
+COPY --from=prod-deps --chown=node:node /app/node_modules ./node_modules
+COPY --from=prod-deps --chown=node:node /app/packages/db/node_modules ./packages/db/node_modules
+COPY --from=prod-deps --chown=node:node /app/apps/server/node_modules ./apps/server/node_modules
+COPY --chown=node:node pnpm-workspace.yaml package.json pnpm-lock.yaml ./
+COPY --chown=node:node packages/db packages/db
+COPY --chown=node:node apps/server apps/server
+COPY --chown=node:node docker/entrypoint.server.sh docker/entrypoint.server.sh
+# No test suites or Vitest configuration in the shipped artifact.
+RUN find apps/server/src packages/db/src -name "*.test.ts" -delete \
+	&& rm -rf apps/server/test packages/db/test \
+		apps/server/vitest.config.ts packages/db/vitest.config.ts \
+	&& chown node:node /app
+USER node
+EXPOSE 4000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+	CMD ["node", "-e", "fetch('http://127.0.0.1:'+(process.env.SERVER_PORT||4000)+'/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+ENTRYPOINT ["docker/entrypoint.server.sh"]

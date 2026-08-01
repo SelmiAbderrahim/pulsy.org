@@ -1,0 +1,73 @@
+{
+  "app": {
+    "name": "Pulsy",
+    "tagline": "Verfügbarkeitsüberwachung leicht gemacht"
+  },
+  "nav": {
+    "dashboard": "Dashboard",
+    "openMenu": "Menü öffnen",
+    "signOut": "Abmelden",
+    "language": "Sprache",
+    "search": "Suchen",
+    "apiKeys": "API-Schlüssel",
+    "apiDocs": "API-Doku"
+  },
+  "languages": {
+    "en": "English",
+    "ar": "العربية",
+    "fr": "Français",
+    "de": "Deutsch",
+    "es": "Español"
+  },
+  "theme": {
+    "switchToDark": "In den dunklen Modus wechseln",
+    "switchToLight": "In den hellen Modus wechseln"
+  },
+  "source": {
+    "offer": "Quellcode dieser Version"
+  },
+  "actions": {
+    "cancel": "Abbrechen",
+    "save": "Speichern",
+    "delete": "Löschen",
+    "close": "Schließen",
+    "retry": "Erneut versuchen"
+  },
+  "states": {
+    "loading": "Wird geladen...",
+    "error": "Etwas ist schiefgelaufen",
+    "notFound": "Nicht gefunden"
+  },
+  "bulkSelection": {
+    "toolbar": "Auswahlleiste",
+    "selected": "{{count}} ausgewählt",
+    "selectAll": "Alle auswählen",
+    "clearSelection": "Leeren",
+    "deleteCount": "Löschen ({{count}})",
+    "deleting": "Wird gelöscht...",
+    "itemTypes": {
+      "server": "Server",
+      "servers": "Server",
+      "user": "Benutzer",
+      "users": "Benutzer",
+      "monitor": "Monitor",
+      "monitors": "Monitore",
+      "channel": "Kanal",
+      "channels": "Kanäle",
+      "account": "Konto",
+      "accounts": "Konten"
+    },
+    "confirmDelete": {
+      "title": "{{count}} {{type}} löschen?",
+      "warning": "Diese Aktion kann nicht rückgängig gemacht werden.",
+      "itemsLabel": "Sie sind dabei zu löschen:",
+      "moreItems": "+{{count}} weitere",
+      "inputLabel": "Geben Sie „DELETE {{count}}“ ein, um zu bestätigen:",
+      "cancel": "Abbrechen",
+      "confirm": "{{count}} {{type}} löschen"
+    },
+    "warnings": {
+      "someItemsHaveConstraints": "{{count}} {{type}} haben Einschränkungen, die eine manuelle Bereinigung erfordern können."
+    }
+  }
+}

@@ -1,0 +1,53 @@
+# Dependencies
+node_modules/
+.pnpm-store/
+graphify-out
+# Build output
+dist/
+build/
+*.tsbuildinfo
+
+# Env
+.env*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+pnpm-debug.log*
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/*
+!.vscode/extensions.json
+
+# Test / coverage
+coverage/
+
+# Drizzle
+packages/db/drizzle/meta/_journal.json.bak
+
+# Vite
+apps/web/dist/
+apps/web/.tanstack/
+.vite/
+
+# Tool caches and browser-test output
+.eslintcache
+.direnv/
+test-results/
+
+# code-review-graph (local, regenerable SQLite index)
+.code-review-graph/
+# eval artifacts: 276 MB of reference repos + per-run reports/results
+evaluate/
+
+# Internal (not part of the open-source distribution)
+MONETIZATION-PLAN.md
+/x
+launch-growth-plan/
+prompts/
+prompt-executor/
+docs/internal/
+docs/PORTING-INVENTORY.md

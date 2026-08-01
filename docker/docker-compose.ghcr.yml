@@ -1,0 +1,79 @@
+# Pulsy — prebuilt images from GHCR (no build step, amd64 + arm64).
+#
+#   mkdir -p pulsy/docker && cd pulsy
+#   curl -fsSL https://raw.githubusercontent.com/SelmiAbderrahim/pulsy/main/docker/docker-compose.ghcr.yml -o docker/docker-compose.ghcr.yml
+#   curl -fsSL https://raw.githubusercontent.com/SelmiAbderrahim/pulsy/main/.env.example -o .env
+#   # edit .env: set POSTGRES_PASSWORD, ENCRYPTION_KEY, BETTER_AUTH_SECRET
+#   docker compose -f docker/docker-compose.ghcr.yml --env-file .env up -d
+#
+# NOTE: the web image is prebuilt with default Vite flags (no analytics, no
+# custom-domain target) and a source link to its exact release
+# commit. To customize any VITE_* build arg, build from source with
+# docker-compose.yml instead.
+
+name: pulsy
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: pulsy-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-pulsy}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required — set it in .env}
+      POSTGRES_DB: ${POSTGRES_DB:-pulsy}
+    ports:
+      # Loopback-only: for local inspection; the server uses the compose network.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    volumes:
+      - pulsy_pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-pulsy} -d ${POSTGRES_DB:-pulsy}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  server:
+    image: ghcr.io/selmiabderrahim/pulsy-server:latest
+    container_name: pulsy-server
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    env_file:
+      - ../.env
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER:-pulsy}:${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required — set it in .env}@postgres:5432/${POSTGRES_DB:-pulsy}
+      SERVER_PORT: "4000"
+    expose:
+      - "4000"
+    ports:
+      # Loopback-only: browsers reach the API through the web container (/api/*).
+      - "127.0.0.1:${SERVER_PORT:-4000}:4000"
+    healthcheck:
+      # node:slim ships no curl/wget — use Node's global fetch.
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4000/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  web:
+    image: ghcr.io/selmiabderrahim/pulsy-web:latest
+    container_name: pulsy-web
+    restart: unless-stopped
+    depends_on:
+      server:
+        condition: service_healthy
+    ports:
+      # Container listens on 8080 (unprivileged nginx).
+      - "${WEB_PORT:-3000}:8080"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8080/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  pulsy_pgdata:

@@ -1,0 +1,397 @@
+openapi: 3.1.0
+info:
+  title: Pulsy Public REST API
+  version: "1.0.0"
+  description: |
+    Pulsy's first-party REST API for managing uptime monitors programmatically.
+
+    **Authentication.** Every request carries a Bearer API key:
+    `Authorization: Bearer pul_…`. Create and revoke keys in the dashboard
+    (Settings → API keys). The plaintext key is shown exactly once at creation;
+    Pulsy stores only its SHA-256 hash, so a lost key must be revoked and
+    regenerated. Keys authenticate the REST API only — never the session cookie.
+
+    **Access.** Every account has full read and write access — Pulsy has no
+    plans or per-key access levels.
+
+    **Errors.** All errors return `{ "error": { "code", "message" } }`. The
+    `message` is localized from the request's `Accept-Language` header. Stable
+    HTTP statuses: 401 (missing/invalid/revoked key), 404 (not found / not
+    owned), 422 (invalid body or query), 429 (rate limited).
+
+    **Rate limiting.** Requests are limited per key in a fixed window
+    (`API_RATE_LIMIT_PER_MIN`, default 60/min). Every response includes
+    `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`; a
+    429 also includes `Retry-After`. The limiter is in-memory and therefore
+    per-replica — Pulsy runs a single server process.
+  license:
+    name: AGPL-3.0-or-later
+servers:
+  - url: "{baseUrl}/api/v1"
+    description: Your Pulsy deployment's public URL (e.g. https://status.example.com)
+    variables:
+      baseUrl:
+        default: https://pulsy.example.com
+security:
+  - bearerAuth: []
+tags:
+  - name: Monitors
+    description: Uptime monitor configuration and current state.
+  - name: Monitor data
+    description: Read-only check logs, incidents, and aggregate stats.
+paths:
+  /monitors:
+    get:
+      tags: [Monitors]
+      summary: List monitors
+      description: Lists the caller's monitors, newest first. Cursor-paginated.
+      parameters:
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Cursor"
+      responses:
+        "200":
+          description: A page of monitors.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Monitor" }
+                  nextCursor:
+                    type: [string, "null"]
+                    description: Pass back as `cursor` to fetch the next page; null when no more.
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    post:
+      tags: [Monitors]
+      summary: Create a monitor
+      description: Creates a monitor owned by the key's account.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MonitorCreate" }
+      responses:
+        "201":
+          description: The created monitor.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Monitor" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /monitors/{id}:
+    parameters:
+      - $ref: "#/components/parameters/MonitorId"
+    get:
+      tags: [Monitors]
+      summary: Get a monitor
+      responses:
+        "200":
+          description: The monitor.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Monitor" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    patch:
+      tags: [Monitors]
+      summary: Update a monitor
+      description: Requires `full` access. Partial config update; status-page fields are not editable via the REST API.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/MonitorUpdate" }
+      responses:
+        "200":
+          description: The updated monitor.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Monitor" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    delete:
+      tags: [Monitors]
+      summary: Delete a monitor
+      description: Requires `full` access. Cancels its scheduled checks and cascades its history.
+      responses:
+        "200":
+          description: Deletion acknowledgement.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: object
+                    properties:
+                      id: { type: string }
+                      deleted: { type: boolean, const: true }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /monitors/{id}/check-now:
+    parameters:
+      - $ref: "#/components/parameters/MonitorId"
+    post:
+      tags: [Monitors]
+      summary: Run a check now
+      description: Requires `full` access. Runs a synchronous check; updates status and may open/resolve an incident. The monitor must be active.
+      responses:
+        "200":
+          description: The monitor after the check.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Monitor" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422":
+          description: The monitor is inactive.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /monitors/{id}/checks:
+    parameters:
+      - $ref: "#/components/parameters/MonitorId"
+      - $ref: "#/components/parameters/Limit"
+      - $ref: "#/components/parameters/Cursor"
+    get:
+      tags: [Monitor data]
+      summary: List check logs
+      responses:
+        "200":
+          description: A page of check logs (newest first).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/CheckLog" }
+                  nextCursor:
+                    type: [string, "null"]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /monitors/{id}/incidents:
+    parameters:
+      - $ref: "#/components/parameters/MonitorId"
+      - $ref: "#/components/parameters/Limit"
+      - $ref: "#/components/parameters/Cursor"
+    get:
+      tags: [Monitor data]
+      summary: List incidents
+      responses:
+        "200":
+          description: A page of incidents (newest first).
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data, nextCursor]
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Incident" }
+                  nextCursor:
+                    type: [string, "null"]
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /monitors/{id}/stats:
+    parameters:
+      - $ref: "#/components/parameters/MonitorId"
+      - name: days
+        in: query
+        description: Window in days for the aggregate (1–366).
+        schema: { type: integer, minimum: 1, maximum: 366, default: 30 }
+    get:
+      tags: [Monitor data]
+      summary: Get aggregate stats
+      responses:
+        "200":
+          description: Aggregate uptime and response-time stats over the window.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/MonitorStats" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: "pul_<random>"
+      description: "Pulsy API key. Header: `Authorization: Bearer pul_…`."
+  parameters:
+    MonitorId:
+      name: id
+      in: path
+      required: true
+      description: Monitor id.
+      schema: { type: string }
+    Limit:
+      name: limit
+      in: query
+      description: Page size (1–100).
+      schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+    Cursor:
+      name: cursor
+      in: query
+      description: Opaque pagination cursor returned as `nextCursor`.
+      schema: { type: string }
+  responses:
+    Unauthorized:
+      description: Missing, invalid, or revoked API key.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    NotFound:
+      description: Resource not found or not owned by the caller.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    ValidationError:
+      description: Invalid request body or query parameters.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+    RateLimited:
+      description: Per-key rate limit exceeded.
+      headers:
+        Retry-After:
+          schema: { type: integer }
+          description: Seconds until the window resets.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+  schemas:
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              enum: [unauthorized, not_found, validation_error, rate_limited, internal]
+            message:
+              type: string
+              description: Localized human-readable message.
+    Monitor:
+      type: object
+      properties:
+        id: { type: string }
+        name: { type: string }
+        url: { type: string, format: uri }
+        method: { type: string, enum: [GET, HEAD, POST] }
+        expectedStatus: { type: integer }
+        timeout: { type: integer, description: Request timeout in ms. }
+        interval: { type: integer, description: Check interval in seconds. }
+        failureThreshold: { type: integer }
+        active: { type: boolean }
+        status: { type: string, enum: [up, down, degraded, pending] }
+        httpStatus: { type: [integer, "null"] }
+        responseTime: { type: [integer, "null"], description: Last response time in ms. }
+        lastCheckedAt: { type: [string, "null"], format: date-time }
+        nextCheckAt: { type: [string, "null"], format: date-time }
+        tlsExpiresAt: { type: [string, "null"], format: date-time }
+        tlsExpiresInDays: { type: [integer, "null"] }
+        consecutiveFailures: { type: integer }
+        uptimePercentage: { type: [number, "null"] }
+        tags:
+          type: array
+          items: { type: string }
+        createdAt: { type: string, format: date-time }
+    MonitorCreate:
+      type: object
+      required: [name, url]
+      properties:
+        name: { type: string, minLength: 1, maxLength: 255 }
+        url: { type: string, format: uri }
+        method: { type: string, enum: [GET, HEAD, POST], default: GET }
+        expectedStatus: { type: integer, minimum: 100, maximum: 599, default: 200 }
+        timeout: { type: integer, minimum: 1000, maximum: 60000, default: 10000 }
+        interval:
+          type: integer
+          enum: [30, 60, 300, 600, 1800, 3600]
+          default: 300
+          description: Check interval in seconds.
+        failureThreshold: { type: integer, minimum: 1, maximum: 10, default: 3 }
+        active: { type: boolean, default: true }
+        tags:
+          type: array
+          maxItems: 10
+          items: { type: string, minLength: 1, maxLength: 50 }
+    MonitorUpdate:
+      type: object
+      description: All fields optional; only provided fields change. Status-page fields are not editable here.
+      properties:
+        name: { type: string, minLength: 1, maxLength: 255 }
+        url: { type: string, format: uri }
+        method: { type: string, enum: [GET, HEAD, POST] }
+        expectedStatus: { type: integer, minimum: 100, maximum: 599 }
+        timeout: { type: integer, minimum: 1000, maximum: 60000 }
+        interval: { type: integer, enum: [30, 60, 300, 600, 1800, 3600] }
+        failureThreshold: { type: integer, minimum: 1, maximum: 10 }
+        active: { type: boolean }
+        tags:
+          type: array
+          maxItems: 10
+          items: { type: string, minLength: 1, maxLength: 50 }
+    CheckLog:
+      type: object
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [up, down, degraded] }
+        httpStatus: { type: [integer, "null"] }
+        responseTime: { type: [integer, "null"] }
+        errorMessage: { type: [string, "null"] }
+        createdAt: { type: string, format: date-time }
+    Incident:
+      type: object
+      properties:
+        id: { type: string }
+        status: { type: string, enum: [ongoing, resolved] }
+        startedAt: { type: string, format: date-time }
+        resolvedAt: { type: [string, "null"], format: date-time }
+        durationSeconds: { type: [integer, "null"] }
+        cause: { type: [string, "null"] }
+    MonitorStats:
+      type: object
+      properties:
+        totalChecks: { type: integer }
+        successfulChecks: { type: integer }
+        failedChecks: { type: integer }
+        avgResponseTime: { type: [number, "null"] }
+        minResponseTime: { type: [number, "null"] }
+        maxResponseTime: { type: [number, "null"] }
+        uptimePercentage: { type: number }
