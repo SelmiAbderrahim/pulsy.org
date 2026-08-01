@@ -132,6 +132,7 @@ jobs:
           labels: ${{ steps.meta-web.outputs.labels }}
           build-args: |
             VITE_SOURCE_CODE_URL=https://github.com/${{ github.repository }}/tree/${{ github.sha }}
+            RUN_WEB_TESTS=0
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

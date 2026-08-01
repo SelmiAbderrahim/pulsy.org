@@ -37,7 +37,13 @@ ENV VITE_SOURCE_CODE_URL=$VITE_SOURCE_CODE_URL
 # the build before tsc keeps plain `tsc --noEmit` aligned with generated routes.
 RUN pnpm --filter @pulsy/web build
 RUN pnpm --filter @pulsy/web typecheck
-RUN pnpm --filter @pulsy/web test
+# The web suite is jsdom-only and arch-independent, so the multi-arch release
+# build sets RUN_WEB_TESTS=0: under QEMU the emulated leg runs ~18x slower and
+# trips vitest's 30s per-test timeout on nothing but emulation overhead. The
+# release workflow gates on the same suite natively in its `validate` job
+# before any image is built. Every other build path leaves this on.
+ARG RUN_WEB_TESTS=1
+RUN if [ "$RUN_WEB_TESTS" = "1" ]; then pnpm --filter @pulsy/web test; fi
 
 # Unprivileged nginx: master process runs as UID 101 (nginx), listens on 8080.
 FROM nginxinc/nginx-unprivileged:1.29-alpine AS runtime
