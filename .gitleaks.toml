@@ -2,16 +2,16 @@
 [extend]
 useDefault = true
 
-[[allowlists]]
-description = "Exact fake Resend fixtures used by unit tests"
-regexTarget = "match"
-regexes = [
-  '''re_(abcdef123456|mine_123456|newkey_123456)''',
-]
-
-[[allowlists]]
-description = "Historical prose describing an expected invalid-Bearer response"
+# gitleaks 8.24.x silently ignores the plural `[[allowlists]]` form when
+# `[extend] useDefault` is set, so every entry has to live in this one singular
+# `[allowlist]` table. Splitting it back out re-enables the default rules
+# against these fixtures with no error to tell you why.
+[allowlist]
+description = "Fake fixtures and prose that are not credentials"
 regexTarget = "line"
 regexes = [
+  # Exact fake Resend keys used by the email-provider unit tests.
+  '''re_(abcdef123456|mine_123456|newkey_123456)''',
+  # Prose describing an expected invalid-Bearer response.
   '''Auth middleware.*missing/garbage/revoked Bearer''',
 ]
