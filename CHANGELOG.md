@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-01
+
 ### Changed
 
 - Simplified the web build to a dashboard-first SPA and replaced generated
@@ -178,4 +180,5 @@ snapshot also includes:
 - **Docker deployment** — Compose stack (postgres + server + web) with a `Makefile` for
   common workflows, plus a seed for a demo user and example monitors.
 
-[Unreleased]: https://github.com/SelmiAbderrahim/pulsy/commits/main
+[Unreleased]: https://github.com/SelmiAbderrahim/pulsy.org/compare/v0.1.0...master
+[0.1.0]: https://github.com/SelmiAbderrahim/pulsy.org/releases/tag/v0.1.0
