@@ -1,0 +1,21 @@
+services:
+  agent-receiver:
+    build:
+      context: ${PULSY_SOURCE_DIR}
+      dockerfile: docker/Dockerfile.agent-install-test
+    entrypoint: [python3, /test/installer_test.py, --compose-fixture]
+    volumes:
+      - ${PULSY_SOURCE_DIR}/artifacts/agent:/artifacts:ro
+      - ${PULSY_SOURCE_DIR}/artifacts/agent-compose:/opt/pulsy-agent
+    healthcheck:
+      test: [CMD, test, -f, /opt/pulsy-agent/ready]
+      interval: 1s
+      timeout: 1s
+      retries: 60
+  # Merge this override with the installer-generated compose.yaml to test it.
+  pulsy-agent:
+    image: debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
+    environment:
+      SSL_CERT_FILE: /test-ca.crt
+    volumes:
+      - ${PULSY_SOURCE_DIR}/artifacts/agent-compose/ca.crt:/test-ca.crt:ro

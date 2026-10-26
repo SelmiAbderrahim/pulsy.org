@@ -123,3 +123,30 @@ graph-help: ## Show code-review-graph CLI help
 .PHONY: audit-private-targets
 audit-private-targets: ## Read-only audit of stored destinations against strict egress policy
 	$(COMPOSE) exec server ./apps/server/node_modules/.bin/tsx apps/server/src/audit-private-targets.ts
+
+.PHONY: server-health-check
+server-health-check: start ## Rebuild and check server health against an isolated test database
+	$(COMPOSE) exec server sh -lc 'cd apps/server && ./node_modules/.bin/tsc --noEmit'
+	$(COMPOSE) exec postgres sh -lc 'dropdb --if-exists --force -U "$$POSTGRES_USER" "$${POSTGRES_DB}_server_health_test" && createdb -U "$$POSTGRES_USER" "$${POSTGRES_DB}_server_health_test"'
+	$(COMPOSE) exec server sh -lc 'cd apps/server && DATABASE_URL="postgres://$$POSTGRES_USER:$$POSTGRES_PASSWORD@postgres:5432/$${POSTGRES_DB}_server_health_test" ./node_modules/.bin/vitest run server-health agent-release-route'
+
+.PHONY: agent-format agent-check agent-build agent-install-check agent-compose-check
+agent-format: ## Format Go sources in the pinned Docker toolchain
+	docker build -f docker/Dockerfile.agent --target toolchain -t pulsy-agent-toolchain .
+	docker run --rm -v "$(CURDIR)/agent:/src/agent" pulsy-agent-toolchain gofmt -w .
+
+agent-check: ## Vet and test the agent in Docker
+	docker build -f docker/Dockerfile.agent --target check -t pulsy-agent-check .
+
+agent-build: ## Export reproducible Linux amd64/arm64 binaries and checksums
+	docker build -f docker/Dockerfile.agent --target artifacts --output type=local,dest=artifacts/agent .
+
+agent-install-check: agent-build ## Exercise the real installer and systemd in disposable Linux
+	docker build -f docker/Dockerfile.agent-install-test -t pulsy-agent-install-test .
+	@set -eu; fixture=$$(docker run -d --cgroupns private --cap-add SYS_ADMIN --security-opt seccomp=unconfined --security-opt apparmor=unconfined --tmpfs /run --tmpfs /run/lock --tmpfs /tmp --tmpfs /sys/fs/cgroup -v "$(CURDIR)/artifacts/agent:/artifacts:ro" pulsy-agent-install-test); trap 'docker rm -f "$$fixture" >/dev/null' EXIT; docker exec "$$fixture" python3 /test/installer_test.py
+
+AGENT_FIXTURE_COMPOSE := PULSY_SOURCE_DIR="$(CURDIR)" docker compose --env-file .env --project-directory "$(CURDIR)/artifacts/agent-compose" -p pulsy-agent-install-fixture -f "$(CURDIR)/docker/docker-compose.agent-install-test.yml"
+agent-compose-check: agent-build ## Run the installer-generated Compose agent with host metrics
+	mkdir -p artifacts/agent-compose
+	rm -f artifacts/agent-compose/ready
+	@set -eu; trap '$(AGENT_FIXTURE_COMPOSE) -f "$(CURDIR)/artifacts/agent-compose/compose.yaml" down --remove-orphans >/dev/null 2>&1 || $(AGENT_FIXTURE_COMPOSE) down --remove-orphans >/dev/null' EXIT; $(AGENT_FIXTURE_COMPOSE) up -d --build --wait agent-receiver; $(AGENT_FIXTURE_COMPOSE) -f "$(CURDIR)/artifacts/agent-compose/compose.yaml" up -d pulsy-agent; $(AGENT_FIXTURE_COMPOSE) exec -T agent-receiver python3 /test/verify_compose.py

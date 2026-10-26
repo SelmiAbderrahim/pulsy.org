@@ -29,6 +29,12 @@ import { startSchedulerLeadership, cancelAllMonitorChecks, reconcileScheduledMon
 import { safeErrorSummary } from "./lib/safe-error";
 import { slaReportPdfHandler } from "./reports/sla-report-route";
 import { createV1Router } from "./api/v1/router";
+import { createHeartbeatRouter } from "./api/heartbeat-route";
+import { startHeartbeatWorker, stopHeartbeatWorker } from "./services/uptime/heartbeat-service";
+import { createServerHealthRouter } from "./api/server-health-route";
+import { createAgentReleaseRouter } from "./api/agent-release-route";
+import { startServerHealthWorker, stopServerHealthWorker } from "./services/uptime/server-health-alerts";
+import { cleanupServerMetrics } from "./services/uptime/server-health-service";
 
 // ---------------------------------------------------------------------------
 // Express bootstrap. Env comes from the process / docker compose (no dotenv).
@@ -116,6 +122,10 @@ app.all(
 
 // Body parser for everything else (tRPC reads JSON bodies). Explicit limit —
 // no legitimate Pulsy payload approaches 1 MB.
+// Heartbeat ingress owns its token authentication and bounded raw parser.
+app.use("/api/heartbeat", createHeartbeatRouter());
+app.use("/api/agent/v1", createServerHealthRouter());
+app.use("/api/agent/releases/v1.0.0", createAgentReleaseRouter());
 app.use(createApiJsonParser());
 app.use(apiJsonErrorHandler);
 
@@ -150,11 +160,12 @@ app.get("/health", (_req, res) => {
 async function runDailyCleanup(): Promise<void> {
 	try {
 		const logs = await cleanupOldCheckLogs(RETENTION_DAYS);
+		const serverMetrics = await cleanupServerMetrics();
 		const statusChanges = await cleanupOldStatusChanges(RETENTION_DAYS);
 		const incidents = await cleanupOldIncidents(RETENTION_DAYS);
 		const notificationLogs = await cleanupOldNotificationLogs(RETENTION_DAYS);
 		console.info(
-			`[cleanup] Removed ${logs} check log(s), ${statusChanges} status change(s), ${incidents} incident(s), ${notificationLogs} notification log(s)`,
+			`[cleanup] Removed ${logs} check log(s), ${serverMetrics} server metric(s), ${statusChanges} status change(s), ${incidents} incident(s), ${notificationLogs} notification log(s)`,
 		);
 	} catch (err) {
 		console.error(`[cleanup] Daily cleanup failed: ${safeErrorSummary(err)}`);
@@ -185,12 +196,14 @@ if (migratedNotificationChannels > 0) {
 	);
 }
 
-const LEADER_JOBS = ["uptime-daily-cleanup", "uptime-monthly-sla"] as const;
+const LEADER_JOBS = ["uptime-daily-cleanup", "uptime-monthly-sla", "uptime-heartbeat-deadlines", "uptime-server-deadlines"] as const;
 let reconcileTimer: ReturnType<typeof setInterval> | undefined;
 
 async function startLeaderWork(): Promise<void> {
   setSchedulingEnabled(true);
   await initializeAllMonitors();
+  startHeartbeatWorker();
+  startServerHealthWorker();
   reconcileTimer = setInterval(() => {
     void reconcileScheduledMonitors().catch(error => console.error(`[scheduler] Reconcile failed: ${safeErrorSummary(error)}`));
   }, 30_000);
@@ -218,12 +231,14 @@ async function startLeaderWork(): Promise<void> {
 	}
 }
 
-function stopLeaderWork(): void {
+async function stopLeaderWork(): Promise<void> {
   setSchedulingEnabled(false);
   if (reconcileTimer) clearInterval(reconcileTimer);
   reconcileTimer = undefined;
   cancelAllMonitorChecks();
   for (const name of LEADER_JOBS) scheduledJobs[name]?.cancel();
+  await stopHeartbeatWorker();
+  await stopServerHealthWorker();
 }
 
 setSchedulingEnabled(false);

@@ -65,7 +65,9 @@ describe("UptimeService monitor CRUD", () => {
 			monitorIds: ["m1", "m2"],
 			patch: { timeout: 5000 },
 		} as never;
-		await UptimeService.updateMonitorsBulk(input);
+    const updated = [{ uptimeMonitorId: "m1" }, { uptimeMonitorId: "m2" }];
+    mockMutation.mockResolvedValueOnce({ updated, results: updated.map(row => ({ id: row.uptimeMonitorId, status: "updated" })) } as never);
+    expect(await UptimeService.updateMonitorsBulk(input)).toEqual(updated);
 		expect(mockMutation).toHaveBeenCalledWith(
 			"uptimeMonitor",
 			"monitor.updateBulk",

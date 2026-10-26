@@ -59,7 +59,7 @@ function baseModel(overrides: Partial<SlaReportModel> = {}): SlaReportModel {
 		stats: {
 			totalChecks: 100,
 			successfulChecks: 99,
-			failedChecks: 1,
+			failedChecks: 1, degradedChecks: 0, availabilityPercentage: 99, slowPercentage: 0,
 			avgResponseTime: 120,
 			minResponseTime: 80,
 			maxResponseTime: 400,
@@ -159,7 +159,7 @@ describe("renderSlaReportPdf", () => {
 				stats: {
 					totalChecks: 0,
 					successfulChecks: 0,
-					failedChecks: 0,
+					failedChecks: 0, degradedChecks: 0, availabilityPercentage: null, slowPercentage: null,
 					avgResponseTime: null,
 					minResponseTime: null,
 					maxResponseTime: null,

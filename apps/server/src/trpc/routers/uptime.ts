@@ -1,15 +1,19 @@
 import { apiNetworkMonitor } from "@pulsy/db/validation-network";
+import { heartbeatRouter } from "./heartbeat";
+import { serverHealthRouter } from "./server-health";
+import { rearmResumedServer } from "../../services/uptime/server-health-service";
+import { rearmResumedHeartbeat } from "../../services/uptime/heartbeat-service";
 import { randomUUID } from "node:crypto";
 import { createNetworkMonitor, updateNetworkMonitor } from "../../services/uptime/network-monitor";
 import { assertMonitorUrlAllowed, isMonitorUrlAllowed, isMonitorHostAllowed } from "../../services/uptime/egress-input";
-import { httpConfigPatch, assertCredentialOrigin, maskMonitor, toOwnerMonitor } from "../../services/uptime/http-config";
+import { httpConfigPatch, assertCredentialOrigin, toOwnerMonitor } from "../../services/uptime/http-config";
 import { updateUptimeMonitor } from "../../services/uptime/monitor-service";
 import { createMonitorsForUser } from "../../services/uptime/monitor-operations";
 import { performHttpCheck } from "../../services/uptime/checker-service";
 import { evaluateLatencyTransition } from "../../services/uptime/latency-policy";
 import { updateMonitorsBulk, deleteMonitorsBulk } from "../../services/uptime/bulk-monitor-write";
 import { firstCheckAt } from "../../services/uptime/first-check";
-import { getOwnedUptimeAggregates, getMonitorDailyUptime } from "../../services/uptime/stats-service";
+import { getOwnedUptimeAggregates, getUptimeBarData, getMonitorStatsForWindow, getMonitorIncidentSummary } from "../../services/uptime/stats-service";
 import {
 	apiCreateUptimeMonitor,
 	apiCreateUptimeMonitorsBulk,
@@ -40,6 +44,7 @@ import {
 	apiResolveStatusPageByDomain,
 	db,
 	uptimeMonitor,
+	uptimeHeartbeat,
 	uptimeStatusChange,
 	uptimeCheckLog,
 	uptimeIncident,
@@ -336,6 +341,8 @@ const monitorRouter = router({
     if (stored && stored.monitorType !== "http") throw badRequest(ctx.t, "errors.monitorTypeAction");
     if (input.configuration.method === "POST" && !input.allowPost) throw badRequest(ctx.t, "errors.httpPostConfirm");
     if (activeHttpTests.has(ctx.user.id) || activeHttpTests.size >= 8) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: ctx.t("errors.httpTestBusy") });
+    activeHttpTests.add(ctx.user.id);
+    try {
     if (stored) assertCredentialOrigin(stored.requestCipher, stored.url, input.configuration.url, input.configuration.requestConfig, ctx.t);
     // Same policy as saving: a test run must not become a one-off SSRF probe.
     await assertMonitorUrlAllowed(input.configuration.url, ctx.t, "configuration.url");
@@ -350,8 +357,6 @@ const monitorRouter = router({
       ...ordinary, ...configuration,
       latencyPolicy: ordinary.latencyPolicy === undefined ? stored?.latencyPolicy ?? null : ordinary.latencyPolicy,
     };
-    activeHttpTests.add(ctx.user.id);
-    try {
       const result = await performHttpCheck(candidate);
       if (!candidate.latencyPolicy) return result;
       const sample = evaluateLatencyTransition({ previousStatus: "pending", checkStatus: result.status, responseTime: result.responseTime, consecutiveFailures: 0, failureThreshold: candidate.failureThreshold, consecutiveSlow: 0, consecutiveHealthy: 0, policy: candidate.latencyPolicy });
@@ -365,7 +370,11 @@ const monitorRouter = router({
 			orderBy: desc(uptimeMonitor.createdAt),
 		});
 		const aggregates = await getOwnedUptimeAggregates(ctx.user.id, 30, monitors.map(m => m.uptimeMonitorId));
-    return monitors.map(m => ({ ...maskMonitor(m), ...(aggregates.get(m.uptimeMonitorId) ?? { uptimeChecks: 0 }) }));
+    const heartbeatIds = monitors.filter(m => m.monitorType === "heartbeat").map(m => m.uptimeMonitorId);
+    const heartbeats = heartbeatIds.length ? await db.select({ monitorId: uptimeHeartbeat.monitorId, lastReceivedAt: uptimeHeartbeat.lastReceivedAt, expectedAt: uptimeHeartbeat.expectedAt, graceSeconds: uptimeHeartbeat.graceSeconds })
+      .from(uptimeHeartbeat).where(and(eq(uptimeHeartbeat.userId, ctx.user.id), inArray(uptimeHeartbeat.monitorId, heartbeatIds))) : [];
+    const heartbeatStates = new Map(heartbeats.map(h => [h.monitorId, { lastReceivedAt: h.lastReceivedAt, expectedAt: h.expectedAt, deadlineAt: new Date(Date.parse(h.expectedAt) + h.graceSeconds * 1000).toISOString() }]));
+    return monitors.map(m => ({ ...toOwnerMonitor(m), heartbeat: heartbeatStates.get(m.uptimeMonitorId) ?? null, ...(aggregates.get(m.uptimeMonitorId) ?? { uptimePercentage: null, uptimeChecks: 0 }) }));
 	}),
 
 	one: protectedProcedure
@@ -396,7 +405,8 @@ const monitorRouter = router({
 				throw notFound(ctx.t, "monitor");
 			}
 			return {
-				...maskMonitor(monitor),
+				...toOwnerMonitor(monitor),
+        incidents: monitor.incidents,
 				notificationChannels: monitor.notificationChannels.map(
 					maskNotificationChannel,
 				),
@@ -406,26 +416,26 @@ const monitorRouter = router({
   create: localizedHttpProcedure.input(apiCreateUptimeMonitor).mutation(async ({ input, ctx }) => {
     const monitor = await createMonitorForUser(input, ctx.user.id, ctx.t);
     if (monitor.active) scheduleMonitorCheck(monitor, { checkIfDue: true });
-    return maskMonitor(monitor);
+    return toOwnerMonitor(monitor);
   }),
   createBulk: localizedHttpProcedure.input(apiCreateUptimeMonitorsBulk).mutation(async ({ input, ctx }) => {
     const monitors = await createMonitorsForUser(input.monitors, ctx.user.id, ctx.t, "urls");
     for (const monitor of monitors) if (monitor.active) scheduleMonitorCheck(monitor, { checkIfDue: true });
-    return monitors.map(maskMonitor);
+    return monitors.map(toOwnerMonitor);
   }),
   update: localizedHttpProcedure.input(apiUpdateUptimeMonitor).mutation(async ({ input, ctx }) => {
     const updated = await updateUptimeMonitor(input, ctx.user.id, ctx.t);
     if (updated.active) rescheduleMonitorCheck(updated); else cancelMonitorCheck(updated.uptimeMonitorId);
-    return maskMonitor(updated);
+    return toOwnerMonitor(updated);
   }),
   updateBulk: protectedProcedure.input(apiUpdateUptimeMonitorsBulk).mutation(async ({ input, ctx }) => {
-    const requestId = ctx.requestId ?? randomUUID();
+    const requestId = randomUUID();
     const result = await updateMonitorsBulk(input, ctx.user.id, ctx.t, requestId);
     for (const monitor of result.updated) {
       try { if (monitor.active) rescheduleMonitorCheck(monitor); else cancelMonitorCheck(monitor.uptimeMonitorId); }
       catch { console.error(JSON.stringify({event:"monitor.updateBulk.scheduler.failed", requestId, monitorId:monitor.uptimeMonitorId})); }
     }
-    return { updated: result.updated.map(maskMonitor), results: result.results };
+    return { updated: result.updated.map(toOwnerMonitor), results: result.results };
   }),
   deleteBulk: protectedProcedure.input(z.object({ ids: z.array(z.string()).min(1).max(200), count: z.number().int().min(1).max(200) }).strict().refine(input => new Set(input.ids).size === input.count && input.ids.length === input.count))
     .mutation(async ({ input, ctx }) => {
@@ -447,12 +457,16 @@ const monitorRouter = router({
       const scope = and(eq(uptimeMonitor.uptimeMonitorId, input.uptimeMonitorId), eq(uptimeMonitor.userId, ctx.user.id));
       const [monitor] = await tx.select().from(uptimeMonitor).where(scope).for("update");
       if (!monitor) throw notFound(ctx.t, "monitor");
-      const [row] = await tx.update(uptimeMonitor).set({ active: !monitor.active, nextCheckAt: !monitor.active ? firstCheckAt() : null }).where(scope).returning();
+      const [row] = await tx.update(uptimeMonitor).set({ active: !monitor.active, nextCheckAt: !monitor.active && !["heartbeat", "server"].includes(monitor.monitorType) ? firstCheckAt() : null }).where(scope).returning();
       if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: ctx.t("errors.internal") });
+      const heartbeatDeadline = await rearmResumedHeartbeat(tx, monitor, row);
+      if (heartbeatDeadline !== undefined) row.nextCheckAt = heartbeatDeadline;
+      const serverDeadline = await rearmResumedServer(tx, monitor, row);
+      if (serverDeadline !== undefined) row.nextCheckAt = serverDeadline;
       return row;
     });
     if (updated.active) scheduleMonitorCheck(updated, { checkIfDue: true }); else cancelMonitorCheck(updated.uptimeMonitorId);
-    return maskMonitor(updated);
+    return toOwnerMonitor(updated);
   }),
 
 	checkNow: protectedProcedure
@@ -470,7 +484,7 @@ const monitorRouter = router({
 
 			// The full check pipeline (probe → log → state → incident → notify)
 			// is shared with `POST /api/v1/monitors/:id/check-now`.
-			return maskMonitor(await runManualCheck(monitor, ctx.t));
+			return toOwnerMonitor(await runManualCheck(monitor, ctx.t));
 		}),
 });
 
@@ -478,12 +492,12 @@ const networkRouter = router({
   create: protectedProcedure.input(apiNetworkMonitor).mutation(async ({ input, ctx }) => {
     const monitor = await createNetworkMonitor(input, ctx.user.id, ctx.t);
     if (monitor.active) scheduleMonitorCheck(monitor, { checkIfDue: true });
-    return maskMonitor(monitor);
+    return toOwnerMonitor(monitor);
   }),
   update: protectedProcedure.input(apiNetworkMonitor.extend({ monitorId: z.string() })).mutation(async ({ input, ctx }) => {
     const monitor = await updateNetworkMonitor(input, ctx.user.id, ctx.t);
     if (monitor.active) rescheduleMonitorCheck(monitor); else cancelMonitorCheck(monitor.uptimeMonitorId);
-    return maskMonitor(monitor);
+    return toOwnerMonitor(monitor);
   }),
 });
 const egressRouter = router({
@@ -587,9 +601,7 @@ const notificationLogRouter = router({
 const checkLogRouter = router({
   daily: protectedProcedure.input(z.object({ uptimeMonitorId: z.string(), days: z.number().int().min(1).max(90).default(90) })).query(async ({ input, ctx }) => {
     await findOwnedMonitorOrThrow(input.uptimeMonitorId, ctx.user.id, ctx.t);
-    const until = new Date();
-    const since = new Date(Date.UTC(until.getUTCFullYear(), until.getUTCMonth(), until.getUTCDate() - input.days + 1)).toISOString();
-    return getMonitorDailyUptime(input.uptimeMonitorId, ctx.user.id, since, until.toISOString());
+    return getUptimeBarData(input.uptimeMonitorId, ctx.user.id, input.days);
   }),
 	list: protectedProcedure
 		.input(
@@ -655,100 +667,20 @@ const checkLogRouter = router({
 			};
 		}),
 
-	stats: protectedProcedure
-		.input(
-			z.object({
-				uptimeMonitorId: z.string(),
-				days: z.number().int().min(1).max(90).default(30),
-			}),
-		)
-		.query(async ({ input, ctx }) => {
-			await findOwnedMonitorOrThrow(input.uptimeMonitorId, ctx.user.id, ctx.t);
-
-			const since = new Date(
-				Date.now() - input.days * 24 * 60 * 60 * 1000,
-			).toISOString();
-
-			const conditions = and(
-				eq(uptimeCheckLog.uptimeMonitorId, input.uptimeMonitorId),
-				gte(uptimeCheckLog.createdAt, since),
-			);
-
-			const logs = await db
-				.select({
-					status: uptimeCheckLog.status,
-					responseTime: uptimeCheckLog.responseTime,
-				})
-				.from(uptimeCheckLog)
-				.innerJoin(
-					uptimeMonitor,
-					and(
-						eq(
-							uptimeCheckLog.uptimeMonitorId,
-							uptimeMonitor.uptimeMonitorId,
-						),
-						eq(uptimeMonitor.userId, ctx.user.id),
-					),
-				)
-				.where(conditions);
-
-			const total = logs.length;
-			const upLogs = logs.filter((log) => log.status === "up");
-			const up = upLogs.length;
-			const uptimePercentage =
-				total > 0 ? Math.round((up / total) * 10000) / 100 : 0;
-			const responseTimes = logs
-				.map((log) => log.responseTime)
-				.filter((value): value is number => typeof value === "number");
-			const upResponseTimes = upLogs
-				.map((log) => log.responseTime)
-				.filter((value): value is number => typeof value === "number");
-			const avgResponseTime =
-				upResponseTimes.length > 0
-					? Math.round(
-							upResponseTimes.reduce((sum, value) => sum + value, 0) /
-								upResponseTimes.length,
-						)
-					: 0;
-			const maxResponseTime =
-				responseTimes.length > 0 ? Math.max(...responseTimes) : 0;
-			const minResponseTime =
-				upResponseTimes.length > 0 ? Math.min(...upResponseTimes) : 0;
-
-			// Incident count in the period
-			const [incidentCount] = await db
-				.select({ value: count() })
-				.from(uptimeIncident)
-				.innerJoin(
-					uptimeMonitor,
-					and(
-						eq(
-							uptimeIncident.uptimeMonitorId,
-							uptimeMonitor.uptimeMonitorId,
-						),
-						eq(uptimeMonitor.userId, ctx.user.id),
-					),
-				)
-				.where(
-					and(
-						eq(uptimeIncident.uptimeMonitorId, input.uptimeMonitorId),
-						gte(uptimeIncident.startedAt, since),
-					),
-				);
-
-			return {
-				totalChecks: total,
-				upChecks: up,
-				downChecks: total - up,
-				uptimePercentage,
-				avgResponseTime,
-				maxResponseTime,
-				minResponseTime,
-				/* v8 ignore next -- defensive: COUNT(*) always returns exactly one row */
-				incidentCount: incidentCount?.value ?? 0,
-				days: input.days,
-			};
-		}),
+  stats: protectedProcedure.input(z.object({ uptimeMonitorId: z.string(), days: z.number().int().min(1).max(90).default(30) }))
+    .query(async ({ input, ctx }) => {
+      await findOwnedMonitorOrThrow(input.uptimeMonitorId, ctx.user.id, ctx.t);
+      const until = new Date().toISOString();
+      const since = new Date(Date.parse(until) - input.days * 86_400_000).toISOString();
+      const [stats, incidents] = await Promise.all([
+        getMonitorStatsForWindow(input.uptimeMonitorId, ctx.user.id, since, until),
+        getMonitorIncidentSummary(input.uptimeMonitorId, ctx.user.id, since, until),
+      ]);
+      return { ...stats, upChecks: stats.successfulChecks, downChecks: stats.failedChecks,
+        uptimePercentage: stats.totalChecks ? stats.uptimePercentage : 0,
+        avgResponseTime: stats.avgResponseTime ?? 0, minResponseTime: stats.minResponseTime ?? 0, maxResponseTime: stats.maxResponseTime ?? 0,
+        incidentCount: incidents.count, days: input.days };
+    }),
 });
 
 // ---------------------------------------------------------------------------
@@ -994,6 +926,7 @@ const channelRouter = router({
 					recipientAddresses: input.recipientAddresses ?? null,
 					...storedSecrets,
 					notifyOnDown: input.notifyOnDown,
+          notifyOnDegraded: input.notifyOnDegraded,
 					notifyOnRecovery: input.notifyOnRecovery,
 					notifyOnTlsExpiry: input.notifyOnTlsExpiry,
 					tlsExpiryThresholdDays: input.tlsExpiryThresholdDays,
@@ -1040,6 +973,7 @@ const channelRouter = router({
 					recipientAddresses: input.recipientAddresses ?? null,
 					...storedSecrets,
 					notifyOnDown: input.notifyOnDown,
+          notifyOnDegraded: input.notifyOnDegraded,
 					notifyOnRecovery: input.notifyOnRecovery,
 					notifyOnTlsExpiry: input.notifyOnTlsExpiry,
 					tlsExpiryThresholdDays: input.tlsExpiryThresholdDays,
@@ -2511,6 +2445,8 @@ const slaReportRouter = router({
 // ---------------------------------------------------------------------------
 
 export const uptimeRouter = router({
+  server: serverHealthRouter,
+  heartbeat: heartbeatRouter,
   network: networkRouter,
   egress: egressRouter,
 	monitor: monitorRouter,

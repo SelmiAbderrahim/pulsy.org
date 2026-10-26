@@ -3,7 +3,7 @@ import { matchesExpectedStatus } from "@pulsy/db/http-status-rule";
 import { apiHttpAssertions, apiHttpRequest } from "@pulsy/db/validation-http";
 import { decrypt } from "../../lib/crypto";
 import { safeFetch } from "../../lib/ssrf";
-import { classifyCheckError } from "./check-error";
+import { classifyCheckError, classifyUnexpectedHttpStatus } from "./check-error";
 import type { HttpCheckResult } from "./checker-service";
 import { evaluateHttpAssertions, MAX_ASSERTION_RESPONSE_BYTES } from "./http-assertions";
 import type { UptimeMonitor } from "./monitor-service";
@@ -103,9 +103,10 @@ export async function performAdvancedHttpCheck(monitor: UptimeMonitor): Promise<
 			: evaluateHttpAssertions(rules, { text, headers: response!.headers });
 		httpStatus = response!.status;
 		const expected = matchesExpectedStatus(httpStatus, monitor);
-		if (!expected || assertionOutcomes.some(outcome => !outcome.passed)) {
+		const assertionsFailed = assertionOutcomes.some(outcome => !outcome.passed);
+		if (!expected || assertionsFailed) {
 			return {
-				status: "down", httpStatus, responseTime: duration(), assertionOutcomes,
+				status: assertionsFailed ? "down" : classifyUnexpectedHttpStatus(httpStatus), httpStatus, responseTime: duration(), assertionOutcomes,
 				errorMessage: expected ? "assertion_failed" : "unexpected_status",
 			};
 		}

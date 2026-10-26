@@ -150,12 +150,67 @@ configuration plus limited attribution.
 | `/api/v1/*` | Pulsy Bearer API key, never a session cookie. Plaintext keys are shown once; only a SHA-256 hash and display prefix are stored. Every route is key-owner scoped. |
 | `/api/reports/sla/:monitorId.pdf` | Resolves the better-auth session again and rechecks ownership before streaming. |
 | `/health` | Unauthenticated liveness JSON; contains no application data. |
+| `/api/heartbeat/:token/:event` or `/api/heartbeat/:event` | Random 43-character token in the path or exact Bearer header; `event` is `start`, `success`, or `fail`. GET, HEAD, and POST only; bounded 10 KB raw body before the general parser, no compression. Uniform unavailable 404; explicit outcome and optional run ID only. |
+| `/api/agent/v1/metrics` | POST with an exact 43-character agent Bearer token; strict 48 KB JSON before the general parser, no compression. Audited response permits only outcome, reporting interval, and filesystem exclusions; unknown credentials yield the same unavailable 401. |
+| `/api/agent/releases/v1.0.0/*` | Public version-keyed allowlist of installer, Compose definition, checksums, and Linux amd64/arm64 binaries; GET/HEAD only, immutable one-year caching, 240 requests per IP per minute. |
 | Public status and share pages | Render only the sanitized tRPC procedures listed above; mutations such as clone require a session. |
 
 Every tRPC input and REST body/query is validated with Zod. Express applies a
 1 MB body limit. Per-IP fixed-window limits protect auth and tRPC; the REST API
 adds a per-key in-memory limit. These limiters are process-local, consistent
 with Pulsy's single-server runtime assumption.
+
+Heartbeat ingress additionally bounds requests to 1,200 per IP per minute
+(IPv6 /64 groups, at most 1,024 buckets, rejecting new sources at capacity),
+12,000 globally per process per minute, and 16 in-flight receipt transactions.
+Each token admits at most 120 receipts per minute. Receipt fields use a strict
+Zod schema and cannot contain the token. Nginx suppresses access and error logs
+for heartbeat URLs. No public tRPC procedure is added.
+
+Heartbeat configuration, token rotation/reveal, and bounded run history use
+owner-scoped protected procedures. Tokens have SHA-256 lookup hashes and
+AES-256-GCM recovery ciphertext. Explicit owner actions may reveal a token;
+ordinary monitor and heartbeat reads omit credentials and admission counters.
+Transactions lock the parent monitor before heartbeat state. Durable run IDs
+make repeated starts and terminal receipts idempotent; superseded and pruned
+runs cannot recover a newer failure.
+
+The scheduler leader evaluates persisted heartbeat deadlines every five seconds
+in bounded batches with owned row locks and `SKIP LOCKED`. Pending has no health
+sample before its first due time. Late begins at `expectedAt`; Down and its
+incident begin at `expectedAt + graceSeconds`, even when a scan runs later.
+Only an actual success receipt restores health; edits and resumes preserve an
+outage. Resume gives a previously pending/healthy heartbeat a fresh interval.
+Worker shutdown cancels the job and drains an active scan before releasing
+leadership or closing the database.
+
+Server health uses `uptime_server` for encrypted agent credentials, thresholds,
+filesystem exclusions, reporting state, and bounded condition streaks. Accepted
+samples enter owner-scoped `uptime_server_metric`; CPU, memory, swap, load,
+uptime, and filesystem utilization are validated against a bounded versioned
+schema. Identity metadata is limited to agent version/architecture, boot ID,
+and sequence; samples contain no hostname, IP address, or process list.
+Receive-time ordering, sampled time, boot ID, sequence, and per-token admission
+guards reject stale or repeated reports without rewinding measured state.
+Metric reads and daily cleanup use `CHECK_LOG_RETENTION_DAYS` with a 30-day
+fallback; no account-dependent interval or retention values are applied.
+
+Metrics ingress has the same 1,200/IP/minute, 1,024-bucket, 12,000/global/minute,
+and 16-in-flight bounds as heartbeat ingress, plus 12 attempts per token per
+minute and the configured reporting cadence. Threshold pressure requires three
+violations and two healthy observations to clear; absent values reset streaks
+without clearing an active condition. The leader's five-second worker marks a
+reporting server Down after three missed reporting intervals. Two accepted
+reports recover missing-agent state. Samples, monitor state, and incidents are
+written together; localized notifications are dispatched after commit.
+
+The dependency-free Go agent module targets Go 1.26 and produces version 1.0.0
+Linux amd64/arm64 binaries and checksums. A pinned build-platform toolchain puts
+these exact artifacts into both server images, readable by the non-root Node
+user. Install commands derive their origin from `PUBLIC_WEB_URL`; installers
+verify downloads and support systemd and Compose. Agent production containers
+run without root. Installer/systemd and Compose acceptance fixtures are isolated
+Docker resources.
 
 User-managed email-provider credentials, notification targets, and custom
 notification-header values are encrypted at rest with AES-256-GCM using

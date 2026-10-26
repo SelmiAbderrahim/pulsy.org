@@ -3,7 +3,7 @@ import { matchesExpectedStatus } from "@pulsy/db/http-status-rule";
 import { performAdvancedHttpCheck } from "./http-request";
 import type { HttpAssertionOutcome } from "./http-assertions";
 import { safeFetch } from "../../lib/ssrf";
-import { classifyCheckError } from "./check-error";
+import { classifyCheckError, classifyUnexpectedHttpStatus } from "./check-error";
 import type { UptimeMonitor } from "./monitor-service";
 
 export interface HttpCheckResult {
@@ -50,7 +50,7 @@ export const performHttpCheck = async (
 		}
 
 		return {
-			status: response.status >= 400 ? "down" : "degraded",
+			status: classifyUnexpectedHttpStatus(response.status),
 			httpStatus: response.status,
 			responseTime,
 			errorMessage: "unexpected_status",

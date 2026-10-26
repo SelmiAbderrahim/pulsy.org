@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { encrypt } from "../../../lib/crypto";
 import { performAdvancedHttpCheck } from "../http-request";
+import { performHttpCheck } from "../checker-service";
 import type { UptimeMonitor } from "../monitor-service";
 
 function monitor(extra: Partial<UptimeMonitor> = {}): UptimeMonitor {
@@ -9,6 +10,25 @@ function monitor(extra: Partial<UptimeMonitor> = {}): UptimeMonitor {
 afterEach(() => { vi.restoreAllMocks(); vi.unstubAllEnvs(); });
 
 describe("advanced HTTP request", () => {
+  it.each([201, 401])("keeps unexpected %i classification consistent with optional request configuration", async (status) => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async () => new Response("ready", { status, headers: { "x-ready": "yes" } }));
+    for (const extra of [
+      {},
+      { requestCipher: encrypt("{}") },
+      { httpAssertions: [{ type: "header_equals" as const, name: "X-Ready", value: "yes" }] },
+    ]) {
+      expect(await performHttpCheck(monitor(extra))).toMatchObject({
+        status: status >= 400 ? "down" : "degraded", httpStatus: status, errorMessage: "unexpected_status",
+      });
+    }
+  });
+
+  it("keeps failed assertions down even when the unexpected status alone would be degraded", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response("ready", { status: 201 }));
+    expect(await performHttpCheck(monitor({ httpAssertions: [{ type: "header_equals", name: "X-Ready", value: "yes" }] })))
+      .toMatchObject({ status: "down", httpStatus: 201, assertionOutcomes: [{ index: 0, passed: false, reason: "missing" }] });
+  });
+
   it("turns a successful status with failed JSON into Down using exactly one response", async () => {
     const fetch = vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response('{"status":"error","private":"fixture-secret"}'));
     const result = await performAdvancedHttpCheck(monitor({ httpAssertions: [{ type: "json", path: "$.status", op: "equals", value: "ok" }] }));

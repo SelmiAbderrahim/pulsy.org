@@ -81,6 +81,8 @@ export {
 	getMonitorStats,
 	getMonitorStatsForWindow,
 	getMonitorDailyUptime,
+	getUptimeBarData,
+  type UptimeBarEntry,
 	getMonitorIncidentSummary,
 	getCheckLogs,
 	type MonitorStats,

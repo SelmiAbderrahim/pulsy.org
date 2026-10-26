@@ -1,13 +1,14 @@
 import { assertMonitorUrlAllowed } from "./egress-input";
 import { countersForPolicyChange } from "./latency-policy";
 import { assertCredentialOrigin, httpConfigPatch } from "./http-config";
-import { assertOwnedMonitorChannels } from "./monitor-operations";
 import { firstCheckAt } from "./first-check";
+import { rearmResumedHeartbeat } from "./heartbeat-service";
+import { rearmResumedServer } from "./server-health-service";
 import { getTranslator, type Translator } from "../../lib/i18n";
 import type { z } from "zod";
 import {
 	db,
-	uptimeMonitor, uptimeMonitorChannelBinding,
+	uptimeMonitor,
 	uptimeNotificationChannel,
 	type apiUpdateUptimeMonitor,
 } from "@pulsy/db";
@@ -61,7 +62,7 @@ export const updateUptimeMonitor = async (
   // DNS-backed policy check before taking the row lock.
   if (input.url !== undefined) await assertMonitorUrlAllowed(input.url, t);
   return db.transaction(async tx => {
-  const { uptimeMonitorId, requestConfig: _requestConfig, channelIds: _channelIds, ...data } = input;
+  const { uptimeMonitorId, requestConfig: _requestConfig, ...data } = input;
   const scope = and(eq(uptimeMonitor.uptimeMonitorId, uptimeMonitorId), eq(uptimeMonitor.userId, userId));
   const [existing] = await tx.select().from(uptimeMonitor).where(scope).for("update");
   if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: t("errors.notFound", { resource: "monitor" }) });
@@ -76,15 +77,13 @@ export const updateUptimeMonitor = async (
   if (input.active === false) updateData.nextCheckAt = null;
   const resumed = input.active === true && !existing.active;
   const retargeted = (input.url !== undefined && input.url !== existing.url) || (input.method !== undefined && input.method !== existing.method) || (input.interval !== undefined && input.interval !== existing.interval) || input.requestConfig !== undefined;
-  if ((resumed || retargeted) && (input.active ?? existing.active)) updateData.nextCheckAt = firstCheckAt();
+  if ((resumed || retargeted) && (input.active ?? existing.active) && !["heartbeat", "server"].includes(existing.monitorType)) updateData.nextCheckAt = firstCheckAt();
   const [updated] = await tx.update(uptimeMonitor).set(updateData).where(scope).returning();
   if (!updated) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: t("errors.internal") });
-  if (input.channelIds !== undefined) {
-    await assertOwnedMonitorChannels(tx, userId, input.channelIds, t);
-    await tx.delete(uptimeMonitorChannelBinding).where(and(eq(uptimeMonitorChannelBinding.userId, userId), eq(uptimeMonitorChannelBinding.monitorId, uptimeMonitorId)));
-    const ids = [...new Set(input.channelIds)];
-    if (ids.length) await tx.insert(uptimeMonitorChannelBinding).values(ids.map(channelId => ({ userId, monitorId: uptimeMonitorId, channelId })));
-  }
+  const heartbeatDeadline = await rearmResumedHeartbeat(tx, existing, updated);
+  if (heartbeatDeadline !== undefined) updated.nextCheckAt = heartbeatDeadline;
+  const serverDeadline = await rearmResumedServer(tx, existing, updated);
+  if (serverDeadline !== undefined) updated.nextCheckAt = serverDeadline;
   return updated;
   });
 };

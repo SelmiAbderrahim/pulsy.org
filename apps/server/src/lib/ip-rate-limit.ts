@@ -54,6 +54,10 @@ export interface IpRateLimiterOptions {
 	limit?: number;
 	windowMs?: number;
 	maxBuckets?: number;
+	/** Reject new addresses when all bounded slots are occupied. */
+	failClosed?: boolean;
+	/** Public capability surfaces may use a narrower response contract. */
+	onLimited?: (res: Response, retryAfter: number) => void;
 	/** Injectable clock for deterministic tests. */
 	now?: () => number;
 }
@@ -69,6 +73,12 @@ export function createIpRateLimiter(opts: IpRateLimiterOptions = {}) {
 	const maxBuckets = opts.maxBuckets ?? MAX_BUCKETS;
 	const now = opts.now ?? (() => Date.now());
 	const buckets = new Map<string, Bucket>();
+	const reject = (res: Response, retryAfter: number): void => {
+		res.setHeader("Retry-After", String(retryAfter));
+		res.status(429);
+		if (opts.onLimited) opts.onLimited(res, retryAfter);
+		else res.json({ error: "rate_limited", retryAfter });
+	};
 
 	return (req: Request, res: Response, next: NextFunction): void => {
 		const id = clientRateLimitKey(req.ip ?? "unknown");
@@ -83,6 +93,10 @@ export function createIpRateLimiter(opts: IpRateLimiterOptions = {}) {
 				}
 			}
 			if (buckets.size >= maxBuckets) {
+				if (opts.failClosed) {
+					reject(res, Math.ceil(windowMs / 1000));
+					return;
+				}
 				next();
 				return;
 			}
@@ -104,8 +118,7 @@ export function createIpRateLimiter(opts: IpRateLimiterOptions = {}) {
 
 		if (bucket.count > limit) {
 			const retryAfter = Math.ceil((bucket.resetAt - ts) / 1000);
-			res.setHeader("Retry-After", String(retryAfter));
-			res.status(429).json({ error: "rate_limited", retryAfter });
+			reject(res, retryAfter);
 			return;
 		}
 

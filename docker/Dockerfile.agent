@@ -1,0 +1,21 @@
+# syntax=docker/dockerfile:1
+FROM --platform=$BUILDPLATFORM golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61 AS toolchain
+WORKDIR /src/agent
+COPY agent/ ./
+
+FROM toolchain AS check
+RUN --mount=type=cache,target=/root/.cache/go-build test -z "$(gofmt -l .)" && go vet ./... && go test -race ./...
+
+FROM toolchain AS build
+RUN --mount=type=cache,target=/root/.cache/go-build sh build.sh
+
+FROM scratch AS artifacts
+COPY --from=build /out/ /
+
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS runtime
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/v1.0.0/pulsy-agent-linux-amd64 /usr/local/bin/pulsy-agent-amd64
+COPY --from=build /out/v1.0.0/pulsy-agent-linux-arm64 /usr/local/bin/pulsy-agent-arm64
+RUN case "$(dpkg --print-architecture)" in amd64|arm64) ln -s "pulsy-agent-$(dpkg --print-architecture)" /usr/local/bin/pulsy-agent;; *) exit 1;; esac
+USER 65532:65532
+ENTRYPOINT ["/usr/local/bin/pulsy-agent"]

@@ -35,12 +35,25 @@ capability flag that unlocks a feature.
 
 ### 2.2 Scope every query by `ctx.user.id`
 Monitor, incident, log, provider, channel, share link -- all `userId`-scoped. The complete `publicProcedure` whitelist is `uptimeMonitor.public.{status, statusPageBySlug, statusPageByDomain, sharedLink}`.
+The separate public Express heartbeat ingress `/api/heartbeat/{token}/{start|success|fail}`
+(or an event path with a Bearer token) is token-keyed, rate-limited, and returns
+only an audited outcome and optional run ID. It precedes the general JSON parser,
+accepts at most 10 KB without compression, and its URLs must never be logged.
+Public Express agent metrics at `/api/agent/v1/metrics` require a Bearer token,
+accept at most 48 KB of uncompressed JSON, and return only the audited outcome,
+reporting interval, and filesystem exclusions. Versioned agent releases at
+`/api/agent/releases/v1.0.0` serve an explicit file allowlist with immutable
+caching. Both surfaces are rate-limited; neither adds public tRPC access.
 
 ### 2.3 Zod on every tRPC input
 No raw SQL, no `as any` on input, no unvalidated payload.
 
 ### 2.4 Secrets encrypted at rest
 AES-256-GCM via `ENCRYPTION_KEY`. Never logged, never returned unmasked.
+Heartbeat tokens are exposed only by explicit owner create, rotate, or reveal
+actions; polling projections omit both token hash and ciphertext.
+Server-agent tokens are returned only by explicit owner create/rotate actions;
+ordinary server and metric projections omit all credential fields.
 
 ### 2.5 UI stays restrained
 `shadow-sm` max, no lift-on-hover, no decorative animation, no `rounded-2xl+`, no `transition-all`.

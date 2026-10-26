@@ -9,6 +9,7 @@ node_modules
 **/.code-review-graph
 .direnv
 test-results
+artifacts
 apps/web/.tanstack
 .git
 .github

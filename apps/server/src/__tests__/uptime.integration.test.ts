@@ -148,7 +148,7 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 			const monitor = await createIntegrationMonitor(
 				{
 					name: "Incident Monitor",
-					url: "https://example.com",
+					url: "https://example.com/incident",
 					method: "GET",
 					expectedStatus: 200,
 					timeout: 10_000,
@@ -301,7 +301,7 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 			const monitor = await createIntegrationMonitor(
 				{
 					name: "Email Notify Monitor",
-					url: "https://example.com",
+					url: "https://example.com/email-notify",
 					method: "GET",
 					expectedStatus: 200,
 					timeout: 10_000,
@@ -639,7 +639,7 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 			const monitor = await createIntegrationMonitor(
 				{
 					name: "Notify Monitor",
-					url: "https://example.com",
+					url: "https://example.com/webhook-notify",
 					method: "GET",
 					expectedStatus: 200,
 					timeout: 10_000,
@@ -694,7 +694,7 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 
 			const body = JSON.parse(String(calls[0]?.init?.body ?? "{}"));
 			expect(body.statusAfter).toBe("down");
-			expect(body.url).toBe("https://example.com");
+			expect(body.url).toBe("https://example.com/webhook-notify");
 		});
 
 		it("formats Slack, Discord, and Telegram alert payloads", async () => {

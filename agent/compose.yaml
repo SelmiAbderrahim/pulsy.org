@@ -1,0 +1,29 @@
+# Download the matching architecture binary and verify SHA256SUMS first.
+# Run from the directory holding the binary and config.json (owner UID 65532, mode 0600).
+services:
+  pulsy-agent:
+    image: debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587
+    user: "65532:65532"
+    entrypoint: ["/usr/local/bin/pulsy-agent", "-config", "/run/pulsy/config.json"]
+    restart: unless-stopped
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 32
+    mem_limit: 64m
+    volumes:
+      - ./pulsy-agent:/usr/local/bin/pulsy-agent:ro
+      - ./config.json:/run/pulsy/config.json:ro
+      - /etc/ssl/certs:/etc/ssl/certs:ro
+      - type: bind
+        source: /proc
+        target: /host/proc
+        read_only: true
+      - type: bind
+        source: /
+        target: /host/root
+        read_only: true
+        bind:
+          propagation: rslave
+    # Config must specify proc=/host/proc and root=/host/root. No Docker socket,
+    # privileged mode, host PID namespace or host network is needed.

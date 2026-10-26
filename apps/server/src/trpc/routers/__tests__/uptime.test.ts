@@ -183,7 +183,7 @@ describe("uptimeMonitor.monitor.create", () => {
 		const created = await ownerCaller().uptimeMonitor.monitor.create(
 			validMonitorInput,
 		);
-		expect(created.userId).toBe(owner.id);
+		expect((await db.query.uptimeMonitor.findFirst({ where: eq(uptimeMonitor.uptimeMonitorId, created.uptimeMonitorId) }))?.userId).toBe(owner.id);
 		expect(created.status).toBe("pending");
 		expect(scheduleMonitorCheck).toHaveBeenCalledTimes(1);
 	});
@@ -220,11 +220,11 @@ describe("uptimeMonitor.monitor.createBulk", () => {
 		const created = await ownerCaller().uptimeMonitor.monitor.createBulk({
 			monitors: [
 				{ ...validMonitorInput, name: "A", active: true },
-				{ ...validMonitorInput, name: "B", active: false },
+				{ ...validMonitorInput, url: "https://example.com/second", name: "B", active: false },
 			],
 		});
 		expect(created).toHaveLength(2);
-		expect(created.every((m) => m.userId === owner.id)).toBe(true);
+		for (const monitor of created) expect((await db.query.uptimeMonitor.findFirst({ where: eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId) }))?.userId).toBe(owner.id);
 		// Only the active monitor is scheduled.
 		expect(scheduleMonitorCheck).toHaveBeenCalledTimes(1);
 	});
@@ -273,7 +273,7 @@ describe("uptimeMonitor.monitor.updateBulk", () => {
 	it("applies the patch to every selected monitor and reschedules active ones", async () => {
 		const a = await createTestMonitor(owner.id, { active: true, timeout: 10_000 });
 		const b = await createTestMonitor(owner.id, { active: true, timeout: 10_000 });
-		const updated = await ownerCaller().uptimeMonitor.monitor.updateBulk({
+		const { updated } = await ownerCaller().uptimeMonitor.monitor.updateBulk({
 			monitorIds: [a.uptimeMonitorId, b.uptimeMonitorId],
 			patch: { timeout: 5_000 },
 		});
@@ -296,7 +296,7 @@ describe("uptimeMonitor.monitor.updateBulk", () => {
 
 	it("replaces tags rather than merging", async () => {
 		const m = await createTestMonitor(owner.id, { tags: ["old"] });
-		const [updated] = await ownerCaller().uptimeMonitor.monitor.updateBulk({
+		const { updated: [updated] } = await ownerCaller().uptimeMonitor.monitor.updateBulk({
 			monitorIds: [m.uptimeMonitorId],
 			patch: { tags: ["new"] },
 		});
@@ -305,7 +305,7 @@ describe("uptimeMonitor.monitor.updateBulk", () => {
 
 	it("runs the interval gate when the patch changes the interval", async () => {
 		const m = await createTestMonitor(owner.id, { active: true, interval: 300 });
-		const [updated] = await ownerCaller().uptimeMonitor.monitor.updateBulk({
+		const { updated: [updated] } = await ownerCaller().uptimeMonitor.monitor.updateBulk({
 			monitorIds: [m.uptimeMonitorId],
 			patch: { interval: 60 },
 		});
@@ -416,7 +416,7 @@ describe("uptimeMonitor.monitor.checkNow", () => {
 
 		await expect(
 			runManualCheck({ ...monitor, userId: attacker.id }),
-		).rejects.toThrow("Failed to update uptime monitor");
+		).rejects.toMatchObject({ code: "NOT_FOUND" });
 
 		const [unchanged] = await db
 			.select()

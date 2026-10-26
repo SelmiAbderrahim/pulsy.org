@@ -24,6 +24,7 @@ pnpm-debug.log*
 
 # Test / coverage
 coverage/
+/artifacts/
 
 # Drizzle
 packages/db/drizzle/meta/_journal.json.bak

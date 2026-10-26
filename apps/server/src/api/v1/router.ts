@@ -347,7 +347,7 @@ export function createV1Router(options: V1RouterOptions = {}): Router {
 			}
 			const monitor = await createMonitorForUser(body.data, req.apiUser!.id);
 			if (monitor.active) {
-				scheduleMonitorCheck(monitor);
+				scheduleMonitorCheck(monitor, { checkIfDue: true });
 			}
 			res.status(201).json({ data: toApiMonitor(monitor) });
 		}),

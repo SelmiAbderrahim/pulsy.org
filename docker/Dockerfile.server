@@ -5,6 +5,11 @@
 #   dev  (compose default) — full dependency set so `make test` / `make
 #        typecheck` can exec vitest/tsc inside the running container.
 #   prod (published image)  — production-only dependencies, no tests, non-root.
+FROM --platform=$BUILDPLATFORM golang:1.27.2-bookworm@sha256:5cf287a799e6b94384bad13d16b14904c531f51ba65792237e122ce42b392f61 AS agent
+WORKDIR /src/agent
+COPY agent/ ./
+RUN --mount=type=cache,target=/root/.cache/go-build sh build.sh
+
 FROM node:24-slim AS base
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
@@ -28,6 +33,7 @@ COPY --from=deps --chown=node:node /app/node_modules ./node_modules
 COPY --from=deps --chown=node:node /app/packages/db/node_modules ./packages/db/node_modules
 COPY --from=deps --chown=node:node /app/apps/server/node_modules ./apps/server/node_modules
 COPY --chown=node:node . .
+COPY --from=agent --chown=node:node /out/ /app/agent-dist/
 # COPY --chown only covers copied entries; /app itself is created root-owned by
 # WORKDIR. The runtime user needs it writable (coverage output, tmp files).
 RUN chown node:node /app
@@ -53,6 +59,7 @@ COPY --chown=node:node pnpm-workspace.yaml package.json pnpm-lock.yaml ./
 COPY --chown=node:node packages/db packages/db
 COPY --chown=node:node apps/server apps/server
 COPY --chown=node:node docker/entrypoint.server.sh docker/entrypoint.server.sh
+COPY --from=agent --chown=node:node /out/ /app/agent-dist/
 # No test suites or Vitest configuration in the shipped artifact.
 RUN find apps/server/src packages/db/src -name "*.test.ts" -delete \
 	&& rm -rf apps/server/test packages/db/test \

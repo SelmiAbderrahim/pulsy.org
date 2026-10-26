@@ -42,30 +42,30 @@ describe("performHttpCheck — responses", () => {
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(fakeResponse(503));
 		const r = await performHttpCheck(makeMonitor());
 		expect(r.status).toBe("down");
-		expect(r.errorMessage).toMatch(/Unexpected status: 503/);
+		expect(r.errorMessage).toBe("unexpected_status");
 	});
 
 	it("reports degraded for an unexpected sub-400 status", async () => {
 		vi.spyOn(globalThis, "fetch").mockResolvedValue(fakeResponse(302));
 		const r = await performHttpCheck(makeMonitor({ expectedStatus: 200 }));
 		expect(r.status).toBe("degraded");
-		expect(r.errorMessage).toMatch(/Unexpected status: 302/);
+		expect(r.errorMessage).toBe("unexpected_status");
 	});
 });
 
 describe("performHttpCheck — error classification", () => {
 	const cases: Array<[unknown, string]> = [
-		[new DOMException("aborted", "AbortError"), "Request timed out"],
-		[new TypeError("fetch failed"), "Connection refused"],
-		[new TypeError("ECONNREFUSED 1.2.3.4"), "Connection refused"],
-		[new TypeError("getaddrinfo ENOTFOUND host"), "DNS resolution failed"],
-		[new TypeError("read ECONNRESET"), "Connection reset by server"],
-		[new TypeError("connect ETIMEDOUT"), "Connection timed out"],
-		[new TypeError("SSL certificate problem"), "TLS/SSL certificate error"],
-		[new TypeError("something odd"), "Network error: something odd"],
-		[new Error("boom"), "boom"],
-		["a string", "Unknown error occurred"],
-	];
+    [new DOMException("aborted", "AbortError"), "response_timeout"],
+    [new TypeError("fetch failed"), "unknown"],
+    [new TypeError("connect fixture", { cause: { code: "ECONNREFUSED" } }), "connection_refused"],
+    [new TypeError("lookup fixture", { cause: { code: "ENOTFOUND" } }), "dns_not_found"],
+    [new TypeError("read fixture", { cause: { code: "ECONNRESET" } }), "connection_reset"],
+    [new TypeError("connect fixture", { cause: { code: "ETIMEDOUT" } }), "connection_timeout"],
+    [new TypeError("certificate fixture", { cause: { code: "CERT_UNTRUSTED" } }), "tls_untrusted"],
+    [new TypeError("something odd"), "unknown"],
+    [new Error("boom"), "unknown"],
+    ["a string", "unknown"],
+  ];
 
 	for (const [thrown, expected] of cases) {
 		it(`maps ${String((thrown as Error)?.message ?? thrown)} -> "${expected}"`, async () => {
@@ -73,6 +73,7 @@ describe("performHttpCheck — error classification", () => {
 			const r = await performHttpCheck(makeMonitor());
 			expect(r.status).toBe("down");
 			expect(r.httpStatus).toBeNull();
+      expect(r.responseTime).toBeNull();
 			expect(r.errorMessage).toBe(expected);
 		});
 	}

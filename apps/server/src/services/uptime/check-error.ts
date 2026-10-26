@@ -32,6 +32,11 @@ const BY_CODE: Record<string, CheckErrorCode> = {
   EDESTINATION: "blocked_target",
 };
 
+/** Preserve the same status-mismatch semantics for every HTTP request path. */
+export function classifyUnexpectedHttpStatus(status: number): "down" | "degraded" {
+  return status >= 400 ? "down" : "degraded";
+}
+
 /**
  * Classify a failed probe by walking the full `cause` chain: undici reports
  * `TypeError("fetch failed")` with the system error (ENOTFOUND, ECONNREFUSED,

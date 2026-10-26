@@ -63,7 +63,8 @@ describe("native DNS and TCP outcomes", () => {
     const configuration = { type: "dns" as const, hostname: "nomail.example.invalid", recordType: "MX" as const, mode: "matches" as const, expected: [{ exchange: ".", priority: 0 }] };
     try {
       const answers = await resolver.resolveMx(configuration.hostname);
-      expect(answers).toEqual([{ priority: 0, exchange: "" }]);
+      // Node 24 includes the record discriminator on native MX answers.
+      expect(answers).toEqual([{ priority: 0, exchange: "", type: "MX" }]);
       expect((await performDnsCheck(configuration, 1000, resolver)).status).toBe("up");
       expect(evaluateDnsAnswers(configuration, [...answers, { exchange: "mail.example.invalid", priority: 10 }])).toBeDefined();
     } finally { resolver.cancel(); await new Promise<void>(resolve => server.close(resolve)); }

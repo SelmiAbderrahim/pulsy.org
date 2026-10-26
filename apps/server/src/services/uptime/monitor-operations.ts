@@ -1,3 +1,4 @@
+import { acceptsProbeResult } from "./probe-configuration";
 import { canonicalMonitorUrl, normalizeMonitorUrl } from "@pulsy/db/monitor-url";
 // Shared owned monitor writes and manual checks. Callers schedule after commit.
 
@@ -143,6 +144,7 @@ export async function runManualCheck(
 	const { updated, statusChangeRecord } = await db.transaction(async (tx) => {
     const [current] = await tx.select().from(uptimeMonitor).where(and(eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId), eq(uptimeMonitor.userId, monitor.userId))).for("update");
     if (!current) throw new TRPCError({ code: "NOT_FOUND", message: t("errors.notFound", { resource: "monitor" }) });
+    if (!acceptsProbeResult(current, monitor)) return { updated: current, statusChangeRecord: null };
     policyMonitor = current;
 	const now = new Date().toISOString();
 	// A caller may hold a snapshot whose last observation is scheduled in the
@@ -259,8 +261,7 @@ export async function runManualCheck(
 	if (statusChangeRecord) {
 		void dispatchNotifications(policyMonitor, statusChangeRecord).catch((err) => {
 			console.error(
-				`[uptime] Failed to dispatch notifications for monitor ${monitor.uptimeMonitorId}:`,
-				safeErrorSummary(err),
+				`[uptime] Failed to dispatch notifications for monitor ${monitor.uptimeMonitorId}: ${safeErrorSummary(err)}`,
 			);
 		});
 	}

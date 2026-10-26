@@ -117,11 +117,12 @@ export const UptimeService = {
   async updateMonitorsBulk(
     input: BulkUpdateUptimeMonitorsInput
   ): Promise<UptimeMonitor[]> {
-    return trpcMutation<UptimeMonitor[]>(
+    const result = await trpcMutation<{ updated: UptimeMonitor[]; results: Array<{ id: string; status: "updated" | "rejected"; reason?: string }> }>(
       "uptimeMonitor",
       "monitor.updateBulk",
       input
     );
+    return result.updated;
   },
 
   /**

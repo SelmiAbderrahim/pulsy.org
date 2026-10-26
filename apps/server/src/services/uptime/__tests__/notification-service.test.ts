@@ -9,7 +9,7 @@ import {
 import { mockFetch } from "../../../../test/fetch-mock";
 import { encrypt } from "../../../lib/crypto";
 import type { UptimeMonitor } from "../monitor-service";
-import { db, uptimeNotificationLog } from "@pulsy/db";
+import { db, uptimeNotificationLog, uptimeMonitorChannelBinding } from "@pulsy/db";
 import { eq } from "drizzle-orm";
 import {
 	buildEmailContent,
@@ -835,7 +835,7 @@ describe("configured latency notifications", () => {
       await dispatchNotifications(configured, downChange({ statusAfter: "degraded" }), NO_RETRY);
       expect(fx.calls).toHaveLength(1);
       expect(fx.calls[0]?.url).toBe("https://hooks.test/degraded");
-      expect(await logRowsFor(monitor.uptimeMonitorId)).toEqual([expect.objectContaining({ event: "degraded", status: "sent" })]);
+      expect(await logRowsFor(monitor.uptimeMonitorId)).toEqual([expect.objectContaining({ event: "degraded", outcome: "sent" })]);
     } finally { fx.restore(); }
   });
   it("keeps informational latency policies quiet", async () => {
@@ -846,4 +846,24 @@ describe("configured latency notifications", () => {
       expect(fx.calls).toHaveLength(0);
     } finally { fx.restore(); }
   });
+});
+
+
+it("delivers to owned selected channel bindings and rejects foreign-owner bindings", async () => {
+  const fx = mockFetch();
+  try {
+    const source = await createTestMonitor(userId);
+    const channel = await createTestChannel(source.uptimeMonitorId, { channelType: "webhook", webhookUrl: "https://hooks.test/selected", notifyOnDown: true });
+    const stranger = await createTestUser();
+    const foreign = await createTestMonitor(stranger.id);
+    const foreignChannel = await createTestChannel(foreign.uptimeMonitorId, { channelType: "webhook", webhookUrl: "https://hooks.test/foreign", notifyOnDown: true });
+    await db.insert(uptimeMonitorChannelBinding).values([
+      { userId, monitorId: monitor.uptimeMonitorId, channelId: channel.channelId },
+      { userId, monitorId: monitor.uptimeMonitorId, channelId: foreignChannel.channelId },
+    ]);
+    await dispatchNotifications(monitor, downChange(), NO_RETRY);
+    expect(fx.calls).toHaveLength(1);
+    expect(fx.calls[0]?.url).toBe("https://hooks.test/selected");
+    expect(await logRowsFor(monitor.uptimeMonitorId)).toEqual([expect.objectContaining({ channelId: channel.channelId, outcome: "sent" })]);
+  } finally { fx.restore(); }
 });

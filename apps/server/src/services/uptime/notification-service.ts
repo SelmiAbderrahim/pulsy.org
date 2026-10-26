@@ -2,6 +2,7 @@ import { safeChannelError } from "./notification-channel-secrets";
 import {
 	db,
 	uptimeNotificationChannel,
+  uptimeMonitorChannelBinding,
 	uptimeNotificationLog,
 } from "@pulsy/db";
 import { and, eq, isNull, or } from "drizzle-orm";
@@ -17,6 +18,7 @@ import { findEmailProviderById, sendViaProvider } from "./email-provider-service
 import { decryptNotificationChannelSecrets } from "./notification-channel-secrets";
 import type { TlsCertificateInfo } from "./tls-checker-service";
 import type { UptimeMonitor } from "./monitor-service";
+import { serverHealthNotice } from "./server-health-notice";
 
 const COMPANY_NAME = "Pulsy";
 const ERROR_MAX_LENGTH = 500;
@@ -44,6 +46,7 @@ interface StatusChangeRecord {
 }
 
 interface NotificationPayload {
+	reason?: string;
 	monitorName: string;
 	url: string;
 	statusBefore: string;
@@ -58,6 +61,7 @@ function buildPayload(
 	statusChange: StatusChangeRecord,
 ): NotificationPayload {
 	return {
+		...(monitor.monitorType === "server" ? { reason: serverHealthNotice(monitor, statusChange).reason } : {}),
 		monitorName: monitor.name,
 		url: monitor.url,
 		statusBefore: statusChange.statusBefore,
@@ -171,7 +175,12 @@ async function loadApplicableChannels(
 		),
 	});
 
-	return channels.map(decryptNotificationChannelSecrets);
+	const referenced = await db.select({ channel: uptimeNotificationChannel }).from(uptimeMonitorChannelBinding)
+    .innerJoin(uptimeNotificationChannel, eq(uptimeMonitorChannelBinding.channelId, uptimeNotificationChannel.channelId))
+    .where(and(eq(uptimeMonitorChannelBinding.userId, monitor.userId), eq(uptimeMonitorChannelBinding.monitorId, monitor.uptimeMonitorId), eq(uptimeNotificationChannel.userId, monitor.userId))).limit(20);
+  const byId = new Map(channels.map(channel => [channel.channelId, channel]));
+  for (const { channel } of referenced) if (!byId.has(channel.channelId)) byId.set(channel.channelId, { ...channel, uptimeMonitorId: monitor.uptimeMonitorId });
+  return [...byId.values()].map(decryptNotificationChannelSecrets);
 }
 
 type NotificationChannelRow = typeof uptimeNotificationChannel.$inferSelect;
@@ -181,6 +190,7 @@ export function buildEmailContent(
 	monitor: UptimeMonitor,
 	statusChange: StatusChangeRecord,
 ): { subject: string; html: string } {
+	if (monitor.monitorType === "server") return serverHealthNotice(monitor, statusChange);
 	const payload = buildPayload(monitor, statusChange);
 	const emoji = getStatusEmoji(statusChange.statusAfter);
 	const subject = `${emoji} ${monitor.name} is ${statusChange.statusAfter.toUpperCase()}`;
@@ -485,7 +495,7 @@ export const dispatchNotifications = async (
 ): Promise<void> => {
 	if (monitor.latencyPolicy?.importance === "informational") return;
 	const isDown = statusChange.statusAfter === "down";
-  const isDegraded = statusChange.statusAfter === "degraded" && Boolean(monitor.latencyPolicy);
+  const isDegraded = statusChange.statusAfter === "degraded" && Boolean(monitor.latencyPolicy || monitor.monitorType === "heartbeat" || monitor.monitorType === "server");
 	const isRecovery =
 		statusChange.statusAfter === "up" &&
 		(statusChange.statusBefore === "down" ||
@@ -655,7 +665,7 @@ export const sendSlackNotification = async (
 	const response = await safeFetch(channel.webhookUrl, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(slackPayload),
+		body: JSON.stringify(monitor.monitorType === "server" ? { blocks: [{ type: "section", text: { type: "plain_text", text: serverHealthNotice(monitor, statusChange).text } }] } : slackPayload),
 		signal: AbortSignal.timeout(10000),
 	});
 
@@ -725,7 +735,7 @@ export const sendDiscordNotification = async (
 	const response = await safeFetch(channel.webhookUrl, {
 		method: "POST",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(discordPayload),
+		body: JSON.stringify(monitor.monitorType === "server" ? { content: serverHealthNotice(monitor, statusChange).text, allowed_mentions: { parse: [] } } : discordPayload),
 		signal: AbortSignal.timeout(10000),
 	});
 
@@ -754,7 +764,7 @@ export const sendTelegramNotification = async (
 	const payload = buildPayload(monitor, statusChange);
 	const emoji = getStatusEmoji(statusChange.statusAfter);
 
-	const text = [
+	const text = monitor.monitorType === "server" ? escapeHtml(serverHealthNotice(monitor, statusChange).text) : [
 		`${emoji} <b>${escapeHtml(monitor.name)}</b> is <b>${statusChange.statusAfter.toUpperCase()}</b>`,
 		"",
 		`<b>URL:</b> ${escapeHtml(monitor.url)}`,

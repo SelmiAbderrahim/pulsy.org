@@ -31,7 +31,8 @@ describe("persisted latency and quiet recovery", () => {
   it("persists the policy, retains omission, validates replacements and isolates owners", async () => {
     const owner = await createTestUser(); const other = await createTestUser(); const caller = authedCaller(owner);
     const created = await caller.uptimeMonitor.monitor.create(config);
-    expect(created).toMatchObject({ latencyPolicy: policy, consecutiveSlow: 0, consecutiveHealthy: 0 });
+    expect(created).toMatchObject({ latencyPolicy: policy });
+    expect(await storedMonitorSnapshot(created.uptimeMonitorId, owner.id)).toMatchObject({ consecutiveSlow: 0, consecutiveHealthy: 0 });
     const retained = await caller.uptimeMonitor.monitor.update({ uptimeMonitorId: created.uptimeMonitorId, name: "Renamed" });
     expect(retained).toMatchObject({ latencyPolicy: policy });
     const invalid = { uptimeMonitorId: created.uptimeMonitorId, latencyPolicy: { ...policy, recoveryThresholdMs: 201 } };

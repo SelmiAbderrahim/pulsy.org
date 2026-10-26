@@ -1,3 +1,4 @@
+import { acceptsProbeResult, probeConfigurationKey } from "./probe-configuration";
 import {
 	db,
 	uptimeMonitor,
@@ -126,6 +127,8 @@ function intervalToCron(intervalSeconds: number): string {
 }
 
 const scheduledIntervals = new Map<string, number>();
+const scheduledConfigurations = new Map<string, string>();
+const dueTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let schedulingEnabled = true;
 export const setSchedulingEnabled = (enabled: boolean): void => { schedulingEnabled = enabled; };
 
@@ -133,7 +136,14 @@ function queueDueCheck(monitor: UptimeMonitor): void {
 	if (!monitor.active || !monitor.nextCheckAt || monitor.monitorType === "heartbeat" || monitor.monitorType === "server" || !schedulingEnabled) return;
 	const delay = Date.parse(monitor.nextCheckAt) - Date.now();
 	if (!(delay <= FIRST_CHECK_JITTER_MS)) return;
-	setTimeout(() => runScheduledCheck(monitor.uptimeMonitorId), Math.max(0, delay)).unref();
+  const existing = dueTimers.get(monitor.uptimeMonitorId);
+  if (existing) clearTimeout(existing);
+  const timer = setTimeout(() => {
+    dueTimers.delete(monitor.uptimeMonitorId);
+    runScheduledCheck(monitor.uptimeMonitorId);
+  }, Math.max(0, delay));
+  dueTimers.set(monitor.uptimeMonitorId, timer);
+  timer.unref();
 }
 
 export const scheduleMonitorCheck = (monitor: UptimeMonitor, options: { checkIfDue?: boolean } = {}): void => {
@@ -145,6 +155,10 @@ export const scheduleMonitorCheck = (monitor: UptimeMonitor, options: { checkIfD
 	}
 
 	scheduledIntervals.delete(monitor.uptimeMonitorId);
+  scheduledConfigurations.delete(monitor.uptimeMonitorId);
+  const due = dueTimers.get(monitor.uptimeMonitorId);
+  if (due) clearTimeout(due);
+  dueTimers.delete(monitor.uptimeMonitorId);
 	if (!schedulingEnabled || monitor.monitorType === "heartbeat" || monitor.monitorType === "server") return;
 
 	const cron = intervalToCron(monitor.interval);
@@ -153,6 +167,7 @@ export const scheduleMonitorCheck = (monitor: UptimeMonitor, options: { checkIfD
 		runScheduledCheck(monitor.uptimeMonitorId);
 	});
 	scheduledIntervals.set(monitor.uptimeMonitorId, monitor.interval);
+  scheduledConfigurations.set(monitor.uptimeMonitorId, probeConfigurationKey(monitor));
   if (options.checkIfDue) queueDueCheck(monitor);
 };
 
@@ -163,6 +178,10 @@ export const cancelMonitorCheck = (monitorId: string): void => {
 		existingJob.cancel();
 	}
 	scheduledIntervals.delete(monitorId);
+  scheduledConfigurations.delete(monitorId);
+  const due = dueTimers.get(monitorId);
+  if (due) clearTimeout(due);
+  dueTimers.delete(monitorId);
 	lastTlsCheckMap.delete(monitorId);
 };
 
@@ -183,9 +202,9 @@ export const reconcileScheduledMonitors = async (): Promise<{ scheduled: number;
 	let scheduled = 0;
 	let cancelled = 0;
 	for (const [id, monitor] of wanted) {
-		if (scheduledIntervals.get(id) !== monitor.interval) {
+		if (scheduledIntervals.get(id) !== monitor.interval || scheduledConfigurations.get(id) !== probeConfigurationKey(monitor)) {
 			// A monitor created through another replica has never been checked: check it now.
-			scheduleMonitorCheck(monitor, { checkIfDue: monitor.lastCheckedAt === null });
+			scheduleMonitorCheck(monitor, { checkIfDue: true });
 			scheduled++;
 		}
 	}
@@ -214,7 +233,7 @@ export const initializeAllMonitors = async (): Promise<void> => {
 	});
 
 	for (const monitor of monitors) {
-		scheduleMonitorCheck(monitor);
+		scheduleMonitorCheck(monitor, { checkIfDue: monitor.lastCheckedAt === null });
 	}
 
 	console.info(
@@ -228,7 +247,8 @@ export const initializeAllMonitors = async (): Promise<void> => {
  * restart never orphans a check mid-write.
  */
 export const shutdownScheduler = async (timeoutMs = 10000): Promise<void> => {
-	// Cancel all node-schedule jobs (checks + daily cleanup).
+	// Cancel monitor timers as well as node-schedule jobs before draining writes.
+  cancelAllMonitorChecks();
 	await cancelAllJobs();
 
 	if (runningChecks.size === 0) {
@@ -304,6 +324,7 @@ const runCheck = async (monitorId: string): Promise<void> => {
 	const statusChangeRecord = await db.transaction(async (tx) => {
     const [current] = await tx.select().from(uptimeMonitor).where(and(eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId), eq(uptimeMonitor.userId, monitor.userId))).for("update");
     if (!current) throw new Error("Monitor removed during check");
+    if (!acceptsProbeResult(current, monitor)) return null;
     policyMonitor = current;
 	const now = new Date().toISOString();
 	if (current.lastCheckedAt && Date.parse(current.lastCheckedAt) > Date.now()) return null;
@@ -404,8 +425,7 @@ const runCheck = async (monitorId: string): Promise<void> => {
 	if (statusChangeRecord) {
 		void dispatchNotifications(policyMonitor, statusChangeRecord).catch((err) => {
 			console.error(
-				`[uptime] Failed to dispatch notifications for monitor ${monitorId}:`,
-				safeErrorSummary(err),
+				`[uptime] Failed to dispatch notifications for monitor ${monitorId}: ${safeErrorSummary(err)}`,
 			);
 		});
 	}
@@ -434,16 +454,14 @@ const runCheck = async (monitorId: string): Promise<void> => {
 					void dispatchTlsExpiryNotifications(tlsUpdated, tlsInfo).catch(
 						(err) => {
 							console.error(
-								`[uptime] Failed to dispatch TLS expiry notifications for monitor ${monitorId}:`,
-								safeErrorSummary(err),
+								`[uptime] Failed to dispatch TLS expiry notifications for monitor ${monitorId}: ${safeErrorSummary(err)}`,
 							);
 						},
 					);
 				}
 			} catch (err) {
 				console.error(
-					`[uptime] TLS check failed for monitor ${monitorId}:`,
-					safeErrorSummary(err),
+					`[uptime] TLS check failed for monitor ${monitorId}: ${safeErrorSummary(err)}`,
 				);
 			} finally {
 				// Throttle even on failure: a broken TLS endpoint or a failed DB

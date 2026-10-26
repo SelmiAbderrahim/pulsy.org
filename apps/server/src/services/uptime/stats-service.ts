@@ -28,6 +28,13 @@ export interface DailyUptimeEntry {
 	totalChecks: number;
 }
 
+export interface UptimeBarEntry {
+	date: string;
+	status: "up" | "down" | "degraded" | "partial" | "unknown";
+	uptimePercent: number | null;
+	totalChecks: number;
+}
+
 export interface IncidentSummary {
 	count: number;
 	totalDowntimeSeconds: number;
@@ -219,9 +226,7 @@ export const getMonitorStatsForWindow = async (
 		ownedMonitorExists(monitorId, userId),
 		gte(uptimeCheckLog.createdAt, since),
 	];
-	if (until) {
-		conditions.push(lte(uptimeCheckLog.createdAt, until));
-	}
+	conditions.push(lte(uptimeCheckLog.createdAt, until ?? new Date().toISOString()));
 
 	const logs = await db.query.uptimeCheckLog.findMany({
 		columns: {
@@ -239,11 +244,84 @@ export const getMonitorStats = async (
 	userId: string,
 	days = 30,
 ): Promise<MonitorStats> => {
+	const until = new Date().toISOString();
 	const since = new Date(
-		Date.now() - days * 24 * 60 * 60 * 1000,
+		Date.parse(until) - days * 24 * 60 * 60 * 1000,
 	).toISOString();
-	return getMonitorStatsForWindow(monitorId, userId, since);
+	return getMonitorStatsForWindow(monitorId, userId, since, until);
 };
+
+/**
+ * Fixed UTC calendar buckets for the owner's daily chart, including unknown
+ * days. Complete days use trigger-maintained rollups; today's checks are
+ * bounded at the captured current time so future samples cannot affect it.
+ */
+export async function getUptimeBarData(
+	monitorId: string,
+	userId: string,
+	days = 90,
+): Promise<UptimeBarEntry[]> {
+	const now = new Date();
+	const until = now.toISOString();
+	const today = `${until.slice(0, 10)}T00:00:00.000Z`;
+	const start = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - days + 1));
+	const since = start.toISOString();
+	const completeDays = await db.select({
+		day: uptimeCheckDay.day,
+		status: uptimeCheckDay.status,
+		checks: sum(uptimeCheckDay.checks),
+	}).from(uptimeCheckDay)
+		.innerJoin(uptimeMonitor, eq(uptimeMonitor.uptimeMonitorId, uptimeCheckDay.monitorId))
+		.where(and(
+			eq(uptimeMonitor.userId, userId),
+			eq(uptimeCheckDay.monitorId, monitorId),
+			gte(uptimeCheckDay.day, since.slice(0, 10)),
+			lt(uptimeCheckDay.day, today.slice(0, 10)),
+		))
+		.groupBy(uptimeCheckDay.day, uptimeCheckDay.status);
+	const currentDay = await db.select({
+		status: uptimeCheckLog.status,
+		checks: count(),
+	}).from(uptimeCheckLog)
+		.innerJoin(uptimeMonitor, eq(uptimeMonitor.uptimeMonitorId, uptimeCheckLog.uptimeMonitorId))
+		.where(and(
+			eq(uptimeMonitor.userId, userId),
+			eq(uptimeCheckLog.uptimeMonitorId, monitorId),
+			gte(uptimeCheckLog.createdAt, today),
+			lte(uptimeCheckLog.createdAt, until),
+		))
+		.groupBy(uptimeCheckLog.status);
+
+	const counts = new Map<string, { total: number; up: number; down: number; degraded: number }>();
+	for (const group of [
+		...completeDays,
+		...currentDay.map(group => ({ ...group, day: until.slice(0, 10) })),
+	]) {
+		const value = counts.get(group.day) ?? { total: 0, up: 0, down: 0, degraded: 0 };
+		const checks = Number(group.checks);
+		value.total += checks;
+		if (group.status === "up") value.up += checks;
+		if (group.status === "down") value.down += checks;
+		if (group.status === "degraded") value.degraded += checks;
+		counts.set(group.day, value);
+	}
+
+	const result: UptimeBarEntry[] = [];
+	for (let offset = 0; offset < days; offset++) {
+		const date = new Date(start.getTime() + offset * 86_400_000).toISOString().slice(0, 10);
+		const value = counts.get(date);
+		if (!value || value.total <= 0) {
+			result.push({ date, status: "unknown", uptimePercent: null, totalChecks: 0 });
+			continue;
+		}
+		let status: UptimeBarEntry["status"];
+		if (value.down === 0 && value.degraded === 0) status = "up";
+		else if (value.up === 0) status = value.down > 0 ? "down" : "degraded";
+		else status = value.down > 0 ? "partial" : "degraded";
+		result.push({ date, status, uptimePercent: checkSuccessPercent(value.up, value.total), totalChecks: value.total });
+	}
+	return result;
+}
 
 /**
  * Per-day uptime series over an explicit `[since, until]` ISO window. Only days

@@ -88,5 +88,18 @@ matching container. Contributor setup and runtime validation are Docker-first.
   `ENCRYPTION_KEY`) — never logged, never returned unmasked, no fallback/default key values, and
   any comparison against a stored secret uses a timing-safe compare.
 - Every tRPC input validated with Zod. `protectedProcedure` for all data access. The complete `publicProcedure` whitelist is `uptimeMonitor.public.{status, statusPageBySlug, statusPageByDomain, sharedLink}` — each is keyed to a specific page/token and returns a hand-audited field list, never a raw row.
+- The separate public Express heartbeat ingress `/api/heartbeat/{token}/{start|success|fail}`
+  (or an event path with a Bearer token) is token-keyed and rate-limited. Its audited
+  response contains only an outcome and optional run ID. Mount it before the general
+  JSON parser; accept at most 10 KB without compression and never log its URLs.
+- Heartbeat tokens may be exposed only by explicit owner create, rotate, or reveal
+  actions. Polling projections omit token hashes, ciphertext, and admission counters.
+- Public Express `/api/agent/v1/metrics` requires an agent Bearer token and accepts
+  at most 48 KB of uncompressed JSON before the general parser. Its audited
+  response permits only outcome, interval, and filesystem exclusions. The public
+  `/api/agent/releases/v1.0.0` surface serves an explicit artifact allowlist with
+  immutable caching. Both are rate-limited and add no public tRPC procedures.
+- Server-agent tokens may be returned only by explicit owner create/rotate actions;
+  ordinary server and metric projections omit all credential fields.
 - 5 locales (en, ar, fr, de, es) + full RTL.
 - Conventional commits. Pinned deps from public npm only.
