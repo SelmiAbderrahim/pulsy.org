@@ -119,3 +119,7 @@ graph-clean: ## Remove the local graph database (next build will be from scratch
 
 graph-help: ## Show code-review-graph CLI help
 	uvx --python python3.11 code-review-graph --help
+
+.PHONY: audit-private-targets
+audit-private-targets: ## Read-only audit of stored destinations against strict egress policy
+	$(COMPOSE) exec server ./apps/server/node_modules/.bin/tsx apps/server/src/audit-private-targets.ts

@@ -3,7 +3,7 @@ import cors from "cors";
 import express from "express";
 import helmet from "helmet";
 import { toNodeHandler } from "better-auth/node";
-import { scheduleJob } from "node-schedule";
+import { scheduleJob, scheduledJobs } from "node-schedule";
 import { auth } from "./auth/auth";
 import { createContext } from "./trpc/trpc";
 import { appRouter } from "./trpc/router";
@@ -20,7 +20,12 @@ import {
 } from "./services/uptime";
 import { PUBLIC_WEB_URL } from "./lib/auth-config";
 import { authRateLimitFromEnv, createIpRateLimiter } from "./lib/ip-rate-limit";
-import { isEgressFilteringEnabled } from "./lib/ssrf";
+import { describeEgressPolicy } from "./lib/ssrf";
+import { parseTrustProxyHops } from "./lib/trust-proxy";
+import { OriginNotAllowedError, originDeniedHandler } from "./lib/origin-denied";
+import { createApiJsonParser, apiJsonErrorHandler } from "./api/json-body";
+import { authRateLimitResponse } from "./auth/rate-limit-response";
+import { startSchedulerLeadership, cancelAllMonitorChecks, reconcileScheduledMonitors, setSchedulingEnabled } from "./services/uptime";
 import { safeErrorSummary } from "./lib/safe-error";
 import { slaReportPdfHandler } from "./reports/sla-report-route";
 import { createV1Router } from "./api/v1/router";
@@ -69,7 +74,7 @@ const app = express();
 
 // Always deployed behind the web container's nginx (or an operator's reverse
 // proxy): trust the first proxy hop so `req.ip` reflects X-Forwarded-For.
-app.set("trust proxy", 1);
+app.set("trust proxy", parseTrustProxyHops(process.env.TRUST_PROXY_HOPS ?? "1"));
 
 // Baseline security headers for every API response. The SPA's headers (CSP
 // etc.) are set by nginx in docker/web.nginx.conf; this server only ever
@@ -91,11 +96,13 @@ app.use(
 				callback(null, true);
 				return;
 			}
-			callback(new Error("Origin not allowed by CORS"));
+			callback(new OriginNotAllowedError());
 		},
 		credentials: true,
 	}),
 );
+
+app.use(originDeniedHandler);
 
 // better-auth handler MUST be mounted BEFORE any body parser.
 // Express 5 (path-to-regexp v8): wildcards are named — "*splat", not "*".
@@ -104,12 +111,13 @@ app.use(
 app.all(
 	"/api/auth/*splat",
 	createIpRateLimiter({ limit: authRateLimitFromEnv() }),
-	toNodeHandler(auth),
+	toNodeHandler(async (request: Request) => authRateLimitResponse(request, await auth.handler(request))),
 );
 
 // Body parser for everything else (tRPC reads JSON bodies). Explicit limit —
 // no legitimate Pulsy payload approaches 1 MB.
-app.use(express.json({ limit: "1mb" }));
+app.use(createApiJsonParser());
+app.use(apiJsonErrorHandler);
 
 // Public REST API (Bearer API-key auth). Mounted AFTER `express.json()` and
 // BEFORE `/api/trpc`; its own CORS allows `Authorization` independently of the
@@ -177,26 +185,16 @@ if (migratedNotificationChannels > 0) {
 	);
 }
 
-const server = app.listen(PORT, () => {
-	console.info(`[server] Pulsy server listening on :${PORT}`);
+const LEADER_JOBS = ["uptime-daily-cleanup", "uptime-monthly-sla"] as const;
+let reconcileTimer: ReturnType<typeof setInterval> | undefined;
 
-	if (!isEgressFilteringEnabled()) {
-		console.warn(
-			"[server] BLOCK_PRIVATE_TARGETS is off: monitors, TLS probes, and " +
-				"webhooks may reach loopback/private/LAN addresses. That is the " +
-				"intended default for self-hosted internal monitoring — but set " +
-				"BLOCK_PRIVATE_TARGETS=true if untrusted users can sign up on " +
-				"this instance.",
-		);
-	}
-
-	// Schedule periodic checks for all active monitors.
-	initializeAllMonitors().catch((err) => {
-		console.error(
-			`[server] Failed to initialize monitors: ${safeErrorSummary(err)}`,
-		);
-	});
-
+async function startLeaderWork(): Promise<void> {
+  setSchedulingEnabled(true);
+  await initializeAllMonitors();
+  reconcileTimer = setInterval(() => {
+    void reconcileScheduledMonitors().catch(error => console.error(`[scheduler] Reconcile failed: ${safeErrorSummary(error)}`));
+  }, 30_000);
+  reconcileTimer.unref();
 	// Daily cleanup at 03:00 server time.
 	try {
 		scheduleJob("uptime-daily-cleanup", "0 3 * * *", () => {
@@ -218,6 +216,22 @@ const server = app.listen(PORT, () => {
 			`[server] Failed to schedule monthly SLA reports: ${safeErrorSummary(err)}`,
 		);
 	}
+}
+
+function stopLeaderWork(): void {
+  setSchedulingEnabled(false);
+  if (reconcileTimer) clearInterval(reconcileTimer);
+  reconcileTimer = undefined;
+  cancelAllMonitorChecks();
+  for (const name of LEADER_JOBS) scheduledJobs[name]?.cancel();
+}
+
+setSchedulingEnabled(false);
+const leadership = startSchedulerLeadership({ onElected: startLeaderWork, onLost: stopLeaderWork });
+
+const server = app.listen(PORT, () => {
+  console.info(`[server] Pulsy server listening on :${PORT}`);
+  for (const line of describeEgressPolicy()) console.warn(line);
 });
 
 // ---------------------------------------------------------------------------
@@ -248,6 +262,7 @@ async function gracefulShutdown(signal: string, exitCode = 0): Promise<void> {
 
 	try {
 		await new Promise<void>((resolve) => server.close(() => resolve()));
+		await leadership.stop();
 		await shutdownScheduler();
 		await closeDb();
 		console.info("[server] Shutdown complete");

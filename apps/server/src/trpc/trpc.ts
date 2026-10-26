@@ -1,3 +1,4 @@
+import { formatApiError } from "./validation-errors";
 import type { Database } from "@pulsy/db";
 import { db, user } from "@pulsy/db";
 import { eq } from "drizzle-orm";
@@ -83,8 +84,8 @@ export type AppContext = Context;
 const t = initTRPC.context<Context>().create({
 	transformer: superjson,
 	/* v8 ignore next 3 -- tRPC error formatter; exercised at the HTTP transport layer, not via createCaller */
-	errorFormatter({ shape }) {
-		return shape;
+	errorFormatter({ shape, error, ctx }) {
+		return formatApiError(shape, error, ctx?.t);
 	},
 });
 

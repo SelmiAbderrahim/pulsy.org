@@ -1,4 +1,6 @@
+import { DEFAULT_FAILURE_THRESHOLD } from "./monitor-defaults";
 import { relations, sql } from "drizzle-orm";
+import type { CapturedReliabilityObservation } from "./validation-reliability";
 import {
 	boolean,
 	index,
@@ -12,6 +14,9 @@ import {
 } from "drizzle-orm/pg-core";
 import { nanoid } from "nanoid";
 import { user } from "./auth";
+import type { HttpAssertion } from "./validation-http";
+import type { LatencyPolicy } from "./validation-latency";
+import type { NetworkConfiguration } from "./validation-network";
 
 // ---------------------------------------------------------------------------
 // Enums
@@ -54,6 +59,7 @@ export const uptimeNotificationChannelTypeEnum = pgEnum(
 
 export const uptimeNotificationEventEnum = pgEnum("uptimeNotificationEvent", [
 	"down",
+	"degraded",
 	"recovery",
 	"tls_expiry",
 ]);
@@ -78,15 +84,31 @@ export const uptimeMonitor = pgTable(
 			.primaryKey()
 			.$defaultFn(() => nanoid()),
 		name: text("name").notNull(),
+		externalKey: text("externalKey"),
+		monitorType: text("monitorType").$type<"http" | "heartbeat" | "dns" | "tcp" | "server">().notNull().default("http"),
+    networkConfig: jsonb("networkConfig").$type<NetworkConfiguration>(),
 		url: text("url").notNull(),
 		method: uptimeMonitorMethodEnum("method").notNull().default("GET"),
 		expectedStatus: integer("expectedStatus").notNull().default(200),
+    expectedStatuses: text("expectedStatuses"),
+    tlsMonitoringEnabled: boolean("tlsMonitoringEnabled").notNull().default(true),
+		// Advanced requests are encrypted as one payload; never project this field.
+		requestCipher: text("requestCipher"),
+		redirectPolicy: text("redirectPolicy").notNull().default("follow"),
+		httpAssertions: jsonb("httpAssertions").$type<HttpAssertion[]>().notNull().default([]),
+    latencyPolicy: jsonb("latencyPolicy").$type<LatencyPolicy>(),
+    consecutiveSlow: integer("consecutiveSlow").notNull().default(0),
+    consecutiveHealthy: integer("consecutiveHealthy").notNull().default(0),
+    lastOperationalAlertAt: text("lastOperationalAlertAt"),
+    lastOperationalAlertId: text("lastOperationalAlertId"),
 		timeout: integer("timeout").notNull().default(10000), // ms
 		interval: integer("interval").notNull().default(300), // seconds: 60/300/600/1800/3600
 		active: boolean("active").notNull().default(true),
 
 		// Current state
 		status: uptimeMonitorStatusEnum("status").notNull().default("pending"),
+		// Durable notification identity; not a FK to retention-managed history.
+		notificationOutageId: text("notificationOutageId"),
 		httpStatus: integer("httpStatus"),
 		responseTime: integer("responseTime"), // ms
 		lastCheckedAt: text("lastCheckedAt"),
@@ -98,7 +120,7 @@ export const uptimeMonitor = pgTable(
 
 		// Failure tracking
 		consecutiveFailures: integer("consecutiveFailures").notNull().default(0),
-		failureThreshold: integer("failureThreshold").notNull().default(3), // 1-10
+		failureThreshold: integer("failureThreshold").notNull().default(DEFAULT_FAILURE_THRESHOLD), // 1-10
 
 		// Computed stats
 		uptimePercentage: real("uptimePercentage"), // 30-day computed
@@ -123,6 +145,7 @@ export const uptimeMonitor = pgTable(
 	(table) => [
 		// Every list/detail/dashboard query filters by the owning user.
 		index("uptime_monitor_user_idx").on(table.userId),
+		uniqueIndex("uptime_monitor_owner_external_key_idx").on(table.userId, table.externalKey),
 		// initializeAllMonitors() loads all active monitors on startup.
 		index("uptime_monitor_active_idx").on(table.active),
 	],
@@ -164,6 +187,15 @@ export const uptimeStatusChange = pgTable(
 /**
  * Individual check log — granular history for charts
  */
+/** Exact sample counts for complete UTC days; maintained transactionally by
+ * check-log triggers, including imports, retention and deletions. */
+export const uptimeCheckDay = pgTable("uptime_check_day", {
+  monitorId: text("monitorId").notNull().references(() => uptimeMonitor.uptimeMonitorId, { onDelete: "cascade" }),
+  day: text("day").notNull(),
+  status: text("status").notNull(),
+  checks: integer("checks").notNull(),
+}, table => ({ key: uniqueIndex("uptime_check_day_key").on(table.monitorId, table.day, table.status) }));
+
 export const uptimeCheckLog = pgTable(
 	"uptime_check_log",
 	{
@@ -180,6 +212,9 @@ export const uptimeCheckLog = pgTable(
 		responseTime: integer("responseTime"),
 		status: uptimeCheckStatusEnum("status").notNull(),
 		errorMessage: text("errorMessage"),
+		assertionOutcomes: jsonb("assertionOutcomes").$type<Array<{ index: number; passed: boolean; reason: string }>>(),
+		observation: jsonb("observation").$type<CapturedReliabilityObservation>(),
+		observationEndedAt: text("observationEndedAt"),
 		createdAt: text("createdAt")
 			.notNull()
 			.$defaultFn(() => new Date().toISOString()),
@@ -189,6 +224,8 @@ export const uptimeCheckLog = pgTable(
 			table.uptimeMonitorId,
 			table.createdAt,
 		),
+		// Covers rolling status counts without visiting diagnostic/history rows.
+		index("uptime_check_log_monitor_created_status_idx").on(table.uptimeMonitorId, table.createdAt, table.status),
 		// Retention cleanup deletes by createdAt across all monitors.
 		index("uptime_check_log_created_idx").on(table.createdAt),
 	],
@@ -266,9 +303,12 @@ export const uptimeNotificationChannel = pgTable(
 		webhookUrl: text("webhookUrl"),
 		webhookHeaders: jsonb("webhookHeaders").$type<Record<string, string>>(),
 		secretVersion: integer("secretVersion").notNull().default(0),
+		// Encrypted with the OSS per-field AES-GCM scheme; never expose ciphertext.
+		signingSecretCipher: text("signingSecretCipher"),
 
 		// What events to notify
 		notifyOnDown: boolean("notifyOnDown").notNull().default(true),
+		notifyOnDegraded: boolean("notifyOnDegraded").notNull().default(false),
 		notifyOnRecovery: boolean("notifyOnRecovery").notNull().default(true),
 		notifyOnTlsExpiry: boolean("notifyOnTlsExpiry").notNull().default(false),
 		tlsExpiryThresholdDays: integer("tlsExpiryThresholdDays")
@@ -367,6 +407,12 @@ export const uptimeIncident = pgTable(
 		resolvedAt: text("resolvedAt"),
 		durationSeconds: integer("durationSeconds"),
 		cause: text("cause"),
+		severity: text("severity").$type<"critical" | "warning" | "informational">(),
+		// Heartbeat timeline: when the missed ping was due. `startedAt` is the grace
+		// end (the instant the monitor is declared Down); null for probe incidents.
+		expectedAt: text("expectedAt"),
+		// First successful outage alert delivery for this incident.
+		notifiedAt: text("notifiedAt"),
 	},
 	(table) => [
 		// getOngoingIncident / incident lists filter by monitor + status.
@@ -376,6 +422,11 @@ export const uptimeIncident = pgTable(
 		),
 		// Retention cleanup filters resolved incidents by startedAt.
 		index("uptime_incident_started_idx").on(table.startedAt),
+		// At most one ongoing incident per monitor, enforced by the database so a
+		// writer that forgets the monitor row lock still cannot open a duplicate.
+		uniqueIndex("uptime_incident_one_ongoing_idx")
+			.on(table.uptimeMonitorId)
+			.where(sql`${table.status} = 'ongoing'`),
 	],
 );
 
@@ -397,6 +448,9 @@ export const uptimeShareLink = pgTable(
 		// silently drop out at resolve time.
 		monitorIds: text("monitorIds").array().notNull(),
 		expiresAt: text("expiresAt").notNull(),
+		// Owner opt-in: the public resolve returns the sharer's display name
+		// only when true; otherwise recipients see a generic "A Pulsy user".
+		showSharerName: boolean("showSharerName").notNull().default(false),
 
 		// Ownership (single-user: scoped to the owning user)
 		userId: text("userId")
@@ -480,6 +534,7 @@ export const uptimeStatusPage = pgTable(
 		logoUrl: text("logoUrl"),
 		// Only published pages resolve publicly; unpublished ⇒ NOT_FOUND.
 		isPublished: boolean("isPublished").notNull().default(false),
+		historyEnabled: boolean("historyEnabled").notNull().default(false),
 		// Optional custom domain (one per page). Unique platform-wide when set.
 		customDomain: text("customDomain"),
 		domainVerified: boolean("domainVerified").notNull().default(false),
@@ -506,10 +561,12 @@ export const uptimeStatusPage = pgTable(
 			table.userId,
 			table.slug,
 		),
-		// Public resolve by Host; a custom domain belongs to one page platform-wide.
+		// Public resolve by Host. A custom domain is served by one page platform-wide,
+		// but only a DNS-verified claim is exclusive: an unverified claim proves
+		// nothing, so it must not be able to block the real owner of the domain.
 		uniqueIndex("uptime_status_page_custom_domain_idx")
 			.on(table.customDomain)
-			.where(sql`${table.customDomain} IS NOT NULL`),
+			.where(sql`${table.customDomain} IS NOT NULL AND ${table.domainVerified} = true`),
 		// Management UI lists a user's own pages.
 		index("uptime_status_page_user_idx").on(table.userId),
 	],
@@ -538,6 +595,9 @@ export const uptimeStatusPageMonitor = pgTable(
 				onDelete: "cascade",
 			}),
 		sortOrder: integer("sortOrder").notNull().default(0),
+		publicName: text("publicName"),
+		publicDescription: text("publicDescription"),
+		publicGroup: text("publicGroup"),
 	},
 	(table) => [
 		// A monitor appears at most once per page; also the page-membership lookup.

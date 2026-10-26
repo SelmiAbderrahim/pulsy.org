@@ -45,17 +45,24 @@ const CHECK_CONCURRENCY = Math.max(
 
 const inFlightChecks = new Set<string>();
 const runningChecks = new Set<Promise<void>>();
+const queuedScheduledChecks = new Set<string>();
 
 let availableSlots = CHECK_CONCURRENCY;
 const slotWaiters: Array<() => void> = [];
 
-function acquireSlot(): Promise<void> {
+function acquireSlot(waitMs?: number): Promise<void> {
 	if (availableSlots > 0) {
 		availableSlots -= 1;
 		return Promise.resolve();
 	}
-	return new Promise<void>((resolve) => {
-		slotWaiters.push(resolve);
+	// Bound waiting manual probes; increase only when measured mixed
+	// account capacity supports a higher queue without missing scheduled work.
+	if (waitMs !== undefined && slotWaiters.length >= 200) return Promise.reject(Object.assign(new Error("Monitor check capacity is temporarily unavailable"), { code: "EPROBEBUSY" }));
+	return new Promise<void>((resolve, reject) => {
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const ready = () => { if (timer) clearTimeout(timer); resolve(); };
+		slotWaiters.push(ready);
+		if (waitMs !== undefined) timer = setTimeout(() => { const index = slotWaiters.indexOf(ready); if (index >= 0) slotWaiters.splice(index, 1); reject(Object.assign(new Error("Monitor check capacity is temporarily unavailable"), { code: "EPROBEBUSY" })); }, waitMs);
 	});
 }
 
@@ -69,21 +76,30 @@ function releaseSlot(): void {
 	}
 }
 
+/** Manual DNS/TCP probes share scheduled capacity; queue expiry records no sample. */
+export async function withMonitorCheckSlot<T>(work: () => Promise<T>, waitMs: number): Promise<T> {
+  await acquireSlot(waitMs);
+  try { return await work(); } finally { releaseSlot(); }
+}
+
 /**
  * Wrap a single scheduled check run: acquire a global concurrency slot, track
  * the promise for graceful drain, and always release the slot afterwards.
  */
 function runScheduledCheck(monitorId: string): void {
+	if (queuedScheduledChecks.has(monitorId) || !schedulingEnabled) return;
+	queuedScheduledChecks.add(monitorId);
 	const run = (async () => {
 		await acquireSlot();
 		try {
-			await executeCheck(monitorId);
+			if (schedulingEnabled) await executeCheck(monitorId);
 		} catch (err) {
 			console.error(
 				`[uptime] Failed to execute check for monitor ${monitorId}: ${safeErrorSummary(err)}`,
 			);
 		} finally {
 			releaseSlot();
+			queuedScheduledChecks.delete(monitorId);
 		}
 	})();
 
@@ -108,6 +124,10 @@ function intervalToCron(intervalSeconds: number): string {
 	return `0 */${hours} * * *`;
 }
 
+const scheduledIntervals = new Map<string, number>();
+let schedulingEnabled = true;
+export const setSchedulingEnabled = (enabled: boolean): void => { schedulingEnabled = enabled; };
+
 export const scheduleMonitorCheck = (monitor: UptimeMonitor): void => {
 	const jobName = `uptime-${monitor.uptimeMonitorId}`;
 
@@ -116,11 +136,15 @@ export const scheduleMonitorCheck = (monitor: UptimeMonitor): void => {
 		existingJob.cancel();
 	}
 
+	scheduledIntervals.delete(monitor.uptimeMonitorId);
+	if (!schedulingEnabled || monitor.monitorType === "heartbeat" || monitor.monitorType === "server") return;
+
 	const cron = intervalToCron(monitor.interval);
 
 	scheduleJob(jobName, cron, () => {
 		runScheduledCheck(monitor.uptimeMonitorId);
 	});
+	scheduledIntervals.set(monitor.uptimeMonitorId, monitor.interval);
 };
 
 export const cancelMonitorCheck = (monitorId: string): void => {
@@ -129,7 +153,40 @@ export const cancelMonitorCheck = (monitorId: string): void => {
 	if (existingJob) {
 		existingJob.cancel();
 	}
+	scheduledIntervals.delete(monitorId);
 	lastTlsCheckMap.delete(monitorId);
+};
+
+/** Cancel every per-monitor check job (leadership lost). In-flight checks are left to finish. */
+export const cancelAllMonitorChecks = (): void => {
+	for (const monitorId of [...scheduledIntervals.keys()]) cancelMonitorCheck(monitorId);
+};
+
+/**
+ * Leader only: make the in-memory jobs match the database. A monitor created, edited
+ * or paused through another replica never calls this process's schedule/cancel, so the
+ * leader re-reads the active set periodically. Cheap: one indexed query of active rows.
+ */
+export const reconcileScheduledMonitors = async (): Promise<{ scheduled: number; cancelled: number }> => {
+	if (!schedulingEnabled) return { scheduled: 0, cancelled: 0 };
+	const active = await db.query.uptimeMonitor.findMany({ where: eq(uptimeMonitor.active, true) });
+	const wanted = new Map(active.filter((monitor) => monitor.monitorType !== "heartbeat" && monitor.monitorType !== "server").map((monitor) => [monitor.uptimeMonitorId, monitor]));
+	let scheduled = 0;
+	let cancelled = 0;
+	for (const [id, monitor] of wanted) {
+		if (scheduledIntervals.get(id) !== monitor.interval) {
+			// A monitor created through another replica has never been checked: check it now.
+			scheduleMonitorCheck(monitor);
+			scheduled++;
+		}
+	}
+	for (const id of [...scheduledIntervals.keys()]) {
+		if (!wanted.has(id)) {
+			cancelMonitorCheck(id);
+			cancelled++;
+		}
+	}
+	return { scheduled, cancelled };
 };
 
 export const rescheduleMonitorCheck = (monitor: UptimeMonitor): void => {
@@ -140,12 +197,7 @@ export const rescheduleMonitorCheck = (monitor: UptimeMonitor): void => {
 /**
  * Schedule periodic checks for every active monitor on process start.
  *
- * SINGLE-INSTANCE ASSUMPTION: this scheduler is in-process and has no
- * cross-process coordination. Running more than one server replica would make
- * EVERY monitor check fire once per replica — duplicate check logs, duplicate
- * incidents, and duplicate notifications. Before scaling to multiple replicas,
- * gate this with a PostgreSQL advisory lock (`pg_advisory_lock`) so only the
- * elected leader runs the scheduler.
+ * Only the elected PostgreSQL scheduler leader initializes these jobs.
  */
 export const initializeAllMonitors = async (): Promise<void> => {
 	const monitors = await db.query.uptimeMonitor.findMany({
@@ -210,7 +262,7 @@ const runCheck = async (monitorId: string): Promise<void> => {
 		where: eq(uptimeMonitor.uptimeMonitorId, monitorId),
 	});
 
-	if (!monitor || !monitor.active) {
+	if (!monitor || !monitor.active || monitor.monitorType === "heartbeat" || monitor.monitorType === "server") {
 		return;
 	}
 

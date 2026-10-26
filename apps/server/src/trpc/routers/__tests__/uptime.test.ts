@@ -948,8 +948,13 @@ describe("uptimeMonitor.incident.search", () => {
 
 	it("respects the result limit", async () => {
 		const m = await createTestMonitor(owner.id, { name: "Prod" });
+		await seedIncident(m.uptimeMonitorId, {
+			status: "resolved",
+			resolvedAt: new Date().toISOString(),
+			durationSeconds: 0,
+		});
 		await seedIncident(m.uptimeMonitorId);
-		await seedIncident(m.uptimeMonitorId);
+		expect(await ownerCaller().uptimeMonitor.incident.search({ query: "prod" })).toHaveLength(2);
 		const results = await ownerCaller().uptimeMonitor.incident.search({
 			query: "prod",
 			limit: 1,

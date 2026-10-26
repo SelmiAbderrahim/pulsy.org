@@ -1,3 +1,4 @@
+import { authRateLimitPolicy } from "./rate-limit-response";
 import { db, account, session, user, verification } from "@pulsy/db";
 import { eq } from "drizzle-orm";
 import { betterAuth } from "better-auth";
@@ -78,6 +79,7 @@ export const auth = betterAuth({
 	// better-auth applies stricter built-in rules to sensitive paths (sign-in,
 	// sign-up, forget-password) within this window.
 	rateLimit: {
+		customRules: { "*": authRateLimitPolicy },
 		enabled: true,
 		window: 60,
 		max: 60,

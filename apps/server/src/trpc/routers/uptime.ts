@@ -946,7 +946,7 @@ const emailProviderRouter = router({
 	create: protectedProcedure
 		.input(apiCreateUptimeEmailProvider)
 		.mutation(async ({ input, ctx }) => {
-			const provider = await createEmailProvider(input, ctx.user.id);
+			const provider = await createEmailProvider(input, ctx.user.id, ctx.t);
 			return findEmailProviderById(
 				provider.emailProviderId,
 				ctx.user.id,
@@ -959,6 +959,7 @@ const emailProviderRouter = router({
 			const provider = await updateEmailProvider(
 				input,
 				ctx.user.id,
+				ctx.t,
 			);
 			return findEmailProviderById(
 				provider.emailProviderId,
@@ -1221,6 +1222,20 @@ const channelRouter = router({
 			const monitor: typeof uptimeMonitor.$inferSelect =
 				channel.uptimeMonitorId === null
 					? {
+							externalKey: null,
+							monitorType: "http",
+							networkConfig: null,
+							expectedStatuses: null,
+							tlsMonitoringEnabled: true,
+							requestCipher: null,
+							redirectPolicy: "follow",
+							httpAssertions: [],
+							latencyPolicy: null,
+							consecutiveSlow: 0,
+							consecutiveHealthy: 0,
+							lastOperationalAlertAt: null,
+							lastOperationalAlertId: null,
+							notificationOutageId: null,
 							uptimeMonitorId: `test-default-${channel.channelId}`,
 							name: "Example monitor",
 							url: "https://example.com",

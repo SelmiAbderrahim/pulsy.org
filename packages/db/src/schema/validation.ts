@@ -1,4 +1,15 @@
+import { isFutureUtcExpiry } from "./api-key-expiry";
+import { apiExpectedStatuses } from "./http-status-rule";
+import { normalizeMonitorUrl } from "./monitor-url";
+import { DEFAULT_FAILURE_THRESHOLD, MAX_MONITOR_TIMEOUT_MS } from "./monitor-defaults";
 import { z } from "zod";
+import { timezoneSchema } from "./timezone";
+import { statusPageSlugSchema } from "./status-page-slug";
+import { apiHttpAssertions, apiHttpRequest } from "./validation-http";
+import { apiLatencyPolicy } from "./validation-latency";
+const requestUrl = z.string().transform(value => normalizeMonitorUrl(value) ?? value).pipe(z.string().max(2048).url()).refine(value => { try { const url = new URL(value); return ["http:", "https:"].includes(url.protocol) && !url.username && !url.password; } catch { return false; } }, "errors.httpDestination");
+const advancedHttpShape = { httpAssertions: apiHttpAssertions.optional(), redirectPolicy: z.enum(["follow", "manual", "error"]).optional(), requestConfig: apiHttpRequest.nullable().optional() };
+
 
 // ---------------------------------------------------------------------------
 // Zod validation schemas for the uptime-monitor API surface.
@@ -9,11 +20,16 @@ import { z } from "zod";
 // ---------------------------------------------------------------------------
 
 export const apiCreateUptimeMonitor = z.object({
-	name: z.string().min(1).max(255),
-	url: z.string().url(),
+	channelIds: z.array(z.string().min(1).max(64)).max(20).transform(ids => [...new Set(ids)]).optional(),
+	...advancedHttpShape,
+	latencyPolicy: apiLatencyPolicy.nullable().optional(),
+	name: z.string().trim().max(255).default(""),
+	url: requestUrl,
 	method: z.enum(["GET", "HEAD", "POST"]).default("GET"),
 	expectedStatus: z.number().int().min(100).max(599).default(200),
-	timeout: z.number().int().min(1000).max(60000).default(10000),
+	expectedStatuses: apiExpectedStatuses.nullable().optional(),
+	tlsMonitoringEnabled: z.boolean().optional(),
+	timeout: z.number().int().min(1000).max(MAX_MONITOR_TIMEOUT_MS).default(10000),
 	interval: z
 		.number()
 		.int()
@@ -21,7 +37,7 @@ export const apiCreateUptimeMonitor = z.object({
 			message: "Interval must be 30, 60, 300, 600, 1800, or 3600 seconds",
 		})
 		.default(300),
-	failureThreshold: z.number().int().min(1).max(10).default(3),
+	failureThreshold: z.number().int().min(1).max(10).default(DEFAULT_FAILURE_THRESHOLD),
 	active: z.boolean().default(true),
 	tags: z.array(z.string().min(1).max(50)).max(10).default([]),
 });
@@ -31,12 +47,16 @@ export const apiCreateUptimeMonitorsBulk = z.object({
 });
 
 export const apiUpdateUptimeMonitor = z.object({
+	...advancedHttpShape,
+	latencyPolicy: apiLatencyPolicy.nullable().optional(),
 	uptimeMonitorId: z.string(),
-	name: z.string().min(1).max(255).optional(),
-	url: z.string().url().optional(),
+	name: z.string().trim().min(1).max(255).optional(),
+	url: requestUrl.optional(),
 	method: z.enum(["GET", "HEAD", "POST"]).optional(),
 	expectedStatus: z.number().int().min(100).max(599).optional(),
-	timeout: z.number().int().min(1000).max(60000).optional(),
+	expectedStatuses: apiExpectedStatuses.nullable().optional(),
+	tlsMonitoringEnabled: z.boolean().optional(),
+	timeout: z.number().int().min(1000).max(MAX_MONITOR_TIMEOUT_MS).optional(),
 	interval: z
 		.number()
 		.int()
@@ -56,9 +76,12 @@ export const apiUpdateUptimeMonitor = z.object({
 // constraints in `apiUpdateUptimeMonitor`; excludes per-monitor identity
 // (name/url), the active flag (handled by toggleActive), and status-page fields.
 const apiUptimeMonitorBulkPatch = z.object({
+	latencyPolicy: apiLatencyPolicy.nullable().optional(),
 	method: z.enum(["GET", "HEAD", "POST"]).optional(),
 	expectedStatus: z.number().int().min(100).max(599).optional(),
-	timeout: z.number().int().min(1000).max(60000).optional(),
+	expectedStatuses: apiExpectedStatuses.nullable().optional(),
+	tlsMonitoringEnabled: z.boolean().optional(),
+	timeout: z.number().int().min(1000).max(MAX_MONITOR_TIMEOUT_MS).optional(),
 	interval: z
 		.number()
 		.int()
@@ -78,15 +101,15 @@ export const apiUpdateUptimeMonitorsBulk = z.object({
 });
 
 const apiEmailProviderCredentialShape = {
-	name: z.string().min(1).max(255),
+	name: z.string().trim().min(1).max(255),
 	providerType: z.enum(["resend", "sendgrid", "smtp"]),
 	apiKey: z.string().min(1).optional(),
 	smtpHost: z.string().min(1).optional(),
 	smtpPort: z.number().int().min(1).max(65535).optional(),
-	smtpUsername: z.string().min(1).optional(),
+	smtpUsername: z.string().trim().min(1).optional(),
 	smtpPassword: z.string().min(1).optional(),
 	smtpSecure: z.boolean().default(true),
-	fromAddress: z.string().email(),
+	fromAddress: z.string().trim().email(),
 } satisfies z.ZodRawShape;
 
 function requireField(
@@ -126,26 +149,38 @@ export const apiCreateUptimeEmailProvider = z
 
 export const apiUpdateUptimeEmailProvider = z.object({
 	emailProviderId: z.string(),
-	name: z.string().min(1).max(255).optional(),
+	name: z.string().trim().min(1).max(255).optional(),
 	providerType: z.enum(["resend", "sendgrid", "smtp"]).optional(),
 	apiKey: z.string().min(1).optional(),
 	smtpHost: z.string().min(1).optional(),
 	smtpPort: z.number().int().min(1).max(65535).optional(),
-	smtpUsername: z.string().min(1).optional(),
+	smtpUsername: z.string().trim().min(1).optional(),
 	smtpPassword: z.string().min(1).optional(),
 	smtpSecure: z.boolean().optional(),
-	fromAddress: z.string().email().optional(),
+	fromAddress: z.string().trim().email().optional(),
 });
 
-function isTelegramTarget(value: string): boolean {
-	if (value.startsWith("https://api.telegram.org/bot")) {
-		/* v8 ignore next -- a value with this prefix always parses as a valid URL */
-		return z.string().url().safeParse(value).success;
-	}
-
-	const parts = value.split(":");
-	return parts.length >= 3 && parts.every((part) => part.length > 0);
+function isTelegramTarget(value: string, headers?: Record<string, string> | null): boolean {
+  let target = value;
+  if (value.startsWith("https://")) {
+    try {
+      const url = new URL(value);
+      const token = url.hostname === "api.telegram.org" && !url.port && !url.username && !url.password ? url.pathname.match(/^\/bot([^/]+)(?:\/sendMessage)?$/)?.[1] : undefined;
+      target = `${token ?? ""}:${headers?.chat_id ?? url.searchParams.get("chat_id") ?? ""}`;
+    } catch { return false; }
+  }
+  return /^\d+:[A-Za-z0-9_-]+:(?:-?\d+|@[A-Za-z0-9_]+)$/.test(target);
 }
+
+// Custom webhook request headers: bounded count/size, RFC 7230 token names, no control
+// characters, and none of the headers that would let a channel rewrite framing or routing.
+const FORBIDDEN_WEBHOOK_HEADERS = new Set(["host", "content-length", "connection", "transfer-encoding", "upgrade", "proxy-authorization", "proxy-connection", "te", "trailer"]);
+const webhookHeadersSchema = z
+	.record(
+		z.string().min(1).max(128).regex(/^[!#$%&'*+.^_`|~0-9A-Za-z-]+$/, "Invalid header name").refine((name) => !FORBIDDEN_WEBHOOK_HEADERS.has(name.toLowerCase()), "Header not allowed"),
+		z.string().max(4096).refine((value) => !/[\r\n\0]/.test(value), "Invalid header value"),
+	)
+	.refine((headers) => Object.keys(headers).length <= 20, "At most 20 headers");
 
 function validateChannelTarget(
 	value: {
@@ -153,6 +188,7 @@ function validateChannelTarget(
 		emailProviderId?: string | null;
 		recipientAddresses?: string[];
 		webhookUrl?: string | null;
+		webhookHeaders?: Record<string, string> | null;
 	},
 	ctx: z.RefinementCtx,
 ): void {
@@ -172,20 +208,20 @@ function validateChannelTarget(
 				requireField(ctx, "webhookUrl", "Webhook URL is required");
 				return;
 			}
-			if (!z.string().url().safeParse(value.webhookUrl).success) {
-				requireField(ctx, "webhookUrl", "Webhook URL must be a valid URL");
+			if (!z.string().url().refine(url => /^https?:\/\//i.test(url)).safeParse(value.webhookUrl).success) {
+				requireField(ctx, "webhookUrl", "Webhook URL must be a valid URL (http or https)");
 			}
 			return;
 		case "telegram":
 			if (!value.webhookUrl) {
-				requireField(ctx, "webhookUrl", "Telegram target is required");
+				requireField(ctx, "webhookUrl", "validation.telegramTarget");
 				return;
 			}
-			if (!isTelegramTarget(value.webhookUrl)) {
+			if (!isTelegramTarget(value.webhookUrl, value.webhookHeaders)) {
 				requireField(
 					ctx,
 					"webhookUrl",
-					"Telegram target must be a Telegram API URL or BOT_TOKEN:CHAT_ID",
+					"validation.telegramTarget",
 				);
 			}
 			return;
@@ -200,8 +236,9 @@ const apiNotificationChannelConfigShape = {
 	emailProviderId: z.string().optional(),
 	recipientAddresses: z.array(z.string().email()).optional(),
 	webhookUrl: z.string().min(1).optional(),
-	webhookHeaders: z.record(z.string(), z.string()).nullable().optional(),
+	webhookHeaders: webhookHeadersSchema.nullable().optional(),
 	notifyOnDown: z.boolean().default(true),
+	notifyOnDegraded: z.boolean().optional(),
 	notifyOnRecovery: z.boolean().default(true),
 	notifyOnTlsExpiry: z.boolean().default(false),
 	tlsExpiryThresholdDays: z.number().int().min(1).max(90).default(14),
@@ -227,8 +264,9 @@ export const apiUpdateUptimeNotificationChannel = z.object({
 	emailProviderId: z.string().nullable().optional(),
 	recipientAddresses: z.array(z.string().email()).optional(),
 	webhookUrl: z.string().min(1).nullable().optional(),
-	webhookHeaders: z.record(z.string(), z.string()).nullable().optional(),
+	webhookHeaders: webhookHeadersSchema.nullable().optional(),
 	notifyOnDown: z.boolean().optional(),
+	notifyOnDegraded: z.boolean().optional(),
 	notifyOnRecovery: z.boolean().optional(),
 	notifyOnTlsExpiry: z.boolean().optional(),
 	tlsExpiryThresholdDays: z.number().int().min(1).max(90).optional(),
@@ -241,6 +279,7 @@ export const apiUpdateUptimeNotificationChannel = z.object({
 const shareTokenSchema = z.string().min(16).max(128);
 
 export const apiCreateUptimeShareLink = z.object({
+	showSharerName: z.boolean().default(false),
 	uptimeMonitorIds: z.array(z.string().min(1)).min(1).max(50),
 	expiresInDays: z
 		.union([z.literal(7), z.literal(30), z.literal(90)])
@@ -266,7 +305,9 @@ export const apiRevokeUptimeShareLink = z.object({
 
 export const apiCreateApiKey = z.object({
 	name: z.string().trim().min(1).max(100),
-});
+	scope: z.enum(["read", "full"]).default("read"),
+	expiresAt: z.string().datetime().refine(value => isFutureUtcExpiry(value), "Expiry date must be after today (UTC)").nullable().optional(),
+}).strict();
 
 export const apiRevokeApiKey = z.object({
 	apiKeyId: z.string().min(1),
@@ -282,13 +323,14 @@ export const apiSearchUptimeIncidents = z.object({
 });
 
 // ---------------------------------------------------------------------------
-// SLA reports (tier-gated monthly PDF / uptime reports).
+// SLA reports (monthly PDF / uptime reports).
 // ---------------------------------------------------------------------------
 
 // On-demand report window (days). Mirrors the legacy inline schema.
 export const apiSlaReport = z.object({
 	uptimeMonitorId: z.string().min(1),
 	days: z.number().int().min(1).max(366).default(30),
+	timezone: timezoneSchema.optional(),
 });
 
 // Create or update a monthly-email subscription. `uptimeMonitorId` null/omitted
@@ -313,17 +355,6 @@ export const apiSendSlaReportNow = z.object({
 // ---------------------------------------------------------------------------
 // Status pages (named public pages + optional verified custom domain).
 // ---------------------------------------------------------------------------
-
-// Public path segment: lowercase, hyphen-joined alphanumeric labels, ≤63 chars.
-const statusPageSlugSchema = z
-	.string()
-	.trim()
-	.toLowerCase()
-	.min(1)
-	.max(63)
-	.regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
-		message: "Slug may contain only lowercase letters, numbers, and hyphens",
-	});
 
 // A custom domain hostname: lowercased, no scheme/path/port, ≤253 chars, at
 // least two labels, punycode-safe (`xn--…`), never an IP address or wildcard.
@@ -356,6 +387,8 @@ const statusPageLogoUrlSchema = z
 	});
 
 export const apiCreateUptimeStatusPage = z.object({
+	confirmEmptyPublication: z.boolean().optional(),
+	uptimeMonitorIds: z.array(z.string().min(1)).max(100).optional(),
 	slug: statusPageSlugSchema,
 	title: z.string().trim().min(1).max(255),
 	description: z.string().max(1000).nullable().optional(),
@@ -365,12 +398,14 @@ export const apiCreateUptimeStatusPage = z.object({
 
 export const apiUpdateUptimeStatusPage = z.object({
 	statusPageId: z.string().min(1),
+	confirmEmptyPublication: z.boolean().optional(),
+	expected: z.object({ title: z.string().max(255), slug: z.string().max(63), description: z.string().max(1000).nullable(), isPublished: z.boolean() }).strict().optional(),
 	slug: statusPageSlugSchema.optional(),
 	title: z.string().trim().min(1).max(255).optional(),
 	description: z.string().max(1000).nullable().optional(),
 	logoUrl: statusPageLogoUrlSchema.nullable().optional(),
 	isPublished: z.boolean().optional(),
-});
+}).strict();
 
 export const apiGetUptimeStatusPage = z.object({
 	statusPageId: z.string().min(1),
@@ -383,8 +418,9 @@ export const apiDeleteUptimeStatusPage = z.object({
 // Replace a page's monitor set wholesale. Empty array clears the page.
 export const apiSetStatusPageMonitors = z.object({
 	statusPageId: z.string().min(1),
+	revision: z.string().length(64).optional(),
 	uptimeMonitorIds: z.array(z.string().min(1)).max(100),
-});
+}).strict();
 
 export const apiAttachCustomDomain = z.object({
 	statusPageId: z.string().min(1),

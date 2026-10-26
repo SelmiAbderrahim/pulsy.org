@@ -1022,3 +1022,33 @@ describe("testEmailProvider", () => {
 		}
 	});
 });
+
+describe("provider failure privacy and cleanup", () => {
+  it.each([[450, true], [550, false]])("preserves SMTP %i temporary/permanent retry policy", async (responseCode, retryable) => {
+    sendMail.mockRejectedValueOnce(Object.assign(new Error("private smtp response"), { code: "EENVELOPE", responseCode }));
+    const error = await sendViaProvider({ providerType: "smtp", apiKey: null, smtpHost: "smtp.fixtures.invalid", smtpPort: 2525, smtpUsername: "fixture", smtpPassword: "smtp-password", smtpSecure: false, fromAddress: "sender@fixtures.invalid" }, "recipient@fixtures.invalid", "Fixture", "<p>fixture</p>").catch(value => value);
+    const { isTransientSendError } = await import("../../../lib/retry"); expect(isTransientSendError(error)).toBe(retryable);
+    expect(String(error)).not.toContain("private smtp response"); expect(close).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["resend", "sendgrid"])("does not retain a %s error response that echoes credentials or recipients", async providerType => {
+    const fx = mockFetch(() => new Response("fixture-secret recipient@fixtures.invalid", { status: 401 }));
+    try {
+      const error = await sendViaProvider({ providerType, apiKey: "fixture-secret", smtpHost: null, smtpPort: null, smtpUsername: null, smtpPassword: null, smtpSecure: null, fromAddress: "sender@fixtures.invalid" }, "recipient@fixtures.invalid", "Fixture", "<p>fixture</p>").catch(value => value);
+      expect(error).toBeInstanceOf(Error); expect(String(error)).not.toContain("fixture-secret"); expect(String(error)).not.toContain("recipient@"); expect(String(error)).toContain("401");
+    } finally { fx.restore(); }
+  });
+  it("closes SMTP transport on a failed send and returns a safe error preserving retry classification", async () => {
+    const error = Object.assign(new Error("smtp-password recipient@fixtures.invalid"), { code: "ECONNREFUSED" }); sendMail.mockRejectedValueOnce(error);
+    const result = await sendViaProvider({ providerType: "smtp", apiKey: null, smtpHost: "smtp.fixtures.invalid", smtpPort: 2525, smtpUsername: "fixture", smtpPassword: "smtp-password", smtpSecure: false, fromAddress: "sender@fixtures.invalid" }, "recipient@fixtures.invalid", "Fixture", "<p>fixture</p>").catch(value => value);
+    expect(close).toHaveBeenCalledTimes(1); expect(String(result)).not.toContain("smtp-password"); expect(String(result)).not.toContain("recipient@"); expect(result).toMatchObject({ code: "ECONNREFUSED" });
+  });
+});
+
+it("fully masks short provider credentials", async () => {
+  for (const [secret, masked] of [["abcde", "••••"], ["abcdefghijk", "••••"], ["abcdefghijkl", "ab••••kl"]] as const) {
+    const owner = await createTestUser();
+    const created = await createEmailProvider({ name: "Mask", providerType: "resend", apiKey: secret, fromAddress: "a@pulsy.test", smtpSecure: true }, owner.id);
+    expect((await findEmailProviderById(created.emailProviderId, owner.id)).apiKeyMasked).toBe(masked);
+  }
+});

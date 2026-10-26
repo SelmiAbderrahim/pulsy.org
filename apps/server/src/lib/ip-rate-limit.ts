@@ -1,3 +1,4 @@
+import { clientRateLimitKey } from "./client-ip";
 import type { NextFunction, Request, Response } from "express";
 
 // ---------------------------------------------------------------------------
@@ -5,7 +6,7 @@ import type { NextFunction, Request, Response } from "express";
 // including the public status/share procedures).
 //
 // In-memory and single-replica by design — the same model as the per-key
-// limiter in `api/rate-limit.ts`. `app.set("trust proxy", 1)` in index.ts
+// limiter in `api/rate-limit.ts`. The configured trusted proxy hops in index.ts
 // makes `req.ip` the real client address behind the nginx proxy.
 // ---------------------------------------------------------------------------
 
@@ -70,7 +71,7 @@ export function createIpRateLimiter(opts: IpRateLimiterOptions = {}) {
 	const buckets = new Map<string, Bucket>();
 
 	return (req: Request, res: Response, next: NextFunction): void => {
-		const id = req.ip ?? "unknown";
+		const id = clientRateLimitKey(req.ip ?? "unknown");
 		const ts = now();
 
 		if (!buckets.has(id) && buckets.size >= maxBuckets) {

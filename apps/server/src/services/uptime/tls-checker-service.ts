@@ -1,5 +1,6 @@
+import { isIP } from "node:net";
 import * as tls from "node:tls";
-import { assertOutboundUrlAllowed, isEgressFilteringEnabled } from "../../lib/ssrf";
+import { assertAllowedUrl, assertOutboundUrlAllowed, isEgressFilteringEnabled, validatingLookup } from "../../lib/ssrf";
 
 export interface TlsCertificateInfo {
 	expiresAt: string;
@@ -15,6 +16,9 @@ function firstCertificateValue(value: string | string[] | undefined): string | n
 
 export const checkTlsCertificate = async (
 	url: string,
+	// The socket `timeout` below only fires on idle; this bounds the whole probe, so a
+	// server that trickles bytes cannot hold a check slot open indefinitely.
+	deadlineMs = 15_000,
 ): Promise<TlsCertificateInfo | null> => {
 	let parsedUrl: URL;
 	try {
@@ -27,26 +31,37 @@ export const checkTlsCertificate = async (
 		return null;
 	}
 
-	// Opt-in egress filtering: never open a probe socket to an internal host.
-	if (isEgressFilteringEnabled()) {
-		try {
-			await assertOutboundUrlAllowed(url);
-		} catch {
-			return null;
-		}
+	// Egress policy: never open a probe socket to a disallowed host. Literal and
+	// name checks run in every mode; resolution is checked when filtering is on
+	// and pinned at connect time through `validatingLookup` below.
+	try {
+		assertAllowedUrl(url);
+		if (isEgressFilteringEnabled()) await assertOutboundUrlAllowed(url);
+	} catch {
+		return null;
 	}
 
-	const hostname = parsedUrl.hostname;
+	const hostname = parsedUrl.hostname.replace(/^\[|\]$/g, "");
 	const port = parsedUrl.port ? Number.parseInt(parsedUrl.port, 10) : 443;
 
-	return new Promise<TlsCertificateInfo | null>((resolve) => {
+	return new Promise<TlsCertificateInfo | null>((finish) => {
+		const deadline = setTimeout(() => {
+			socket.destroy();
+			finish(null);
+		}, deadlineMs);
+		const resolve = (value: TlsCertificateInfo | null) => {
+			clearTimeout(deadline);
+			finish(value);
+		};
 		const socket = tls.connect(
 			{
 				host: hostname,
 				port,
 				rejectUnauthorized: false,
-				servername: hostname,
+				servername: isIP(hostname) ? undefined : hostname,
 				timeout: 10000,
+				// Connect to the address that was validated, not a second DNS answer.
+				lookup: validatingLookup as never,
 			},
 			() => {
 				try {

@@ -30,6 +30,9 @@ else
 	}
 fi
 
+# Schema push cannot install triggers; migrate mode verifies this is a no-op.
+node packages/db/scripts/check-day-rollup.mjs
+
 # Seed before starting the server. Both commands invoke pnpm, which may perform
 # a node_modules consistency check; running them concurrently can make two pnpm
 # processes race while relinking the dependency tree in a fresh container.

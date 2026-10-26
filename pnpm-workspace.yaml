@@ -4,6 +4,7 @@ packages:
 
 # Security floor for transitive Vite/Vitest consumers (GHSA-r28c-9q8g-f849).
 overrides:
+  undici: 7.28.0
   postcss: 8.5.18
   "@esbuild-kit/core-utils>esbuild": 0.25.4
 

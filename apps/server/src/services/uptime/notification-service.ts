@@ -1,3 +1,4 @@
+import { safeChannelError } from "./notification-channel-secrets";
 import {
 	db,
 	uptimeNotificationChannel,
@@ -292,7 +293,7 @@ async function recordAndLog(
 ): Promise<void> {
 	const outcome = result.ok ? "sent" : "failed";
 	const providerMessageId = result.ok ? (result.value ?? null) : null;
-	const error = result.ok ? null : toErrorMessage(result.error);
+	const error = result.ok ? null : safeChannelError(new Error(toErrorMessage(result.error)), channel, { decrypted: true });
 	const consoleTarget =
 		channel.channelType === "email" ? "email recipient" : target;
 

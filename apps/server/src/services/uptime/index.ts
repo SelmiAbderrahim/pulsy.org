@@ -102,3 +102,6 @@ export {
 	type SlaReportWindow,
 	type ProcessSubscriptionResult,
 } from "./sla-report-service";
+
+export * from "./scheduler-leader";
+export { cancelAllMonitorChecks, setSchedulingEnabled, reconcileScheduledMonitors, withMonitorCheckSlot } from "./scheduler-service";

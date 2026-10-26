@@ -31,6 +31,7 @@ services:
       # the published GHCR image is built from the lean `prod` target.
       target: dev
     container_name: pulsy-server
+    init: true
     restart: unless-stopped
     depends_on:
       postgres:

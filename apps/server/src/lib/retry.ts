@@ -20,6 +20,8 @@ export class NotificationSendError extends Error {
 }
 
 const TRANSIENT_SOCKET_CODES = new Set([
+	"ESMTP_CONNECT",
+	"ESMTP_TEMPORARY",
 	"ECONNRESET",
 	"ETIMEDOUT",
 	"ECONNREFUSED",

@@ -66,6 +66,8 @@ function chan(
 		uptimeMonitorId: "mon_1",
 		userId: "user_1",
 		channelType: "webhook",
+		signingSecretCipher: null,
+		notifyOnDegraded: false,
 		emailProviderId: null,
 		recipientAddresses: null,
 		webhookUrl: "https://hooks.test/in",

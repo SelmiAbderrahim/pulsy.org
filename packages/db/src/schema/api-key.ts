@@ -1,5 +1,5 @@
 import { relations } from "drizzle-orm";
-import { index, pgTable, text, uniqueIndex } from "drizzle-orm/pg-core";
+import { index, pgEnum, pgTable, text, uniqueIndex } from "drizzle-orm/pg-core";
 import { nanoid } from "nanoid";
 import { user } from "./auth";
 
@@ -14,6 +14,8 @@ import { user } from "./auth";
 // only fragment ever returned after creation, so the UI can identify a key.
 // ---------------------------------------------------------------------------
 
+export const apiKeyScope = pgEnum("api_key_scope", ["read", "full"]);
+
 export const apiKey = pgTable(
 	"api_key",
 	{
@@ -27,6 +29,8 @@ export const apiKey = pgTable(
 			.references(() => user.id, { onDelete: "cascade" }),
 		// User-supplied label, e.g. "CI pipeline".
 		name: text("name").notNull(),
+		// Existing credentials retain full access through this migration default.
+		scope: apiKeyScope("scope").notNull().default("full"),
 		// First ~8 chars of the plaintext key, shown in the management UI.
 		keyPrefix: text("keyPrefix").notNull(),
 		// sha256(full plaintext key) — the only stored form of the secret.
@@ -38,6 +42,7 @@ export const apiKey = pgTable(
 		// Set on revocation (ISO). Revoked keys never authenticate again and are
 		// indistinguishable from missing keys at resolve time.
 		revokedAt: text("revokedAt"),
+		removedAt: text("removedAt"),
 		createdAt: text("createdAt")
 			.notNull()
 			.$defaultFn(() => new Date().toISOString()),

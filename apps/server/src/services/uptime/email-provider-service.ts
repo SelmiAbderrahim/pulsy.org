@@ -1,3 +1,8 @@
+import { connectOutboundSocket } from "../../lib/outbound-socket";
+import type { Socket } from "node:net";
+import { assertBelowCap } from "../../lib/account-caps";
+import { getTranslator, type Translator } from "../../lib/i18n";
+import { assertMonitorHostAllowed } from "./egress-input";
 import type { z } from "zod";
 import {
 	db,
@@ -6,7 +11,7 @@ import {
 	type apiUpdateUptimeEmailProvider,
 } from "@pulsy/db";
 import { TRPCError } from "@trpc/server";
-import { and, eq } from "drizzle-orm";
+import { and, count, eq } from "drizzle-orm";
 import nodemailer from "nodemailer";
 import { decrypt, encrypt } from "../../lib/crypto";
 import { escapeHtml } from "../../lib/html";
@@ -39,7 +44,7 @@ function decryptField(value: string | null): string | null {
 }
 
 function maskServiceKey(value: string): string {
-	if (value.length <= 4) return "••••";
+	if (value.length < 12) return "••••";
 	return `${value.slice(0, 2)}••••${value.slice(-2)}`;
 }
 
@@ -107,8 +112,12 @@ function assertProviderCredentials(
 export const createEmailProvider = async (
 	input: z.infer<typeof apiCreateUptimeEmailProvider>,
 	userId: string,
+	t: Translator = getTranslator("en"),
 ): Promise<UptimeEmailProvider> => {
 	assertProviderCredentials(input.providerType, input);
+	if (input.providerType === "smtp" && input.smtpHost) await assertMonitorHostAllowed(input.smtpHost, "tcp", t, "smtpHost");
+	const [existingCount] = await db.select({ value: count() }).from(uptimeEmailProvider).where(eq(uptimeEmailProvider.userId, userId));
+	assertBelowCap(existingCount?.value ?? 0, "emailProviders", t);
 
 	const encryptedApiKey = encryptField(input.apiKey);
 	const encryptedSmtpPassword = encryptField(input.smtpPassword);
@@ -143,6 +152,7 @@ export const createEmailProvider = async (
 export const updateEmailProvider = async (
 	input: z.infer<typeof apiUpdateUptimeEmailProvider>,
 	userId: string,
+	t: Translator = getTranslator("en"),
 ): Promise<UptimeEmailProvider> => {
 	const { emailProviderId, ...data } = input;
 
@@ -161,6 +171,7 @@ export const updateEmailProvider = async (
 	}
 
 	const effectiveProviderType = data.providerType ?? existing.providerType;
+	if (effectiveProviderType === "smtp" && data.smtpHost) await assertMonitorHostAllowed(data.smtpHost, "tcp", t, "smtpHost");
 	assertProviderCredentials(effectiveProviderType, {
 		apiKey: data.apiKey ?? existing.apiKey,
 		smtpHost: data.smtpHost ?? existing.smtpHost,
@@ -514,10 +525,20 @@ async function sendViaSmtp(
 		throw new Error("SMTP host is required");
 	}
 
+	let connection: Socket | undefined;
 	const transporter = nodemailer.createTransport({
 		host: provider.smtpHost,
 		port: provider.smtpPort ?? 587,
 		secure: provider.smtpSecure ?? false,
+		getSocket: (_options: unknown, callback: (error: Error | null, options?: { connection: Socket; secured: boolean }) => void) => {
+			void connectOutboundSocket(provider.smtpHost!, provider.smtpPort ?? 587, 10_000, provider.smtpSecure ?? false)
+				.then(socket => { connection = socket; callback(null, { connection: socket, secured: provider.smtpSecure ?? false }); })
+				.catch((error: unknown) => {
+					const code = error && typeof error === "object" && "code" in error ? error.code : undefined;
+					const temporary = typeof code === "string" && ["ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "EAI_AGAIN", "EPIPE"].includes(code);
+					callback(Object.assign(new Error("SMTP destination unavailable or prohibited"), { code: temporary ? "ESMTP_CONNECT" : "EDESTINATION" }));
+				});
+		},
 		auth:
 			provider.smtpUsername && provider.smtpPassword
 				? {
@@ -525,11 +546,14 @@ async function sendViaSmtp(
 						pass: provider.smtpPassword,
 					}
 				: undefined,
+		greetingTimeout: 10000,
 		connectionTimeout: 10000,
 		socketTimeout: 15000,
 	});
 
-	const info = await transporter.sendMail({
+	let deadline: ReturnType<typeof setTimeout> | undefined;
+	try {
+		const sending = transporter.sendMail({
 		from: provider.fromAddress,
 		to,
 		subject,
@@ -544,7 +568,23 @@ async function sendViaSmtp(
 			: {}),
 	});
 
-	transporter.close();
 
-	return info.messageId ?? null;
+		const info = await Promise.race([sending, new Promise<never>((_resolve, reject) => {
+			deadline = setTimeout(() => reject(Object.assign(new Error("SMTP delivery deadline exceeded"), { code: "ETIMEDOUT" })), 30_000);
+		})]);
+		return info.messageId ?? null;
+	} catch (error) {
+		const allowed = new Set(["ESMTP_CONNECT", "EDESTINATION", "ECONNREFUSED", "ECONNRESET", "ETIMEDOUT", "EAI_AGAIN", "EPIPE", "EAUTH", "EENVELOPE", "EDNS", "ESOCKET"]);
+		const responseCode = error && typeof error === "object" && "responseCode" in error && typeof error.responseCode === "number" && Number.isInteger(error.responseCode) && error.responseCode >= 400 && error.responseCode <= 599 ? error.responseCode : null;
+		const originalCode = error && typeof error === "object" && "code" in error && typeof error.code === "string" && allowed.has(error.code) ? error.code : undefined;
+		const code = responseCode && responseCode < 500 ? "ESMTP_TEMPORARY" : originalCode === "ESOCKET" ? "ECONNRESET" : originalCode;
+		const safe = new Error(`SMTP delivery failed${responseCode ? ` (${responseCode})` : code ? ` (${code})` : ""}: check provider configuration`);
+		if (error instanceof Error && ["TimeoutError", "AbortError"].includes(error.name)) safe.name = error.name;
+		if (code) Object.assign(safe, { code });
+		throw safe;
+	} finally {
+		if (deadline) clearTimeout(deadline);
+		transporter.close();
+		connection?.destroy();
+	}
 }
