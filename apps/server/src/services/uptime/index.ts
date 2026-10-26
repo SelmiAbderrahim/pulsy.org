@@ -9,6 +9,7 @@ export {
 
 export {
 	createMonitorForUser,
+	createMonitorsForUser,
 	runManualCheck,
 } from "./monitor-operations";
 
@@ -74,6 +75,9 @@ export {
 } from "./incident-service";
 
 export {
+	getOwnedUptimeAggregates,
+	getMonitorIncidentsForWindow,
+	summarizeWindowIncidents,
 	getMonitorStats,
 	getMonitorStatsForWindow,
 	getMonitorDailyUptime,

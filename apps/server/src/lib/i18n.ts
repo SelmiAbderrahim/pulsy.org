@@ -158,6 +158,10 @@ export const DICTIONARIES: Record<SupportedLanguage, Dictionary> = {
 		"errors.maintenanceTimezone": "Maintenance timezone must be an IANA timezone.",
 		"errors.maintenanceDuration": "End must follow start; recurring windows last at most 24 hours and one-time windows 30 days.",
 		"errors.requestFailed": "Pulsy could not process this request. Reference: {{requestId}}.",
+		"errors.bulkTimeout": "Pulsy took too long to process this request. Nothing was changed. Try again.",
+		"errors.monitorDuplicate": "This URL is already monitored by “{{name}}”.",
+		"errors.monitorTypeAction": "This action is unavailable for this monitor type. Use its configuration instead.",
+		"errors.templateChannelMissing": "A selected alert channel is unavailable. Select an owned channel again.",
 	},
 	ar: {
 		"errors.notFound": "{{resource}} غير موجود",
@@ -284,6 +288,10 @@ export const DICTIONARIES: Record<SupportedLanguage, Dictionary> = {
 		"errors.maintenanceTimezone": "يجب اختيار منطقة زمنية وفق IANA للصيانة.",
 		"errors.maintenanceDuration": "يجب أن تلي النهاية البداية؛ الحد الأقصى 24 ساعة للنوافذ المتكررة و30 يومًا للنافذة الواحدة.",
 		"errors.requestFailed": "تعذّر على Pulsy معالجة هذا الطلب. المرجع: {{requestId}}.",
+		"errors.bulkTimeout": "استغرق Pulsy وقتًا طويلًا في معالجة هذا الطلب. لم يتم تغيير شيء. حاول مرة أخرى.",
+		"errors.monitorDuplicate": "يراقب «{{name}}» هذا الرابط بالفعل.",
+		"errors.monitorTypeAction": "هذا الإجراء غير متاح لنوع المراقب هذا. استخدم إعداداته.",
+		"errors.templateChannelMissing": "قناة تنبيه محددة غير متاحة. اختر قناة تملكها مجددًا.",
 	},
 	fr: {
 		"errors.notFound": "{{resource}} introuvable",
@@ -413,6 +421,10 @@ export const DICTIONARIES: Record<SupportedLanguage, Dictionary> = {
 		"errors.maintenanceTimezone": "Le fuseau de maintenance doit être un fuseau IANA.",
 		"errors.maintenanceDuration": "La fin doit suivre le début ; maximum 24 heures pour les fenêtres récurrentes et 30 jours pour les fenêtres uniques.",
 		"errors.requestFailed": "Pulsy n’a pas pu traiter cette requête. Référence : {{requestId}}.",
+		"errors.bulkTimeout": "Pulsy a mis trop de temps à traiter cette requête. Rien n’a été modifié. Réessayez.",
+		"errors.monitorDuplicate": "Cette URL est déjà surveillée par « {{name}} ».",
+		"errors.monitorTypeAction": "Cette action est indisponible pour ce type de moniteur. Utilisez ses paramètres.",
+		"errors.templateChannelMissing": "Un canal sélectionné est indisponible. Sélectionnez à nouveau un canal vous appartenant.",
 	},
 	de: {
 		"errors.notFound": "{{resource}} nicht gefunden",
@@ -543,6 +555,10 @@ export const DICTIONARIES: Record<SupportedLanguage, Dictionary> = {
 		"errors.maintenanceTimezone": "Die Wartungszeitzone muss eine IANA-Zeitzone sein.",
 		"errors.maintenanceDuration": "Das Ende muss nach dem Beginn liegen; maximal 24 Stunden für wiederkehrende und 30 Tage für einmalige Fenster.",
 		"errors.requestFailed": "Pulsy konnte diese Anfrage nicht verarbeiten. Referenz: {{requestId}}.",
+		"errors.bulkTimeout": "Pulsy hat zu lange für diese Anfrage gebraucht. Es wurde nichts geändert. Versuchen Sie es erneut.",
+		"errors.monitorDuplicate": "Diese URL wird bereits von „{{name}}“ überwacht.",
+		"errors.monitorTypeAction": "Diese Aktion ist für diesen Monitortyp nicht verfügbar. Verwenden Sie seine Einstellungen.",
+		"errors.templateChannelMissing": "Ein gewählter Alarmkanal ist nicht verfügbar. Wählen Sie erneut einen eigenen Kanal.",
 	},
 	es: {
 		"errors.notFound": "{{resource}} no encontrado",
@@ -673,6 +689,10 @@ export const DICTIONARIES: Record<SupportedLanguage, Dictionary> = {
 		"errors.maintenanceTimezone": "La zona horaria del mantenimiento debe ser una zona IANA.",
 		"errors.maintenanceDuration": "El final debe ser posterior al inicio; máximo 24 horas para ventanas recurrentes y 30 días para ventanas únicas.",
 		"errors.requestFailed": "Pulsy no pudo procesar esta solicitud. Referencia: {{requestId}}.",
+		"errors.bulkTimeout": "Pulsy tardó demasiado en procesar esta solicitud. No se cambió nada. Inténtalo de nuevo.",
+		"errors.monitorDuplicate": "Esta URL ya está supervisada por «{{name}}».",
+		"errors.monitorTypeAction": "Esta acción no está disponible para este tipo de monitor. Usa sus ajustes.",
+		"errors.templateChannelMissing": "Un canal seleccionado no está disponible. Seleccione de nuevo un canal propio.",
 	},
 };
 

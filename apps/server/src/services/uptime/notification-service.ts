@@ -21,7 +21,7 @@ import type { UptimeMonitor } from "./monitor-service";
 const COMPANY_NAME = "Pulsy";
 const ERROR_MAX_LENGTH = 500;
 
-type NotificationEvent = "down" | "recovery" | "tls_expiry";
+type NotificationEvent = "down" | "degraded" | "recovery" | "tls_expiry";
 
 /**
  * Test seam for retry timing. Production callers pass nothing (real 30s/2m/10m
@@ -483,23 +483,26 @@ export const dispatchNotifications = async (
 	statusChange: StatusChangeRecord,
 	opts: DispatchOptions = {},
 ): Promise<void> => {
+	if (monitor.latencyPolicy?.importance === "informational") return;
 	const isDown = statusChange.statusAfter === "down";
+  const isDegraded = statusChange.statusAfter === "degraded" && Boolean(monitor.latencyPolicy);
 	const isRecovery =
 		statusChange.statusAfter === "up" &&
 		(statusChange.statusBefore === "down" ||
 			statusChange.statusBefore === "degraded");
 
-	if (!isDown && !isRecovery) {
+	if (!isDown && !isDegraded && !isRecovery) {
 		return;
 	}
 
-	const event: NotificationEvent = isDown ? "down" : "recovery";
+	const event: NotificationEvent = isDown ? "down" : isDegraded ? "degraded" : "recovery";
 
 	const channels = mergeChannelsForDispatch(
 		await loadApplicableChannels(monitor),
 	).filter(
 		(channel) =>
 			(isDown && channel.notifyOnDown) ||
+      (isDegraded && channel.notifyOnDegraded) ||
 			(isRecovery && channel.notifyOnRecovery),
 	);
 

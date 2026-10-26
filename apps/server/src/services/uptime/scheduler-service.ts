@@ -9,12 +9,13 @@ import {
 	scheduleJob,
 	gracefulShutdown as cancelAllJobs,
 } from "node-schedule";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { safeErrorSummary } from "../../lib/safe-error";
-import { performHttpCheck } from "./checker-service";
+import { performMonitorProbe } from "./monitor-probe";
+import { FIRST_CHECK_JITTER_MS } from "./first-check";
 import { checkTlsCertificate } from "./tls-checker-service";
 import { createIncident, resolveIncident, getOngoingIncident } from "./incident-service";
-import { computeStatusTransition } from "./status-transition";
+import { evaluateLatencyTransition } from "./latency-policy";
 import {
 	dispatchNotifications,
 	dispatchTlsExpiryNotifications,
@@ -128,7 +129,14 @@ const scheduledIntervals = new Map<string, number>();
 let schedulingEnabled = true;
 export const setSchedulingEnabled = (enabled: boolean): void => { schedulingEnabled = enabled; };
 
-export const scheduleMonitorCheck = (monitor: UptimeMonitor): void => {
+function queueDueCheck(monitor: UptimeMonitor): void {
+	if (!monitor.active || !monitor.nextCheckAt || monitor.monitorType === "heartbeat" || monitor.monitorType === "server" || !schedulingEnabled) return;
+	const delay = Date.parse(monitor.nextCheckAt) - Date.now();
+	if (!(delay <= FIRST_CHECK_JITTER_MS)) return;
+	setTimeout(() => runScheduledCheck(monitor.uptimeMonitorId), Math.max(0, delay)).unref();
+}
+
+export const scheduleMonitorCheck = (monitor: UptimeMonitor, options: { checkIfDue?: boolean } = {}): void => {
 	const jobName = `uptime-${monitor.uptimeMonitorId}`;
 
 	const existingJob = scheduledJobs[jobName];
@@ -145,6 +153,7 @@ export const scheduleMonitorCheck = (monitor: UptimeMonitor): void => {
 		runScheduledCheck(monitor.uptimeMonitorId);
 	});
 	scheduledIntervals.set(monitor.uptimeMonitorId, monitor.interval);
+  if (options.checkIfDue) queueDueCheck(monitor);
 };
 
 export const cancelMonitorCheck = (monitorId: string): void => {
@@ -176,7 +185,7 @@ export const reconcileScheduledMonitors = async (): Promise<{ scheduled: number;
 	for (const [id, monitor] of wanted) {
 		if (scheduledIntervals.get(id) !== monitor.interval) {
 			// A monitor created through another replica has never been checked: check it now.
-			scheduleMonitorCheck(monitor);
+			scheduleMonitorCheck(monitor, { checkIfDue: monitor.lastCheckedAt === null });
 			scheduled++;
 		}
 	}
@@ -191,7 +200,7 @@ export const reconcileScheduledMonitors = async (): Promise<{ scheduled: number;
 
 export const rescheduleMonitorCheck = (monitor: UptimeMonitor): void => {
 	cancelMonitorCheck(monitor.uptimeMonitorId);
-	scheduleMonitorCheck(monitor);
+	scheduleMonitorCheck(monitor, { checkIfDue: true });
 };
 
 /**
@@ -262,26 +271,28 @@ const runCheck = async (monitorId: string): Promise<void> => {
 		where: eq(uptimeMonitor.uptimeMonitorId, monitorId),
 	});
 
-	if (!monitor || !monitor.active || monitor.monitorType === "heartbeat" || monitor.monitorType === "server") {
+	if (!monitor || !monitor.active || (monitor.monitorType === "heartbeat" || monitor.monitorType === "server")) {
 		return;
 	}
 
-	const checkResult = await performHttpCheck(monitor);
-	const now = new Date().toISOString();
+	const checkResult = await performMonitorProbe(monitor);
 
 	// Apply failure-threshold semantics to the monitor state.
-	const transition = computeStatusTransition({
+	let transition = evaluateLatencyTransition({
 		previousStatus: monitor.status,
 		checkStatus: checkResult.status,
 		consecutiveFailures: monitor.consecutiveFailures,
 		failureThreshold: monitor.failureThreshold,
+    responseTime: checkResult.responseTime, policy: monitor.latencyPolicy,
+    consecutiveSlow: monitor.consecutiveSlow, consecutiveHealthy: monitor.consecutiveHealthy,
 	});
 
 	const nextCheckAt = new Date(
 		Date.now() + monitor.interval * 1000,
 	).toISOString();
 
-	const previousStatus = monitor.status;
+	let previousStatus = monitor.status;
+  let policyMonitor = monitor;
 
 	// Persist the check atomically: check log + monitor state + status change +
 	// incident open/resolve commit or roll back together. Without this, a crash
@@ -291,26 +302,55 @@ const runCheck = async (monitorId: string): Promise<void> => {
 	// The HTTP probe stays before the transaction and notification dispatch
 	// after commit: no network I/O while holding a pooled connection.
 	const statusChangeRecord = await db.transaction(async (tx) => {
+    const [current] = await tx.select().from(uptimeMonitor).where(and(eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId), eq(uptimeMonitor.userId, monitor.userId))).for("update");
+    if (!current) throw new Error("Monitor removed during check");
+    policyMonitor = current;
+	const now = new Date().toISOString();
+	if (current.lastCheckedAt && Date.parse(current.lastCheckedAt) > Date.now()) return null;
+    // Completion time is assigned after the probe, never when queued. Serialize
+    // against the latest committed observation, including legacy monitors.
+    // An older completion waiting for this lock must not rewind state/history.
+    previousStatus = current.status;
+    transition = evaluateLatencyTransition({ previousStatus, checkStatus: checkResult.status, responseTime: checkResult.responseTime,
+      consecutiveFailures: current.consecutiveFailures, failureThreshold: current.failureThreshold,
+      consecutiveSlow: current.consecutiveSlow, consecutiveHealthy: current.consecutiveHealthy, policy: current.latencyPolicy });
 		await tx.insert(uptimeCheckLog).values({
-			uptimeMonitorId: monitorId,
+      uptimeMonitorId: current.uptimeMonitorId,
 			httpStatus: checkResult.httpStatus,
 			responseTime: checkResult.responseTime,
-			status: checkResult.status,
-			errorMessage: checkResult.errorMessage ?? null,
+			status: transition.sampleStatus,
+			errorMessage: checkResult.errorMessage ?? transition.latencyReason ?? null,
+			assertionOutcomes: checkResult.assertionOutcomes ?? null,
 			createdAt: now,
 		});
 
-		await tx
+		// The locked row owns status, timing and completion time as one snapshot.
+		const [claimed] = await tx
 			.update(uptimeMonitor)
 			.set({
 				status: transition.monitorStatus,
 				httpStatus: checkResult.httpStatus,
 				responseTime: checkResult.responseTime,
 				lastCheckedAt: now,
-				nextCheckAt,
+				nextCheckAt: new Date(Date.now() + current.interval * 1000).toISOString(),
 				consecutiveFailures: transition.consecutiveFailures,
+        consecutiveSlow: transition.consecutiveSlow, consecutiveHealthy: transition.consecutiveHealthy,
 			})
-			.where(eq(uptimeMonitor.uptimeMonitorId, monitorId));
+			.where(
+				and(
+					eq(uptimeMonitor.uptimeMonitorId, monitorId),
+					eq(uptimeMonitor.userId, monitor.userId),
+					eq(uptimeMonitor.status, previousStatus),
+				),
+			)
+			.returning({ uptimeMonitorId: uptimeMonitor.uptimeMonitorId });
+
+		if (!claimed) {
+			console.warn(
+				`[uptime] Skipping transition for monitor ${monitorId}: status changed concurrently`,
+			);
+			return null;
+		}
 
 		if (!transition.shouldRecordStatusChange) {
 			return null;
@@ -324,20 +364,34 @@ const runCheck = async (monitorId: string): Promise<void> => {
 				statusAfter: transition.statusAfter,
 				httpStatus: checkResult.httpStatus,
 				responseTime: checkResult.responseTime,
-				reason: checkResult.errorMessage ?? null,
+				reason: checkResult.errorMessage ?? transition.latencyReason ?? null,
 				createdAt: now,
 			})
 			.returning();
 
+		if (record?.statusAfter === "down" || policyMonitor.latencyPolicy && record?.statusAfter === "degraded") {
+      // One configured failure episode may escalate Degraded → Down before recovery.
+      const outageId = policyMonitor.latencyPolicy && (previousStatus === "down" || previousStatus === "degraded") && policyMonitor.notificationOutageId ? policyMonitor.notificationOutageId : record.statusChangeId;
+			await tx.update(uptimeMonitor).set({ notificationOutageId: outageId }).where(and(eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId), eq(uptimeMonitor.userId, monitor.userId)));
+			policyMonitor = { ...policyMonitor, notificationOutageId: outageId };
+
+    } else if (record?.statusAfter === "degraded" && !policyMonitor.latencyPolicy && (previousStatus === "up" || previousStatus === "pending")) {
+      // A fresh legacy degraded episode must not inherit a recovered episode's receipts.
+      await tx.update(uptimeMonitor).set({ notificationOutageId: null }).where(and(eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId), eq(uptimeMonitor.userId, monitor.userId)));
+      policyMonitor = { ...policyMonitor, notificationOutageId: null };
+		} else if (record?.statusAfter === "up") {
+
+    }
+
 		if (transition.shouldCreateIncident) {
 			const ongoing = await getOngoingIncident(monitorId, tx);
 			if (!ongoing) {
-				await createIncident(monitorId, checkResult.errorMessage, tx);
+				await createIncident(monitorId, checkResult.errorMessage ?? transition.latencyReason, tx, policyMonitor.latencyPolicy?.importance ?? "critical", now);
 			}
 		}
 
 		if (transition.shouldResolveIncident) {
-			await resolveIncident(monitorId, tx);
+			await resolveIncident(monitorId, tx, now);
 		}
 
 		return record ?? null;
@@ -348,44 +402,53 @@ const runCheck = async (monitorId: string): Promise<void> => {
 	// In-flight retries are lost on process restart (accepted — the delivery
 	// log records the final known outcome).
 	if (statusChangeRecord) {
-		void dispatchNotifications(monitor, statusChangeRecord).catch((err) => {
+		void dispatchNotifications(policyMonitor, statusChangeRecord).catch((err) => {
 			console.error(
-				`[uptime] Failed to dispatch notifications for monitor ${monitorId}: ${safeErrorSummary(err)}`,
+				`[uptime] Failed to dispatch notifications for monitor ${monitorId}:`,
+				safeErrorSummary(err),
 			);
 		});
 	}
 
 	// 7. TLS check for HTTPS URLs (every 24 hours)
-	if (monitor.url.startsWith("https://")) {
+	if (monitor.monitorType === "http" && monitor.tlsMonitoringEnabled !== false && monitor.url.startsWith("https://")) {
 		const lastTlsCheck = lastTlsCheckMap.get(monitorId) ?? 0;
 		const timeSinceLastTls = Date.now() - lastTlsCheck;
 
 		if (timeSinceLastTls >= TLS_CHECK_INTERVAL_MS) {
 			try {
-				const tlsInfo = await checkTlsCertificate(monitor.url);
+				const tlsMonitor = await db.query.uptimeMonitor.findFirst({ where: and(eq(uptimeMonitor.uptimeMonitorId, monitorId), eq(uptimeMonitor.userId, monitor.userId), eq(uptimeMonitor.tlsMonitoringEnabled, true)) });
+        if (!tlsMonitor || !tlsMonitor.url.startsWith("https://")) return;
+        const tlsInfo = await checkTlsCertificate(tlsMonitor.url);
 				if (tlsInfo) {
-					await db
+					const [tlsUpdated] = await db
 						.update(uptimeMonitor)
 						.set({
 							tlsExpiresAt: tlsInfo.expiresAt,
 							tlsExpiresInDays: tlsInfo.expiresInDays,
 						})
-						.where(eq(uptimeMonitor.uptimeMonitorId, monitorId));
+						.where(and(eq(uptimeMonitor.uptimeMonitorId, monitorId), eq(uptimeMonitor.userId, monitor.userId), eq(uptimeMonitor.tlsMonitoringEnabled, true), eq(uptimeMonitor.url, tlsMonitor.url))).returning();
+          if (!tlsUpdated) return;
 
 					// Detached for the same reason as status-change dispatch above.
-					void dispatchTlsExpiryNotifications(monitor, tlsInfo).catch(
+					void dispatchTlsExpiryNotifications(tlsUpdated, tlsInfo).catch(
 						(err) => {
 							console.error(
-								`[uptime] Failed to dispatch TLS expiry notifications for monitor ${monitorId}: ${safeErrorSummary(err)}`,
+								`[uptime] Failed to dispatch TLS expiry notifications for monitor ${monitorId}:`,
+								safeErrorSummary(err),
 							);
 						},
 					);
 				}
-				lastTlsCheckMap.set(monitorId, Date.now());
 			} catch (err) {
 				console.error(
-					`[uptime] TLS check failed for monitor ${monitorId}: ${safeErrorSummary(err)}`,
+					`[uptime] TLS check failed for monitor ${monitorId}:`,
+					safeErrorSummary(err),
 				);
+			} finally {
+				// Throttle even on failure: a broken TLS endpoint or a failed DB
+				// write must not re-probe (and re-alert) on every check tick.
+				lastTlsCheckMap.set(monitorId, Date.now());
 			}
 		}
 	}

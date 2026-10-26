@@ -824,3 +824,26 @@ describe("dispatchTlsExpiryNotifications", () => {
 		}
 	});
 });
+
+describe("configured latency notifications", () => {
+  it("sends degraded only to opted-in channels and records the event", async () => {
+    const fx = mockFetch();
+    try {
+      const configured = { ...monitor, latencyPolicy: { thresholdMs: 200, slowCount: 1, recoveryThresholdMs: 150, recoveryCount: 1, importance: "critical" as const, cooldownSeconds: 0 } };
+      await createTestChannel(monitor.uptimeMonitorId, { channelType: "webhook", webhookUrl: "https://hooks.test/degraded", notifyOnDegraded: true });
+      await createTestChannel(monitor.uptimeMonitorId, { channelType: "webhook", webhookUrl: "https://hooks.test/disabled", notifyOnDegraded: false });
+      await dispatchNotifications(configured, downChange({ statusAfter: "degraded" }), NO_RETRY);
+      expect(fx.calls).toHaveLength(1);
+      expect(fx.calls[0]?.url).toBe("https://hooks.test/degraded");
+      expect(await logRowsFor(monitor.uptimeMonitorId)).toEqual([expect.objectContaining({ event: "degraded", status: "sent" })]);
+    } finally { fx.restore(); }
+  });
+  it("keeps informational latency policies quiet", async () => {
+    const fx = mockFetch();
+    try {
+      await createTestChannel(monitor.uptimeMonitorId, { channelType: "webhook", webhookUrl: "https://hooks.test/quiet", notifyOnDegraded: true });
+      await dispatchNotifications({ ...monitor, latencyPolicy: { thresholdMs: 200, slowCount: 1, recoveryThresholdMs: 150, recoveryCount: 1, importance: "informational", cooldownSeconds: 60 } }, downChange({ statusAfter: "degraded" }), NO_RETRY);
+      expect(fx.calls).toHaveLength(0);
+    } finally { fx.restore(); }
+  });
+});

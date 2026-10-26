@@ -52,7 +52,7 @@ describe("scheduler leader election", () => {
 		const second = leader();
 		await new Promise((r) => setTimeout(r, 120));
 		// Terminate the database session that holds the advisory lock, as a network drop or DB restart would.
-		await db.execute(sql`select pg_terminate_backend(pid) from pg_locks where locktype = 'advisory' and objsubid = 1 and ((classid::bigint << 32) | objid::bigint) = 7450121004`);
+		await db.execute(sql`select pg_terminate_backend(pid) from pg_locks where locktype = 'advisory' and database = (select oid from pg_database where datname = current_database()) and objsubid = 1 and ((classid::bigint << 32) | objid::bigint) = 7450121004`);
 		await until(() => first.handle.isLeader() !== second.handle.isLeader(), 4000);
 		await new Promise((r) => setTimeout(r, 300)); // settle: ticks keep re-checking
 		expect(first.handle.isLeader() !== second.handle.isLeader()).toBe(true); // exactly one

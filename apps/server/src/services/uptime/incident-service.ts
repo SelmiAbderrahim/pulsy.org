@@ -8,8 +8,10 @@ export const createIncident = async (
 	monitorId: string,
 	cause?: string | null,
 	dbc: DbExecutor = db,
+  severity: "critical" | "warning" | "informational" = "critical",
+  observedAt?: string,
 ): Promise<UptimeIncident> => {
-	const now = new Date().toISOString();
+	const now = observedAt ?? new Date().toISOString();
 
 	const [incident] = await dbc
 		.insert(uptimeIncident)
@@ -18,6 +20,7 @@ export const createIncident = async (
 			status: "ongoing",
 			startedAt: now,
 			cause: cause ?? null,
+      severity,
 		})
 		.returning();
 
@@ -35,6 +38,7 @@ export const createIncident = async (
 export const resolveIncident = async (
 	monitorId: string,
 	dbc: DbExecutor = db,
+  observedAt?: string,
 ): Promise<UptimeIncident | null> => {
 	const ongoing = await dbc.query.uptimeIncident.findFirst({
 		where: and(
@@ -47,7 +51,7 @@ export const resolveIncident = async (
 		return null;
 	}
 
-	const now = new Date();
+	const now = observedAt ? new Date(observedAt) : new Date();
 	const startedAt = new Date(ongoing.startedAt);
 	const durationSeconds = Math.round(
 		(now.getTime() - startedAt.getTime()) / 1000,

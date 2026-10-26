@@ -1,3 +1,15 @@
+import { apiNetworkMonitor } from "@pulsy/db/validation-network";
+import { randomUUID } from "node:crypto";
+import { createNetworkMonitor, updateNetworkMonitor } from "../../services/uptime/network-monitor";
+import { assertMonitorUrlAllowed, isMonitorUrlAllowed, isMonitorHostAllowed } from "../../services/uptime/egress-input";
+import { httpConfigPatch, assertCredentialOrigin, maskMonitor, toOwnerMonitor } from "../../services/uptime/http-config";
+import { updateUptimeMonitor } from "../../services/uptime/monitor-service";
+import { createMonitorsForUser } from "../../services/uptime/monitor-operations";
+import { performHttpCheck } from "../../services/uptime/checker-service";
+import { evaluateLatencyTransition } from "../../services/uptime/latency-policy";
+import { updateMonitorsBulk, deleteMonitorsBulk } from "../../services/uptime/bulk-monitor-write";
+import { firstCheckAt } from "../../services/uptime/first-check";
+import { getOwnedUptimeAggregates, getMonitorDailyUptime } from "../../services/uptime/stats-service";
 import {
 	apiCreateUptimeMonitor,
 	apiCreateUptimeMonitorsBulk,
@@ -304,13 +316,56 @@ function assertNotificationChannelConfig(
 // monitor.*
 // ---------------------------------------------------------------------------
 
+const localizedHttpProcedure = protectedProcedure.use(async ({ ctx, next }) => {
+  const result = await next();
+  if (!result.ok && result.error.cause instanceof z.ZodError) {
+    const issue = result.error.cause.issues.find(value => value.message.startsWith("errors.http") || value.message.startsWith("errors.latency"));
+    throw new TRPCError({ code: "BAD_REQUEST", message: ctx.t(issue?.message ?? "errors.badRequest"), cause: result.error.cause });
+  }
+  return result;
+});
+
+
+const activeHttpTests = new Set<string>();
 const monitorRouter = router({
+  testConfiguration: localizedHttpProcedure.input(z.object({
+    uptimeMonitorId: z.string().max(64).optional(), configuration: apiCreateUptimeMonitor,
+    allowPost: z.boolean().default(false),
+  }).strict()).mutation(async ({ input, ctx }) => {
+    const stored = input.uptimeMonitorId ? await findOwnedMonitorOrThrow(input.uptimeMonitorId, ctx.user.id, ctx.t) : null;
+    if (stored && stored.monitorType !== "http") throw badRequest(ctx.t, "errors.monitorTypeAction");
+    if (input.configuration.method === "POST" && !input.allowPost) throw badRequest(ctx.t, "errors.httpPostConfirm");
+    if (activeHttpTests.has(ctx.user.id) || activeHttpTests.size >= 8) throw new TRPCError({ code: "TOO_MANY_REQUESTS", message: ctx.t("errors.httpTestBusy") });
+    if (stored) assertCredentialOrigin(stored.requestCipher, stored.url, input.configuration.url, input.configuration.requestConfig, ctx.t);
+    // Same policy as saving: a test run must not become a one-off SSRF probe.
+    await assertMonitorUrlAllowed(input.configuration.url, ctx.t, "configuration.url");
+    const { requestConfig: _requestConfig, ...ordinary } = input.configuration;
+    const configuration = httpConfigPatch(input.configuration, ordinary.method, ctx.t, stored?.requestCipher);
+    const candidate: UptimeMonitorRow = {
+      monitorType: "http", externalKey: null, networkConfig: null, uptimeMonitorId: "test", userId: ctx.user.id, status: "pending", createdAt: new Date().toISOString(),
+      consecutiveSlow: 0, consecutiveHealthy: 0, lastOperationalAlertAt: null, lastOperationalAlertId: null,
+      notificationOutageId: null, requestCipher: stored?.requestCipher ?? null, redirectPolicy: "follow", httpAssertions: [],
+      httpStatus: null, responseTime: null, lastCheckedAt: null, nextCheckAt: null, tlsExpiresAt: null, tlsExpiresInDays: null, expectedStatuses: null, tlsMonitoringEnabled: true,
+      consecutiveFailures: 0, uptimePercentage: null, isPublic: false, statusPageTitle: null, statusPageDescription: null,
+      ...ordinary, ...configuration,
+      latencyPolicy: ordinary.latencyPolicy === undefined ? stored?.latencyPolicy ?? null : ordinary.latencyPolicy,
+    };
+    activeHttpTests.add(ctx.user.id);
+    try {
+      const result = await performHttpCheck(candidate);
+      if (!candidate.latencyPolicy) return result;
+      const sample = evaluateLatencyTransition({ previousStatus: "pending", checkStatus: result.status, responseTime: result.responseTime, consecutiveFailures: 0, failureThreshold: candidate.failureThreshold, consecutiveSlow: 0, consecutiveHealthy: 0, policy: candidate.latencyPolicy });
+      return { ...result, status: sample.sampleStatus, latencySample: true };
+    }
+    finally { activeHttpTests.delete(ctx.user.id); }
+  }),
 	list: protectedProcedure.query(async ({ ctx }) => {
 		const monitors = await db.query.uptimeMonitor.findMany({
 			where: eq(uptimeMonitor.userId, ctx.user.id),
 			orderBy: desc(uptimeMonitor.createdAt),
 		});
-		return monitors;
+		const aggregates = await getOwnedUptimeAggregates(ctx.user.id, 30, monitors.map(m => m.uptimeMonitorId));
+    return monitors.map(m => ({ ...maskMonitor(m), ...(aggregates.get(m.uptimeMonitorId) ?? { uptimeChecks: 0 }) }));
 	}),
 
 	one: protectedProcedure
@@ -341,220 +396,64 @@ const monitorRouter = router({
 				throw notFound(ctx.t, "monitor");
 			}
 			return {
-				...monitor,
+				...maskMonitor(monitor),
 				notificationChannels: monitor.notificationChannels.map(
 					maskNotificationChannel,
 				),
 			};
 		}),
 
-	create: protectedProcedure
-		.input(apiCreateUptimeMonitor)
-		.mutation(async ({ input, ctx }) => {
-			// Insert lives in the shared helper so the REST API
-			// (`POST /api/v1/monitors`) behaves identically.
-			const inserted = await createMonitorForUser(input, ctx.user.id);
+  create: localizedHttpProcedure.input(apiCreateUptimeMonitor).mutation(async ({ input, ctx }) => {
+    const monitor = await createMonitorForUser(input, ctx.user.id, ctx.t);
+    if (monitor.active) scheduleMonitorCheck(monitor, { checkIfDue: true });
+    return maskMonitor(monitor);
+  }),
+  createBulk: localizedHttpProcedure.input(apiCreateUptimeMonitorsBulk).mutation(async ({ input, ctx }) => {
+    const monitors = await createMonitorsForUser(input.monitors, ctx.user.id, ctx.t, "urls");
+    for (const monitor of monitors) if (monitor.active) scheduleMonitorCheck(monitor, { checkIfDue: true });
+    return monitors.map(maskMonitor);
+  }),
+  update: localizedHttpProcedure.input(apiUpdateUptimeMonitor).mutation(async ({ input, ctx }) => {
+    const updated = await updateUptimeMonitor(input, ctx.user.id, ctx.t);
+    if (updated.active) rescheduleMonitorCheck(updated); else cancelMonitorCheck(updated.uptimeMonitorId);
+    return maskMonitor(updated);
+  }),
+  updateBulk: protectedProcedure.input(apiUpdateUptimeMonitorsBulk).mutation(async ({ input, ctx }) => {
+    const requestId = ctx.requestId ?? randomUUID();
+    const result = await updateMonitorsBulk(input, ctx.user.id, ctx.t, requestId);
+    for (const monitor of result.updated) {
+      try { if (monitor.active) rescheduleMonitorCheck(monitor); else cancelMonitorCheck(monitor.uptimeMonitorId); }
+      catch { console.error(JSON.stringify({event:"monitor.updateBulk.scheduler.failed", requestId, monitorId:monitor.uptimeMonitorId})); }
+    }
+    return { updated: result.updated.map(maskMonitor), results: result.results };
+  }),
+  deleteBulk: protectedProcedure.input(z.object({ ids: z.array(z.string()).min(1).max(200), count: z.number().int().min(1).max(200) }).strict().refine(input => new Set(input.ids).size === input.count && input.ids.length === input.count))
+    .mutation(async ({ input, ctx }) => {
+      const deleted = await deleteMonitorsBulk(input.ids, ctx.user.id, ctx.t);
+      const ids = new Set(deleted.map(row => row.id));
+      for (const id of ids) cancelMonitorCheck(id);
+      return input.ids.map(id => ids.has(id) ? { id, status: "deleted" as const } : { id, status: "rejected" as const, reason: ctx.t("errors.notFound", { resource: "monitor" }) });
+    }),
 
-			// Schedule periodic checks if monitor is active.
-			if (inserted.active) {
-				scheduleMonitorCheck(inserted);
-			}
+  delete: protectedProcedure.input(z.object({ uptimeMonitorId: z.string() })).mutation(async ({ input, ctx }) => {
+    await findOwnedMonitorOrThrow(input.uptimeMonitorId, ctx.user.id, ctx.t);
+    await deleteMonitorsBulk([input.uptimeMonitorId], ctx.user.id, ctx.t);
+    cancelMonitorCheck(input.uptimeMonitorId);
+    return { success: true };
+  }),
 
-			return inserted;
-		}),
-
-	createBulk: protectedProcedure
-		.input(apiCreateUptimeMonitorsBulk)
-		.mutation(async ({ input, ctx }) => {
-			const inserted = await db
-				.insert(uptimeMonitor)
-				.values(
-					input.monitors.map((m) => ({
-						name: m.name,
-						url: m.url,
-						method: m.method,
-						expectedStatus: m.expectedStatus,
-						timeout: m.timeout,
-						interval: m.interval,
-						failureThreshold: m.failureThreshold,
-						active: m.active,
-						tags: m.tags,
-						status: "pending" as const,
-						consecutiveFailures: 0,
-						nextCheckAt: m.active
-							? new Date(Date.now() + m.interval * 1000).toISOString()
-							: null,
-						userId: ctx.user.id,
-					})),
-				)
-				.returning();
-
-			/* v8 ignore next 6 -- unreachable: bulk INSERT ... RETURNING yields rows or throws */
-			if (inserted.length === 0) {
-				throw new TRPCError({
-					code: "INTERNAL_SERVER_ERROR",
-					message: ctx.t("errors.internal"),
-				});
-			}
-
-			// Schedule periodic checks for each active monitor.
-			for (const monitor of inserted) {
-				if (monitor.active) {
-					scheduleMonitorCheck(monitor);
-				}
-			}
-
-			return inserted;
-		}),
-
-	update: protectedProcedure
-		.input(apiUpdateUptimeMonitor)
-		.mutation(async ({ input, ctx }) => {
-			await findOwnedMonitorOrThrow(
-				input.uptimeMonitorId,
-				ctx.user.id,
-				ctx.t,
-			);
-
-			const { uptimeMonitorId, ...updates } = input;
-
-			const [updated] = await db
-				.update(uptimeMonitor)
-				.set(updates)
-				.where(
-					and(
-						eq(uptimeMonitor.uptimeMonitorId, uptimeMonitorId),
-						eq(uptimeMonitor.userId, ctx.user.id),
-					),
-				)
-				.returning();
-
-			/* v8 ignore next 3 -- defensive: ownership was checked immediately above */
-			if (!updated) {
-				throw notFound(ctx.t, "monitor");
-			}
-
-			// Reschedule or cancel based on active status
-			if (updated.active) {
-				rescheduleMonitorCheck(updated);
-			} else {
-				cancelMonitorCheck(updated.uptimeMonitorId);
-			}
-
-			return updated;
-		}),
-
-	updateBulk: protectedProcedure
-		.input(apiUpdateUptimeMonitorsBulk)
-		.mutation(async ({ input, ctx }) => {
-			// Ownership scope: every requested id must belong to the caller. A
-			// count mismatch means at least one id is foreign or missing — throw a
-			// plain NOT_FOUND without revealing which (same model as share.create).
-			const owned = await db
-				.select({ id: uptimeMonitor.uptimeMonitorId })
-				.from(uptimeMonitor)
-				.where(
-					and(
-						inArray(uptimeMonitor.uptimeMonitorId, input.monitorIds),
-						eq(uptimeMonitor.userId, ctx.user.id),
-					),
-				);
-			if (owned.length !== input.monitorIds.length) {
-				throw notFound(ctx.t, "monitor");
-			}
-
-			const updated = await db
-				.update(uptimeMonitor)
-				.set(input.patch)
-				.where(
-					and(
-						inArray(uptimeMonitor.uptimeMonitorId, input.monitorIds),
-						eq(uptimeMonitor.userId, ctx.user.id),
-					),
-				)
-				.returning();
-
-			// Resync the scheduler: the interval may have changed, so reschedule
-			// active monitors and cancel inactive ones (mirrors single `update`).
-			for (const monitor of updated) {
-				if (monitor.active) {
-					rescheduleMonitorCheck(monitor);
-				} else {
-					cancelMonitorCheck(monitor.uptimeMonitorId);
-				}
-			}
-
-			return updated;
-		}),
-
-	delete: protectedProcedure
-		.input(z.object({ uptimeMonitorId: z.string() }))
-		.mutation(async ({ input, ctx }) => {
-			const [deleted] = await db
-				.delete(uptimeMonitor)
-				.where(
-					and(
-						eq(uptimeMonitor.uptimeMonitorId, input.uptimeMonitorId),
-						eq(uptimeMonitor.userId, ctx.user.id),
-					),
-				)
-				.returning({ uptimeMonitorId: uptimeMonitor.uptimeMonitorId });
-			if (!deleted) {
-				throw notFound(ctx.t, "monitor");
-			}
-
-			// Cancel scheduled checks only after an owned row was deleted.
-			cancelMonitorCheck(deleted.uptimeMonitorId);
-
-			return { success: true };
-		}),
-
-	toggleActive: protectedProcedure
-		.input(z.object({ uptimeMonitorId: z.string() }))
-		.mutation(async ({ input, ctx }) => {
-			const monitor = await findOwnedMonitorOrThrow(
-				input.uptimeMonitorId,
-				ctx.user.id,
-				ctx.t,
-			);
-
-			const newActive = !monitor.active;
-
-			const [updated] = await db
-				.update(uptimeMonitor)
-				.set({
-					active: newActive,
-					// Reset next check time when re-activating
-					...(newActive
-						? {
-								nextCheckAt: new Date(
-									Date.now() + monitor.interval * 1000,
-								).toISOString(),
-							}
-						: {}),
-				})
-				.where(
-					and(
-						eq(uptimeMonitor.uptimeMonitorId, input.uptimeMonitorId),
-						eq(uptimeMonitor.userId, ctx.user.id),
-					),
-				)
-				.returning();
-
-			/* v8 ignore next 3 -- defensive: ownership was checked immediately above */
-			if (!updated) {
-				throw notFound(ctx.t, "monitor");
-			}
-
-			// Schedule or cancel checks based on new active state
-			if (updated.active) {
-				scheduleMonitorCheck(updated);
-			} else {
-				cancelMonitorCheck(updated.uptimeMonitorId);
-			}
-
-			return updated;
-		}),
+  toggleActive: protectedProcedure.input(z.object({ uptimeMonitorId: z.string() })).mutation(async ({ input, ctx }) => {
+    const updated = await db.transaction(async tx => {
+      const scope = and(eq(uptimeMonitor.uptimeMonitorId, input.uptimeMonitorId), eq(uptimeMonitor.userId, ctx.user.id));
+      const [monitor] = await tx.select().from(uptimeMonitor).where(scope).for("update");
+      if (!monitor) throw notFound(ctx.t, "monitor");
+      const [row] = await tx.update(uptimeMonitor).set({ active: !monitor.active, nextCheckAt: !monitor.active ? firstCheckAt() : null }).where(scope).returning();
+      if (!row) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: ctx.t("errors.internal") });
+      return row;
+    });
+    if (updated.active) scheduleMonitorCheck(updated, { checkIfDue: true }); else cancelMonitorCheck(updated.uptimeMonitorId);
+    return maskMonitor(updated);
+  }),
 
 	checkNow: protectedProcedure
 		.input(z.object({ uptimeMonitorId: z.string() }))
@@ -571,8 +470,25 @@ const monitorRouter = router({
 
 			// The full check pipeline (probe → log → state → incident → notify)
 			// is shared with `POST /api/v1/monitors/:id/check-now`.
-			return runManualCheck(monitor);
+			return maskMonitor(await runManualCheck(monitor, ctx.t));
 		}),
+});
+
+const networkRouter = router({
+  create: protectedProcedure.input(apiNetworkMonitor).mutation(async ({ input, ctx }) => {
+    const monitor = await createNetworkMonitor(input, ctx.user.id, ctx.t);
+    if (monitor.active) scheduleMonitorCheck(monitor, { checkIfDue: true });
+    return maskMonitor(monitor);
+  }),
+  update: protectedProcedure.input(apiNetworkMonitor.extend({ monitorId: z.string() })).mutation(async ({ input, ctx }) => {
+    const monitor = await updateNetworkMonitor(input, ctx.user.id, ctx.t);
+    if (monitor.active) rescheduleMonitorCheck(monitor); else cancelMonitorCheck(monitor.uptimeMonitorId);
+    return maskMonitor(monitor);
+  }),
+});
+const egressRouter = router({
+  url: protectedProcedure.input(z.object({ url: z.string().max(2048) }).strict()).query(async ({ input }) => ({ allowed: await isMonitorUrlAllowed(input.url) })),
+  host: protectedProcedure.input(z.object({ hostname: z.string().max(253), type: z.enum(["dns", "tcp"]) }).strict()).query(async ({ input }) => ({ allowed: await isMonitorHostAllowed(input.hostname, input.type) })),
 });
 
 // ---------------------------------------------------------------------------
@@ -669,6 +585,12 @@ const notificationLogRouter = router({
 // ---------------------------------------------------------------------------
 
 const checkLogRouter = router({
+  daily: protectedProcedure.input(z.object({ uptimeMonitorId: z.string(), days: z.number().int().min(1).max(90).default(90) })).query(async ({ input, ctx }) => {
+    await findOwnedMonitorOrThrow(input.uptimeMonitorId, ctx.user.id, ctx.t);
+    const until = new Date();
+    const since = new Date(Date.UTC(until.getUTCFullYear(), until.getUTCMonth(), until.getUTCDate() - input.days + 1)).toISOString();
+    return getMonitorDailyUptime(input.uptimeMonitorId, ctx.user.id, since, until.toISOString());
+  }),
 	list: protectedProcedure
 		.input(
 			z.object({
@@ -2589,6 +2511,8 @@ const slaReportRouter = router({
 // ---------------------------------------------------------------------------
 
 export const uptimeRouter = router({
+  network: networkRouter,
+  egress: egressRouter,
 	monitor: monitorRouter,
 	statusChange: statusChangeRouter,
 	notificationLog: notificationLogRouter,
