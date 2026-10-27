@@ -3,7 +3,8 @@
 ## What Pulsy Is
 
 Pulsy is a **self-hosted, open-source website uptime & downtime monitor**. It periodically checks
-URLs (HTTP GET/HEAD/POST), tracks up/down/degraded status, watches TLS certificate expiry, groups
+HTTP (GET/HEAD/POST), DNS/TCP targets, cron heartbeats and Linux server health;
+it tracks up/down/degraded status, watches TLS certificate expiry, groups
 failures into incidents, sends notifications (email/webhook/Slack/Discord/Telegram), and serves
 public status pages. Single-user accounts: every monitor is scoped to its owning `userId`.
 
@@ -77,12 +78,20 @@ matching container. Contributor setup and runtime validation are Docker-first.
   per-turn confirmation.
 - **Docker-only execution** (strict) — all build/test/lint/typecheck/migrate/seed/run via `make`
   or `docker compose exec pulsy-*`, never the host.
+- Source containers have no bind mounts: rebuild with `make start` before checks.
+  Generate migrations in Docker and copy them out; regenerate the router tree only
+  through the web build stage. Never run Node, pnpm or Go on the host.
+- Shared UI controls, canonical monitor tabs, account timezone and the five locale
+  namespaces stay consistent. Keep pre-paint scripts external under the strict CSP.
+- Required quality gates include real ESLint, translation integrity, agent checks
+  and installed-agent acceptance; see `docs/TESTING.md` and the Makefile.
 - Single root `.env` for all env vars.
 
 ## Hard Rules
 
 - **Capability is never gated** — no plans, tiers, entitlements, quotas, or paywalls. Never
-  add billing code or a flag that unlocks a feature.
+  add billing code or a flag that unlocks a feature. Uniform technical abuse
+  ceilings in `lib/account-caps.ts` never depend on account capability.
 - Scope every monitor/incident/log/provider/channel/share-link query by `ctx.user.id`.
 - Secrets (email-provider credentials, etc.) are encrypted at rest (AES-256-GCM via
   `ENCRYPTION_KEY`) — never logged, never returned unmasked, no fallback/default key values, and
@@ -110,5 +119,15 @@ matching container. Contributor setup and runtime validation are Docker-first.
   general CORS/auth/JSON parsing. No public tRPC procedures are added.
 - Server-agent tokens may be returned only by explicit owner create/rotate actions;
   ordinary server and metric projections omit all credential fields.
+- Webhook signing keys use the OSS per-field encryption scheme. Browser-generated
+  64-character lowercase hex keys enter create/rotate requests; every channel
+  server response stays masked, and rotation returns only `{rotated:true}`.
+  Never port an envelope format or add a raw-secret response exception.
+- Notification channel types are email, webhook, Slack, Discord and Telegram.
+  Provider/diagnostic output is sanitized; notification links use `PUBLIC_WEB_URL`.
+- Egress permits private/LAN targets by default through
+  `MONITOR_ALLOW_PRIVATE_NETWORKS=true`; metadata/link-local remain blocked.
+  Validate inputs, pin DNS at connect and re-check every redirect. The old
+  `BLOCK_PRIVATE_TARGETS=true` alias means deny only when the new setting is absent.
 - 5 locales (en, ar, fr, de, es) + full RTL.
 - Conventional commits. Pinned deps from public npm only.

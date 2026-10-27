@@ -9,6 +9,7 @@ import type { PageSelectionPreview, PageReplacementPreview } from "@/types/page-
  */
 
 import { SERVER_URL, trpcQuery, trpcMutation } from "@/lib/api/trpc";
+
 import type {
   UptimeMonitor,
   HttpConfigurationResult,
@@ -49,6 +50,12 @@ import type {
   StatusPageDomainState,
   DomainStatus,
 } from "@/types/uptime";
+
+// Keep the one-time display value in this client; HTTP replies contain masked data only.
+function newLocalWebhookSecret(): string {
+  const bytes = crypto.getRandomValues(new Uint8Array(32));
+  return Array.from(bytes, value => value.toString(16).padStart(2, "0")).join("");
+}
 
 /**
  * Uptime Monitor Service
@@ -384,11 +391,11 @@ export const UptimeService = {
   async createDefaultChannel(
     input: CreateUptimeDefaultNotificationChannelInput
   ): Promise<UptimeNotificationChannel & { signingSecret?: string }> {
-    return trpcMutation<UptimeNotificationChannel>(
-      "uptimeMonitor",
-      "channel.createDefault",
-      input
+    const signingSecret = input.channelType === "webhook" ? newLocalWebhookSecret() : undefined;
+    const channel = await trpcMutation<UptimeNotificationChannel>(
+      "uptimeMonitor", "channel.createDefault", { ...input, ...(signingSecret ? { signingSecret } : {}) }
     );
+    return signingSecret ? { ...channel, signingSecret } : channel;
   },
 
   /**
@@ -397,18 +404,20 @@ export const UptimeService = {
   async createChannel(
     input: CreateUptimeNotificationChannelInput
   ): Promise<UptimeNotificationChannel & { signingSecret?: string }> {
-    return trpcMutation<UptimeNotificationChannel>(
-      "uptimeMonitor",
-      "channel.create",
-      input
+    const signingSecret = input.channelType === "webhook" ? newLocalWebhookSecret() : undefined;
+    const channel = await trpcMutation<UptimeNotificationChannel>(
+      "uptimeMonitor", "channel.create", { ...input, ...(signingSecret ? { signingSecret } : {}) }
     );
+    return signingSecret ? { ...channel, signingSecret } : channel;
   },
 
   /**
    * Update an existing notification channel
    */
   async rotateChannelSecret(channelId: string): Promise<{ signingSecret: string }> {
-    return trpcMutation("uptimeMonitor", "channel.rotateSecret", { channelId });
+    const signingSecret = newLocalWebhookSecret();
+    await trpcMutation<{ rotated: true }>("uptimeMonitor", "channel.rotateSecret", { channelId, signingSecret });
+    return { signingSecret };
   },
 
   async updateChannel(

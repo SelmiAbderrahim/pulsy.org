@@ -21,6 +21,7 @@ function fakeResponse(status: number, redirected = false): Response {
 
 afterEach(() => {
 	vi.restoreAllMocks();
+	vi.unstubAllEnvs();
 });
 
 describe("performHttpCheck — responses", () => {
@@ -43,6 +44,7 @@ describe("performHttpCheck — responses", () => {
 		const r = await performHttpCheck(makeMonitor());
 		expect(r.status).toBe("down");
 		expect(r.errorMessage).toBe("unexpected_status");
+		expect(r.httpStatus).toBe(503);
 	});
 
 	it("reports degraded for an unexpected sub-400 status", async () => {
@@ -77,4 +79,24 @@ describe("performHttpCheck — error classification", () => {
 			expect(r.errorMessage).toBe(expected);
 		});
 	}
+});
+
+
+describe("performHttpCheck — egress privacy and response cleanup", () => {
+  it("reports a blocked private destination without exposing its resolved address", async () => {
+    vi.stubEnv("MONITOR_ALLOW_PRIVATE_NETWORKS", "false");
+    const result = await performHttpCheck(makeMonitor({ url: "http://localhost/" }));
+    expect(result).toMatchObject({ status: "down", errorMessage: "blocked_target", httpStatus: null, responseTime: null });
+    expect(JSON.stringify(result)).not.toMatch(/127\.0\.0\.1|::1|localhost/);
+  });
+
+  it("cancels the unread response stream after reading the status", async () => {
+    let cancellations = 0;
+    const stream = new ReadableStream({ cancel() { cancellations++; } });
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(stream, { status: 200 }));
+    const result = await performHttpCheck(makeMonitor());
+    expect(result.status).toBe("up");
+    expect(cancellations).toBe(1);
+    expect(stream.locked).toBe(false);
+  });
 });

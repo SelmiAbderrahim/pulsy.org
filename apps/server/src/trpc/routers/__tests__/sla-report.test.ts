@@ -53,7 +53,7 @@ describe("uptimeMonitor.slaReport.subscription", () => {
 	it("creates, lists, updates and removes a subscription", async () => {
 		const u = await createTestUser();
 		const m = await createTestMonitor(u.id, { name: "Bound" });
-		const provider = await createTestEmailProvider(u.id);
+		const provider = await createTestEmailProvider(u.id, { verified: true });
 		const caller = authedCaller({ id: u.id, email: u.email });
 
 		const created = await caller.uptimeMonitor.slaReport.subscription.upsert({
@@ -85,7 +85,7 @@ describe("uptimeMonitor.slaReport.subscription", () => {
 
 	it("lists an account-wide subscription with a null monitor name", async () => {
 		const u = await createTestUser();
-		const provider = await createTestEmailProvider(u.id);
+		const provider = await createTestEmailProvider(u.id, { verified: true });
 		await createTestSlaReportSubscription(u.id, {
 			emailProviderId: provider.emailProviderId,
 		});
@@ -111,7 +111,7 @@ describe("uptimeMonitor.slaReport.subscription", () => {
 	it("rejects a monitor owned by another user", async () => {
 		const u = await createTestUser();
 		const stranger = await createTestUser();
-		const provider = await createTestEmailProvider(u.id);
+		const provider = await createTestEmailProvider(u.id, { verified: true });
 		const m = await createTestMonitor(stranger.id);
 		const caller = authedCaller({ id: u.id, email: u.email });
 		await expect(
@@ -126,7 +126,7 @@ describe("uptimeMonitor.slaReport.subscription", () => {
 	it("rejects updating a subscription that is not the caller's", async () => {
 		const u = await createTestUser();
 		const stranger = await createTestUser();
-		const provider = await createTestEmailProvider(u.id);
+		const provider = await createTestEmailProvider(u.id, { verified: true });
 		const strangerProvider = await createTestEmailProvider(stranger.id);
 		const sub = await createTestSlaReportSubscription(stranger.id, {
 			emailProviderId: strangerProvider.emailProviderId,
@@ -153,7 +153,7 @@ describe("uptimeMonitor.slaReport.subscription", () => {
 
 	it("rejects an invalid recipient email via Zod", async () => {
 		const u = await createTestUser();
-		const provider = await createTestEmailProvider(u.id);
+		const provider = await createTestEmailProvider(u.id, { verified: true });
 		const caller = authedCaller({ id: u.id, email: u.email });
 		await expect(
 			caller.uptimeMonitor.slaReport.subscription.upsert({
@@ -167,7 +167,7 @@ describe("uptimeMonitor.slaReport.subscription", () => {
 		const fx = mockFetch();
 		try {
 			const u = await createTestUser();
-			const provider = await createTestEmailProvider(u.id);
+			const provider = await createTestEmailProvider(u.id, { verified: true });
 			await createTestMonitor(u.id);
 			const sub = await createTestSlaReportSubscription(u.id, {
 				emailProviderId: provider.emailProviderId,

@@ -8,6 +8,7 @@ import { createHeartbeatForUser, receiveHeartbeat, scanHeartbeatDeadlines, rotat
 import { uptimeMonitor, uptimeHeartbeat, uptimeHeartbeatRun, uptimeIncident, uptimeStatusChange, uptimeCheckLog } from "@pulsy/db";
 import { eq } from "drizzle-orm";
 import { authedCaller } from "../../../../test/trpc-caller";
+import { getOwnedUptimeAggregates } from "../stats-service";
 useCleanDatabase();
 afterEach(async () => { await stopHeartbeatWorker(); vi.useRealTimers(); vi.restoreAllMocks(); });
 const t = getTranslator("en");
@@ -344,5 +345,39 @@ describe("durable interval heartbeats", () => {
     await receiveHeartbeat(created.token, "success", {}, at(1001));
     expect((await db.select().from(uptimeMonitor))[0]?.status).toBe("up");
     expect((await db.select().from(uptimeIncident))[0]?.status).toBe("resolved");
+  });
+
+  it("excludes new no-data heartbeats, includes never-pinged overdue failures and disabled recorded history in both dashboard averages", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(at(400));
+    const owner = await createTestUser(); const other = await createTestUser();
+    const caller = authedCaller(owner);
+    const fresh = await createHeartbeatForUser({ ...input, name: "New" }, owner.id, t, at(399));
+    const missed = await createHeartbeatForUser(input, owner.id, t, start);
+    const healthy = await createHeartbeatForUser({ ...input, name: "Healthy" }, owner.id, t, at(399));
+    const foreign = await createHeartbeatForUser(input, other.id, t, start);
+    expect(await caller.uptimeMonitor.dashboard.summary()).toMatchObject({ avgUptimePercentage: null, uptimeMonitorsWithData: 0 });
+    expect(await getOwnedUptimeAggregates(owner.id)).toEqual(new Map());
+
+    expect(await receiveHeartbeat(healthy.token, "success", {}, at(400))).toMatchObject({ statusCode: 200, outcome: "accepted" });
+    await scanHeartbeatDeadlines(at(400));
+    const aggregates = await getOwnedUptimeAggregates(owner.id);
+    expect(aggregates.size).toBe(2);
+    expect(aggregates.has(fresh.monitor.uptimeMonitorId)).toBe(false);
+    expect(aggregates.has(foreign.monitor.uptimeMonitorId)).toBe(false);
+    expect(aggregates.get(missed.monitor.uptimeMonitorId)?.uptimePercentage).toBe(0);
+    expect(aggregates.get(healthy.monitor.uptimeMonitorId)?.uptimePercentage).toBe(100);
+    expect((await readHeartbeatForUser(missed.monitor.uptimeMonitorId, owner.id, t)).lastSuccessAt).toBeNull();
+
+    await db.update(uptimeMonitor).set({ active: false }).where(eq(uptimeMonitor.uptimeMonitorId, healthy.monitor.uptimeMonitorId));
+    expect(await caller.uptimeMonitor.dashboard.summary()).toMatchObject({ avgUptimePercentage: 50, uptimeMonitorsWithData: 2 });
+    const list = await caller.uptimeMonitor.monitor.list();
+    expect(list).toHaveLength(3);
+    expect(list.find(monitor => monitor.uptimeMonitorId === fresh.monitor.uptimeMonitorId)).toMatchObject({ uptimePercentage: null, uptimeChecks: 0 });
+    expect(list.find(monitor => monitor.uptimeMonitorId === missed.monitor.uptimeMonitorId)?.uptimePercentage).toBe(0);
+    expect(list.find(monitor => monitor.uptimeMonitorId === healthy.monitor.uptimeMonitorId)).toMatchObject({ active: false, uptimePercentage: 100 });
+    // The browser derives its equal-weight average from the list snapshot.
+    const measured = list.map(monitor => monitor.uptimePercentage).filter((value): value is number => value !== null);
+    expect(measured).toHaveLength(2);
+    expect(measured.reduce((sum, value) => sum + value, 0) / measured.length).toBe(50);
   });
 });

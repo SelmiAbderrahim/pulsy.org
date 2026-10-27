@@ -292,6 +292,19 @@ describe("sendDiscordNotification", () => {
 });
 
 describe("sendTelegramNotification — target parsing", () => {
+	it.each([
+		"http://127.0.0.1:4000/bot123:abc/sendMessage",
+		"http://169.254.169.254/bot123:abc/sendMessage",
+		"https://api.telegram.org:8443/bot123:abc/sendMessage?chat_id=123",
+		"https://user:private-password@api.telegram.org/bot123:abc/sendMessage?chat_id=123",
+	])("rejects URL-shaped legacy destinations before sending: %s", async webhookUrl => {
+		const fx = mockFetch();
+		try {
+			const channel = await createTestChannel(monitor.uptimeMonitorId, { channelType: "telegram", webhookUrl });
+			await expect(sendTelegramNotification(channel, monitor, downChange())).rejects.toThrow(/bot token and chat ID are required/);
+			expect(fx.calls).toHaveLength(0);
+		} finally { fx.restore(); }
+	});
 	it("throws when no webhookUrl is set", async () => {
 		const channel = await createTestChannel(monitor.uptimeMonitorId, {
 			channelType: "telegram",

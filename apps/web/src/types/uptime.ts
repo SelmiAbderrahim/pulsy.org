@@ -201,7 +201,6 @@ export interface UptimeEmailProvider {
 export interface UptimeNotificationChannel {
   channelId: string;
   uptimeMonitorId: string | null;
-  userId: string;
   channelType: UptimeNotificationChannelType;
   emailProviderId: string | null;
   recipientAddresses: string[] | null;

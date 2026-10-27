@@ -1682,7 +1682,9 @@ describe("uptimeMonitor.channel defaults", () => {
 			tlsExpiryThresholdDays: 14,
 		});
 		expect(created.uptimeMonitorId).toBeNull();
-		expect(created.userId).toBe(owner.id);
+		expect(created).not.toHaveProperty("userId");
+		const stored = await db.query.uptimeNotificationChannel.findFirst({ where: eq(uptimeNotificationChannel.channelId, created.channelId) });
+		expect(stored?.userId).toBe(owner.id);
 		expect(created.hasWebhookUrl).toBe(true);
 		expect(created).not.toHaveProperty("webhookUrl");
 		expect(created).not.toHaveProperty("webhookHeaders");

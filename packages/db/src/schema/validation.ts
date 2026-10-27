@@ -189,9 +189,13 @@ function validateChannelTarget(
 		recipientAddresses?: string[];
 		webhookUrl?: string | null;
 		webhookHeaders?: Record<string, string> | null;
+		signingSecret?: string;
 	},
 	ctx: z.RefinementCtx,
 ): void {
+	if (value.signingSecret !== undefined && value.channelType !== "webhook") {
+		requireField(ctx, "signingSecret", "Signing secrets are only supported for webhook channels");
+	}
 	switch (value.channelType) {
 		case "email":
 			if (!value.emailProviderId) {
@@ -231,12 +235,15 @@ function validateChannelTarget(
 	}
 }
 
+export const apiWebhookSigningSecret = z.string().regex(/^[a-f0-9]{64}$/, "Signing secret must contain exactly 64 lowercase hexadecimal characters");
+
 const apiNotificationChannelConfigShape = {
 	channelType: z.enum(["email", "webhook", "slack", "discord", "telegram"]),
 	emailProviderId: z.string().optional(),
 	recipientAddresses: z.array(z.string().email()).optional(),
 	webhookUrl: z.string().min(1).optional(),
 	webhookHeaders: webhookHeadersSchema.nullable().optional(),
+	signingSecret: apiWebhookSigningSecret.optional(),
 	notifyOnDown: z.boolean().default(true),
 	notifyOnDegraded: z.boolean().optional(),
 	notifyOnRecovery: z.boolean().default(true),

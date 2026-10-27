@@ -451,6 +451,7 @@ async function sendViaResend(
 	});
 
 	if (!response.ok) {
+		await response.body?.cancel().catch(() => {});
 		throw new NotificationSendError(
 			`Resend API error (${response.status})`,
 			response.status,
@@ -498,6 +499,7 @@ async function sendViaSendGrid(
 	});
 
 	if (!response.ok) {
+		await response.body?.cancel().catch(() => {});
 		throw new NotificationSendError(
 			`SendGrid API error (${response.status})`,
 			response.status,

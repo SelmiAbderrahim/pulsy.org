@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { and, eq } from "drizzle-orm";
 import { db, uptimeMonitor, uptimeHeartbeat, uptimeHeartbeatRun } from "@pulsy/db";
 import { authedCaller, publicCaller } from "../../../../test/trpc-caller";
-import { createTestUser, createTestMonitor, useCleanDatabase } from "../../../../test/db";
+import { createTestUser, createTestMonitor, createTestStatusPage, createTestStatusPageMonitor, useCleanDatabase } from "../../../../test/db";
 
 useCleanDatabase();
 afterEach(() => vi.unstubAllEnvs());
@@ -118,5 +118,29 @@ describe("protected heartbeat configuration", () => {
 		]);
 		expect(results).toHaveLength(3);
 		expect(await db.select().from(uptimeMonitor).where(eq(uptimeMonitor.userId, user.id))).toHaveLength(14);
+	});
+
+	it("never makes New or an empty or partially observed page operational and omits heartbeat credentials", async () => {
+		const user = await createTestUser(); const owner = authedCaller(user);
+		const page = await createTestStatusPage(user.id, { slug: "jobs", isPublished: true });
+		const publicPage = () => publicCaller().uptimeMonitor.public.statusPageBySlug({ userId: user.id, slug: "jobs" });
+		expect((await publicPage()).overallStatus).toBe("unknown");
+		const heartbeat = await owner.uptimeMonitor.heartbeat.create(config);
+		await createTestStatusPageMonitor(page.statusPageId, heartbeat.monitor.uptimeMonitorId);
+		const up = await createTestMonitor(user.id, { status: "up" });
+		await createTestStatusPageMonitor(page.statusPageId, up.uptimeMonitorId);
+		const projection = await publicPage();
+		expect(projection.overallStatus).toBe("unknown");
+		expect(projection.monitors).toHaveLength(2);
+		expect(projection.monitors.find(monitor => monitor.monitorType === "heartbeat")).toMatchObject({ status: "pending", uptimePercentage: null });
+		await db.update(uptimeMonitor).set({ status: "down" }).where(and(eq(uptimeMonitor.uptimeMonitorId, up.uptimeMonitorId), eq(uptimeMonitor.userId, user.id)));
+		const partiallyDown = await publicPage();
+		expect(partiallyDown.overallStatus).toBe("partial");
+		for (const view of [projection, partiallyDown]) {
+			expect(JSON.stringify(view)).not.toContain(heartbeat.token);
+			for (const monitor of view.monitors) {
+				for (const field of ["userId", "uptimeMonitorId", "token", "tokenHash", "tokenCipher", "heartbeat", "requestCipher"]) expect(monitor).not.toHaveProperty(field);
+			}
+		}
 	});
 });

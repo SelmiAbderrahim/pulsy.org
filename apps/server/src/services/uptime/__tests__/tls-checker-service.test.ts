@@ -22,6 +22,8 @@ interface FakeSocketOptions {
 	throwInCallback?: boolean;
 	/** Fire this socket event instead of invoking the connect callback. */
 	emit?: "error" | "timeout" | null;
+	/** Never complete the handshake or emit an idle-timeout event. */
+	silent?: boolean;
 }
 
 /**
@@ -51,6 +53,7 @@ function primeSocket(opts: FakeSocketOptions = {}) {
 
 	connectMock.mockImplementation(
 		(_options: unknown, cb: ConnectCallback) => {
+			if (opts.silent) return socket;
 			if (opts.emit) {
 				// Defer so the Promise executor finishes registering listeners.
 				queueMicrotask(() => listeners[opts.emit as string]?.());
@@ -66,10 +69,12 @@ function primeSocket(opts: FakeSocketOptions = {}) {
 
 beforeEach(() => {
 	connectMock.mockReset();
+	vi.stubEnv("MONITOR_ALLOW_PRIVATE_NETWORKS", "true");
 });
 
 afterEach(() => {
 	vi.clearAllMocks();
+	vi.unstubAllEnvs();
 });
 
 describe("checkTlsCertificate — early returns", () => {
@@ -244,24 +249,14 @@ describe("checkTlsCertificate — socket failures", () => {
 });
 
 describe("checkTlsCertificate — opt-in egress filtering", () => {
-	const ORIGINAL = process.env.BLOCK_PRIVATE_TARGETS;
-
-	afterEach(() => {
-		if (ORIGINAL === undefined) {
-			delete process.env.BLOCK_PRIVATE_TARGETS;
-		} else {
-			process.env.BLOCK_PRIVATE_TARGETS = ORIGINAL;
-		}
-	});
-
 	it("returns null without opening a socket for a blocked host", async () => {
-		process.env.BLOCK_PRIVATE_TARGETS = "true";
+		vi.stubEnv("MONITOR_ALLOW_PRIVATE_NETWORKS", "false");
 		expect(await checkTlsCertificate("https://127.0.0.1/")).toBeNull();
 		expect(connectMock).not.toHaveBeenCalled();
 	});
 
 	it("still probes an allowed public host when filtering is on", async () => {
-		process.env.BLOCK_PRIVATE_TARGETS = "true";
+		vi.stubEnv("MONITOR_ALLOW_PRIVATE_NETWORKS", "false");
 		primeSocket({
 			authorized: true,
 			cert: {
@@ -274,5 +269,30 @@ describe("checkTlsCertificate — opt-in egress filtering", () => {
 		const result = await checkTlsCertificate("https://8.8.8.8/");
 		expect(result).not.toBeNull();
 		expect(connectMock).toHaveBeenCalled();
+	});
+});
+describe("checkTlsCertificate — absolute deadline", () => {
+	afterEach(() => vi.useRealTimers());
+
+	it("gives up on a probe that never completes, destroying the socket (idle timeout alone would not fire)", async () => {
+		vi.useFakeTimers();
+		const { destroy } = primeSocket({ silent: true });
+		const pending = checkTlsCertificate("https://slow.example.com", 500);
+		await vi.advanceTimersByTimeAsync(499);
+		expect(destroy).not.toHaveBeenCalled();
+		await vi.advanceTimersByTimeAsync(2);
+		await expect(pending).resolves.toBeNull();
+		expect(destroy).toHaveBeenCalledTimes(1);
+	});
+
+	it("a probe that finishes in time leaves no deadline timer behind", async () => {
+		vi.useFakeTimers();
+		const { destroy } = primeSocket({ cert: { valid_to: new Date(Date.now() + 30 * 86_400_000).toUTCString(), issuer: { O: "Test CA" } }, authorized: true });
+		const result = await checkTlsCertificate("https://fast.example.com", 500);
+		expect(result).not.toBeNull();
+		const destroyedAfterFinish = destroy.mock.calls.length;
+		await vi.advanceTimersByTimeAsync(5000);
+		expect(destroy.mock.calls.length).toBe(destroyedAfterFinish);
+		expect(vi.getTimerCount()).toBe(0);
 	});
 });

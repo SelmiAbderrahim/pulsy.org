@@ -15,6 +15,18 @@ describe("extractNameFromUrl()", () => {
 	it("returns an empty string for an invalid URL", () => {
 		expect(extractNameFromUrl("not a url")).toBe("");
 		expect(extractNameFromUrl("")).toBe("");
-		expect(extractNameFromUrl("example.com")).toBe("");
+	});
+
+	it.each([
+		["example.com", "example.com"],
+		[" api.example.com/health ", "api.example.com"],
+		["example.com:8443/path", "example.com"],
+		["localhost:8080/health", "localhost"],
+	])("normalizes the accepted monitor address %s before extracting its name", (input, expected) => {
+		expect(extractNameFromUrl(input)).toBe(expected);
+	});
+
+	it.each(["ftp://example.com/file", "https://user:secret@example.com", "https://example.com/a b"])("does not name an unsupported monitor address: %s", (input) => {
+		expect(extractNameFromUrl(input)).toBe("");
 	});
 });

@@ -99,9 +99,37 @@ trust, service state, config permissions and whether the credential was rotated.
 
 ## Reproducible builds
 
-`make agent-format`, `make agent-check` and `make agent-build` run inside the
-pinned Go container. The agent has no third-party Go dependencies. Static
-amd64/arm64 binaries use trimmed paths, no VCS stamping and no build ID. Generated
-artifacts are ignored by Git. The server Dockerfile uses the same build script.
+Run contributor checks and builds from the repository root through Docker:
+
+```sh
+make agent-check
+make agent-build
+make agent-install-check
+make agent-compose-check
+```
+
+`make agent-check` checks gofmt output, runs Go vet and runs race-enabled tests.
+`make agent-format` applies formatting inside the same Docker toolchain. No host
+Go installation is needed. The module declares Go 1.26.0; the Docker toolchain is
+Go 1.27.2, pinned by image digest in `docker/Dockerfile.agent`.
+
+The agent has no third-party Go dependencies. Static amd64/arm64 binaries use
+trimmed paths, no VCS stamping and no build ID. `make agent-build` exports the
+binaries, `install.sh`, `compose.yaml` and `SHA256SUMS` under
+`artifacts/agent/v1.0.0/`; these generated artifacts are ignored by Git. The server
+Dockerfile uses the same build script in its pinned Go `BUILDPLATFORM` stage and
+serves those release files directly from `/api/agent/releases/v1.0.0/`.
+
+`make agent-install-check` exercises the real installer in a disposable systemd
+fixture. `make agent-compose-check` runs the installer-generated Compose agent
+against a local HTTPS receiver and checks host metrics; it needs the configured
+root `.env` for Compose. Both targets build their release artifacts automatically.
+
+For acceptance against the actual Pulsy API and dashboard, run
+`make server-health-e2e`. It uses an isolated database, local notifications and
+real 60-second reports to check pressure, recovery, missing reports, restart
+persistence, credential rotation and deletion. Redacted evidence is exported to
+`artifacts/server-health-e2e/`. See [Testing](../docs/TESTING.md) for prerequisites,
+focused regressions and evidence handling.
 
 Metric semantics follow the [Linux proc filesystem documentation](https://www.kernel.org/doc/html/latest/filesystems/proc.html).

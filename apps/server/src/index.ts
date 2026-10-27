@@ -103,6 +103,13 @@ app.use(
 // Published page projections and body-only subscription capabilities precede cookie CORS/auth.
 app.use("/api/status", createPublicStatusRouter());
 
+// Bearer API keys have their own noncredentialed CORS and JSON boundaries.
+// Complete enabled REST requests here, before the session-origin allowlist;
+// disabled REST paths continue through the normal cookie-origin policy.
+if (API_V1_ENABLED) {
+	app.use("/api/v1", createV1Router());
+}
+
 app.use(
 	cors({
 		origin(origin, callback) {
@@ -136,13 +143,6 @@ app.use("/api/agent/v1", createServerHealthRouter());
 app.use("/api/agent/releases/v1.0.0", createAgentReleaseRouter());
 app.use(createApiJsonParser());
 app.use(apiJsonErrorHandler);
-
-// Public REST API (Bearer API-key auth). Mounted AFTER `express.json()` and
-// BEFORE `/api/trpc`; its own CORS allows `Authorization` independently of the
-// credentialed cookie CORS above.
-if (API_V1_ENABLED) {
-	app.use("/api/v1", createV1Router());
-}
 
 // tRPC. Per-IP fixed-window limiter in front — this is the surface that
 // includes the unauthenticated public procedures (status pages, share links),

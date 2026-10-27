@@ -1024,6 +1024,18 @@ describe("testEmailProvider", () => {
 });
 
 describe("provider failure privacy and cleanup", () => {
+	it.each(["resend", "sendgrid"] as const)("releases an unread %s failure body without replacing the safe error", async providerType => {
+		const cancel = vi.fn().mockRejectedValue(new Error("private cleanup failure"));
+		const response = new Response("private-provider-token", { status: 401 });
+		vi.spyOn(response.body!, "cancel").mockImplementation(cancel);
+		const fx = mockFetch(() => response);
+		try {
+			const error = await sendViaProvider({ providerType, apiKey: "fixture-secret", smtpHost: null, smtpPort: null, smtpUsername: null, smtpPassword: null, smtpSecure: null, fromAddress: "sender@fixtures.invalid" }, "recipient@fixtures.invalid", "Fixture", "<p>fixture</p>").catch(value => value);
+			expect(cancel).toHaveBeenCalledTimes(1);
+			expect(String(error)).toContain("401");
+			expect(String(error)).not.toMatch(/private|fixture-secret|recipient@/);
+		} finally { fx.restore(); }
+	});
   it.each([[450, true], [550, false]])("preserves SMTP %i temporary/permanent retry policy", async (responseCode, retryable) => {
     sendMail.mockRejectedValueOnce(Object.assign(new Error("private smtp response"), { code: "EENVELOPE", responseCode }));
     const error = await sendViaProvider({ providerType: "smtp", apiKey: null, smtpHost: "smtp.fixtures.invalid", smtpPort: 2525, smtpUsername: "fixture", smtpPassword: "smtp-password", smtpSecure: false, fromAddress: "sender@fixtures.invalid" }, "recipient@fixtures.invalid", "Fixture", "<p>fixture</p>").catch(value => value);

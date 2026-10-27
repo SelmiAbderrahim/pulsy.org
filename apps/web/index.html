@@ -11,14 +11,7 @@
       html[data-locale-pending] #root { display: none; }
       html[data-locale-pending] #locale-loading { display: grid; min-height: 100dvh; place-content: center; padding: 1rem; box-sizing: border-box; font: 1rem system-ui; overflow-wrap: anywhere; }
     </style>
-    <script>
-      (function () {
-        var stored; try { stored = localStorage.getItem("pulsy-theme"); } catch (e) {}
-        var dark = stored === "dark" || (stored !== "light" && window.matchMedia && matchMedia("(prefers-color-scheme: dark)").matches);
-        document.documentElement.classList.toggle("dark", dark);
-        document.documentElement.style.colorScheme = dark ? "dark" : "light";
-      })();
-    </script>
+    <script src="/theme-bootstrap.js"></script>
     <script src="/locale-bootstrap.js"></script>
 	</head>
 	<body>

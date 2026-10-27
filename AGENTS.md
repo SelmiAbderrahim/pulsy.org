@@ -10,7 +10,8 @@
 ## 1. Project Identity
 
 Pulsy is a **self-hosted, open-source website uptime & downtime monitor** (AGPL-3.0-or-later).
-It checks URLs, tracks up/down/degraded status, watches TLS cert expiry, groups
+It checks HTTP/DNS/TCP targets, receives cron heartbeats and Linux server health,
+tracks up/down/degraded status, watches TLS cert expiry, groups
 failures into incidents, sends notifications (email/webhook/Slack/Discord/Telegram),
 and serves public status pages. Single-user accounts: every monitor is scoped to
 its owning `userId`. Every capability is free and ungated: there is no billing code,
@@ -31,7 +32,8 @@ These apply to **every** change. See `CLAUDE.md`'s Conventions section for the f
 
 ### 2.1 Everything is free and ungated
 No plans, tiers, entitlements, quotas, or billing code. Never add a paywall or a
-capability flag that unlocks a feature.
+capability flag that unlocks a feature. Uniform technical abuse ceilings in
+`lib/account-caps.ts` apply equally to every account and never unlock capability.
 
 ### 2.2 Scope every query by `ctx.user.id`
 Monitor, incident, log, provider, channel, share link -- all `userId`-scoped. The complete `publicProcedure` whitelist is `uptimeMonitor.public.{status, statusPageBySlug, statusPageByDomain, sharedLink}`.
@@ -62,6 +64,9 @@ Heartbeat tokens are exposed only by explicit owner create, rotate, or reveal
 actions; polling projections omit both token hash and ciphertext.
 Server-agent tokens are returned only by explicit owner create/rotate actions;
 ordinary server and metric projections omit all credential fields.
+Webhook signing keys use the OSS per-field scheme; browser-generated 64-character
+lowercase hex keys enter create/rotate requests. Every channel server response
+stays masked; rotation returns only `{rotated:true}`. No raw-secret exception.
 
 ### 2.5 UI stays restrained
 `shadow-sm` max, no lift-on-hover, no decorative animation, no `rounded-2xl+`, no `transition-all`.
@@ -70,12 +75,21 @@ ordinary server and metric projections omit all credential fields.
 Logical CSS props (`ms-`, `me-`, `text-start`); `dir="rtl"` for Arabic.
 
 ### 2.7 Docker-only development
-Run dev commands inside `pulsy-*` containers via `make`. Never `pnpm dev` on the host.
+Run build/test/lint/typecheck/migrate/seed commands through `make` or matching
+containers; never Node, pnpm or Go on the host. Source containers have no bind
+mounts: run `make start` before checks after edits. Generate migrations in Docker
+and copy them out; regenerate the route tree through the web build stage only.
 
 ### 2.8 No destructive git without per-turn confirmation
 `git push --force`, `git reset --hard`, branch deletes -- always ask first.
 
 ---
+
+### 2.9 Egress policy
+`MONITOR_ALLOW_PRIVATE_NETWORKS=true` is the OSS default for private/LAN targets.
+Metadata/link-local stay blocked. Input validation, DNS pinning at connect and
+redirect-hop checks are mandatory. `BLOCK_PRIVATE_TARGETS=true` is a deprecated
+deny alias only when the new setting is absent; startup reports the policy.
 
 ## 3. Sources of Truth
 
@@ -106,5 +120,9 @@ make migrate    # run drizzle migrations
 make seed       # demo user + example monitors
 make logs       # tail all services
 make stop       # docker compose down
+make lint       # real ESLint + policy tests and typechecks
+make translations-check # references, plurals, placeholders and gate regressions
+make agent-check # pinned Go toolchain tests
+make server-health-e2e # real installed-agent/browser acceptance
 make graph-update  # refresh code-review-graph after edits
 ```

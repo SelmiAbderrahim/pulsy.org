@@ -6,7 +6,8 @@
 // it shares behavior with the tRPC dashboard API. Read-scoped keys can read;
 // full-scoped keys can also write. Every route is scoped to the key owner.
 //
-// Mounted in `index.ts` AFTER `express.json()` and BEFORE `/api/trpc`. The
+// Mounted in `index.ts` BEFORE credentialed CORS and the general JSON parser.
+// This router owns its noncredentialed CORS, parsing and error boundaries. The
 // rate limiter is per-key and in-memory (single-replica deploy).
 // ---------------------------------------------------------------------------
 
@@ -43,6 +44,7 @@ import {
 } from "../../services/uptime";
 import { resolveApiKey as defaultResolveApiKey } from "../../services/api-keys/api-key-service";
 import { sendApiError, sendApiErrorMessage } from "../http";
+import { apiJsonErrorHandler } from "../json-body";
 import { apiKeyAuth, requireApiScope } from "../middleware";
 import { createRateLimiter, type RateLimiterOptions } from "../rate-limit";
 import "../types";
@@ -256,6 +258,13 @@ export function createV1Router(options: V1RouterOptions = {}): Router {
 
 	router.use(apiKeyAuth({ resolve: options.resolve }));
 	router.use(createRateLimiter(options.rateLimit));
+
+	// Normal REST bodies retain the general parser's default bound. Configuration
+	// keeps its separate authenticated 1 MiB parser below; never parse it twice.
+	const normalJson = parseJson();
+	router.use((req, res, next) => /^\/configuration(?:\/|$)/i.test(req.path)
+		? next() : normalJson(req, res, next));
+	router.use(apiJsonErrorHandler);
 
 	const readAccess = requireApiScope("read");
 	const writeAccess = requireApiScope("full");
@@ -614,6 +623,13 @@ export function createV1Router(options: V1RouterOptions = {}): Router {
 			res.json({ data: toApiMonitor(updated, (await checkSuccessFor(req.apiUser!.id, [updated])).get(updated.uptimeMonitorId) ?? null) });
 		}),
 	);
+
+	// Unknown REST paths must not fall through to credentialed cookie CORS.
+	router.use((req, res) => {
+		sendApiError(res, req.apiTranslator!, "not_found", "errors.notFound", {
+			vars: { resource: "API route" },
+		});
+	});
 
 	return router;
 }

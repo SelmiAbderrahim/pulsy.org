@@ -10,8 +10,8 @@ import type { UptimeMonitor } from "@/types/uptime";
 
 /**
  * Filter monitors by a case-insensitive substring match against the monitor
- * name, url, or any of its tags. An empty/whitespace query returns the list
- * unchanged.
+ * name, URL, network hostname/port/record type, or tags. An empty/whitespace
+ * query returns the list unchanged.
  */
 export function filterMonitors(
 	monitors: UptimeMonitor[],
@@ -21,8 +21,12 @@ export function filterMonitors(
 	if (!needle) return monitors;
 
 	return monitors.filter((m) => {
-		if (m.name.toLowerCase().includes(needle)) return true;
-		if (m.url.toLowerCase().includes(needle)) return true;
-		return (m.tags ?? []).some((tag) => tag.toLowerCase().includes(needle));
+		const network = m.networkConfig;
+		const networkFields = network
+			? [network.hostname, network.type === "tcp" ? String(network.port) : network.recordType,
+				network.type === "tcp" ? `${network.hostname}:${network.port}` : ""]
+			: [];
+		return [m.name, m.url, ...networkFields, ...(m.tags ?? [])]
+			.some(field => field.toLowerCase().includes(needle));
 	});
 }

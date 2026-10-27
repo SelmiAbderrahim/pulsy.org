@@ -80,6 +80,8 @@ export async function getOwnedUptimeAggregates(
 	const fullEnd = `${until.slice(0, 10)}T00:00:00.000Z`;
 	const hasFullDays = fullStart < fullEnd;
 
+	// Filter IDs on the owned relation so a fresh database can use parameterized
+	// child indexes rather than rescan every matching check for each monitor.
 	const daily = hasFullDays
 		? await db.select({
 			monitorId: uptimeCheckDay.monitorId,
@@ -91,7 +93,7 @@ export async function getOwnedUptimeAggregates(
 				eq(uptimeMonitor.userId, userId),
 				gte(uptimeCheckDay.day, fullStart.slice(0, 10)),
 				lt(uptimeCheckDay.day, fullEnd.slice(0, 10)),
-				monitorIds ? inArray(uptimeCheckDay.monitorId, monitorIds) : undefined,
+				monitorIds ? inArray(uptimeMonitor.uptimeMonitorId, monitorIds) : undefined,
 			))
 			.groupBy(uptimeCheckDay.monitorId, uptimeCheckDay.status)
 		: [];
@@ -108,7 +110,7 @@ export async function getOwnedUptimeAggregates(
 			hasFullDays
 				? or(lt(uptimeCheckLog.createdAt, fullStart), gte(uptimeCheckLog.createdAt, fullEnd))
 				: undefined,
-			monitorIds ? inArray(uptimeCheckLog.uptimeMonitorId, monitorIds) : undefined,
+			monitorIds ? inArray(uptimeMonitor.uptimeMonitorId, monitorIds) : undefined,
 		))
 		.groupBy(uptimeCheckLog.uptimeMonitorId, uptimeCheckLog.status);
 

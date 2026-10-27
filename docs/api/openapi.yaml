@@ -7,23 +7,28 @@ info:
 
     **Authentication.** Every request carries a Bearer API key:
     `Authorization: Bearer pul_…`. Create and revoke keys in the dashboard
-    (Settings → API keys). The plaintext key is shown exactly once at creation;
+    (Dashboard → API Keys, `/dashboard/api-keys`). The plaintext key is shown exactly once at creation;
     Pulsy stores only its SHA-256 hash, so a lost key must be revoked and
     regenerated. Keys authenticate the REST API only — never the session cookie.
 
     **Key scopes.** Read endpoints accept `read` and `full` keys; write
     endpoints require `full` scope. Every account can use the entire API.
     Dashboard creation defaults to `read`. Keys created before scopes were
-    introduced retain `full` access.
+    introduced retain `full` access. Optional dashboard expiry selects a UTC date
+    strictly after today and expires at 23:59:59.999 UTC on that date. Invalid,
+    expired, revoked or removed keys and unavailable/banned owners return 401.
+    Revoke before removing a key from the dashboard list; removal keeps audit
+    timestamps. All accounts share a technical ceiling of 20 live, unexpired
+    keys, bounding independent rate-limit buckets.
 
-    **Errors.** All errors return `{ "error": { "code", "message" } }`. The
+    **Errors.** REST errors return `{ "error": { "code", "message" } }`. The
     `message` is localized from the request's `Accept-Language` header. Stable
     HTTP statuses: 401 (missing/invalid/expired/revoked key), 403 (insufficient
     key scope), 404 (not found / not owned), 409 (stale configuration review),
     422 (invalid body or query), 429
-    (rate limited). Malformed JSON, an oversized body or an unsupported
-    content type is answered with HTTP 400, 413 or 415 and the code
-    `validation_error`.
+    (rate limited). Malformed JSON, an oversized body or unsupported
+    encoding/charset is answered with HTTP 400, 413 or 415 and the code
+    `validation_error`. Public status/subscription errors instead return an `outcome`.
 
     **Rate limiting.** Requests are limited per key in a fixed window
     (`API_RATE_LIMIT_PER_MIN`, default 60/min). Every response to an
@@ -35,10 +40,12 @@ info:
     **Pagination.** List endpoints take `limit` (1–100, default 20) and an opaque
     `cursor`. Responses are `{ "data": [...], "nextCursor": "…" }`; pass
     `nextCursor` back as `cursor` until it is `null`. Cursors are not stable
-    identifiers — never build or store them.
+    identifiers — never build or store them. Annotation lists default to 25 and
+    also require a from/to window.
 
     **Monitor types.** `POST /monitors` and `PATCH /monitors/{id}` create and
-    edit HTTP monitors. DNS, TCP, heartbeat and Linux server-agent monitors are
+    edit HTTP monitors. Every type also supports PATCH with active for pause/resume.
+    DNS, TCP, heartbeat and Linux server-agent monitors are
     created and updated with a configuration manifest: send it to
     `POST /configuration/preview`, check the planned `entries`, then send the
     same text with the returned `revision` to `POST /configuration/apply`. The
@@ -53,13 +60,18 @@ info:
     manifests); unknown or foreign ids return 404. Channel destinations,
     headers, provider credentials and webhook signing secrets are write-only:
     no API response, export or log includes them. See `docs/api/webhooks.md` for
-    the signed Webhook payload.
+    the signed Webhook payload. The dashboard generates signing credentials
+    locally; channel create/rotate responses never return plaintext or ciphertext.
 
     **Status pages.** Status pages are edited and published in the dashboard.
     Published pages expose read-only, unauthenticated JSON, SVG and feed
     projections under `/api/status/pages/{publicKey}/…` (see the
-    `Status pages` tag); they never include URLs, credentials, subscribers or
-    internal notes.
+    `Status pages` tag); they never include private monitor URLs, credentials, subscribers or
+    internal notes. Public-history JSON requires explicit enablement. The
+    subscription POSTs use Origin validation and body-only page capabilities,
+    not API keys or session cookies. They share the public per-IP request budget.
+    Heartbeat and server-agent ingress use separate monitor credentials, documented
+    in `docs/uptime/heartbeat.md` and `docs/uptime/server-monitoring.md`.
   license:
     name: AGPL-3.0-or-later
 servers:
@@ -78,7 +90,7 @@ tags:
   - name: Monitor data
     description: Check logs, incidents, aggregate stats, observed availability and annotations.
   - name: Status pages
-    description: Read-only public projections of published status pages. No API key; per-IP rate limited (240 requests per minute).
+    description: Public published projections and opt-in email subscription actions. No API-key authority; shared per-IP budget of 240 requests per minute.
 paths:
   /metrics:
     get:
@@ -228,7 +240,7 @@ paths:
     post:
       tags: [Monitors]
       summary: Run a check now
-      description: Requires `full` key scope. Runs a synchronous check; updates status and may open/resolve an incident. The monitor must be active.
+      description: Requires `full` key scope. Runs a synchronous HTTP, DNS or TCP check; updates status and may open/resolve an incident. The monitor must be active. Passive heartbeat and server monitors reject this operation with 422.
       responses:
         "200":
           description: The monitor after the check.
@@ -333,7 +345,7 @@ paths:
       - name: to
         in: query
         required: true
-        description: Window end, ISO 8601 with offset. After `from`, at most 730 days, and within `CHECK_LOG_RETENTION_DAYS` retention.
+        description: Window end, ISO 8601 with offset. After `from`; requested span at most 730 days and no longer than `CHECK_LOG_RETENTION_DAYS`. The result clips future ends to now and treats time outside retention as unknown.
         schema: { type: string, format: date-time }
     get:
       tags: [Monitor data]
@@ -362,7 +374,7 @@ paths:
     get:
       tags: [Monitor data]
       summary: List annotations
-      description: Private deployment/change markers for the monitor, newest first. Requires `read` or `full` key scope.
+      description: Private deployment/change markers for the monitor, newest first. Requires `read` or `full` key scope. The half-open from/to window must span at most 730 days; reads clip its start to retained history.
       parameters:
         - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
         - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
@@ -534,7 +546,8 @@ paths:
       summary: Read a published status page
       description: >-
         Unauthenticated, read-only projections of a published status page. `publicKey` is the page's non-secret
-        public identifier shown in the status-page editor. Draft and missing pages return 404. Query parameters are
+        public identifier shown in the status-page editor. Draft and missing pages return 404; history.json also requires
+        explicit public-history enablement. Query parameters are
         rejected with 400. Responses send `Cache-Control: no-store` and allow any origin.
       security: []
       parameters:
@@ -551,7 +564,7 @@ paths:
             application/rss+xml: {}
             application/atom+xml: {}
         "400": { description: Query parameters are not accepted. }
-        "404": { description: The page is missing, unpublished, or the format is unknown. }
+        "404": { description: The page is missing, unpublished, history is disabled, or the format is unknown. All return the same unavailable outcome. }
         "429":
           description: More than 240 requests per minute from one client address.
           headers:
@@ -560,14 +573,95 @@ paths:
           description: Temporarily busy.
           headers:
             Retry-After: { schema: { type: integer } }
+  /status/pages/{publicKey}/subscribe:
+    servers:
+      - url: "{baseUrl}/api"
+        variables:
+          baseUrl:
+            default: https://pulsy.example.com
+    post:
+      tags: [Status pages]
+      summary: Request an email subscription confirmation
+      description: >-
+        A published page with enabled subscriptions and an owned, usable verified email provider can request
+        confirmation for the whole page (empty componentIds) or exact published component IDs. No API key or
+        session is used. Requires an allowed Origin and at most 16 KiB of uncompressed JSON. Query parameters
+        are rejected. Shares the feeds' 240 requests per IP per minute. Valid requests return a neutral accepted
+        outcome, including when an address is already registered or no email can be sent. Confirmation expires
+        after 24 hours; another request is eligible after 15 minutes. Email links require an explicit action.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/PublicPageKey"
+        - $ref: "#/components/parameters/SubscriptionOrigin"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StatusSubscriptionRequest" }
+            example: { email: reader@example.com, componentIds: [], language: en }
+      responses:
+        "202": { $ref: "#/components/responses/SubscriptionAccepted" }
+        "400": { description: Invalid body or query parameters; outcome invalid. }
+        "403": { description: Origin is missing or not allowed; outcome forbidden. }
+        "404": { description: Missing or unpublished page; outcome unavailable. }
+        "413": { description: Body exceeds 16 KiB; outcome invalid. }
+        "415": { description: JSON content type required; compressed bodies and unsupported charsets are rejected; outcome invalid. }
+        "429": { $ref: "#/components/responses/PublicRateLimited" }
+        "503": { $ref: "#/components/responses/PublicBusy" }
+  /status/pages/{publicKey}/subscription:
+    servers:
+      - url: "{baseUrl}/api"
+        variables:
+          baseUrl:
+            default: https://pulsy.example.com
+    post:
+      tags: [Status pages]
+      summary: Confirm or unsubscribe using a page-bound capability
+      description: >-
+        Redeems a capability only from the JSON body, never from a URL, query, Authorization header or GET.
+        No API-key or session authority is used. Requires an allowed Origin, no query parameters and at most
+        16 KiB of uncompressed JSON. Shares the feeds' 240 requests per IP per minute. Valid requests return
+        the same neutral accepted outcome for unknown, expired or already-used tokens. Unsubscribe remains
+        available after page unpublication; confirmation still requires publication and enabled subscriptions.
+        Old tokens cannot change a later confirmed opt-in. Token values and subscriber addresses are never returned.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/PublicPageKey"
+        - $ref: "#/components/parameters/SubscriptionOrigin"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StatusSubscriptionRedeem" }
+      responses:
+        "202": { $ref: "#/components/responses/SubscriptionAccepted" }
+        "400": { description: Invalid body or query parameters; outcome invalid. }
+        "403": { description: Origin is missing or not allowed; outcome forbidden. }
+        "404": { description: Page does not exist; outcome unavailable. }
+        "413": { description: Body exceeds 16 KiB; outcome invalid. }
+        "415": { description: JSON content type required; compressed bodies and unsupported charsets are rejected; outcome invalid. }
+        "429": { $ref: "#/components/responses/PublicRateLimited" }
+        "503": { $ref: "#/components/responses/PublicBusy" }
 components:
   securitySchemes:
     bearerAuth:
-      description: "Bearer keys have read or full scope. Access depends only on the key scope. Expired or revoked keys return 401; insufficient scope returns 403. Dashboard creation defaults to read-only and supports an optional expiry date after today (UTC), expiring at 23:59:59.999 UTC on that date."
+      description: "Account API keys have read or full scope; all accounts can use the entire API. Dashboard creation defaults to read. Invalid, expired, revoked or removed keys and unavailable/banned owners return 401; insufficient scope returns 403. Optional expiry selects a UTC date after today and expires at 23:59:59.999 UTC. A revoked key can be removed from the dashboard list. Every account has a technical ceiling of 20 live, unexpired keys."
       type: http
       scheme: bearer
       bearerFormat: "pul_<random>"
   parameters:
+    PublicPageKey:
+      name: publicKey
+      in: path
+      required: true
+      description: Non-secret public page identifier. Grants no owner or configuration access.
+      schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$" }
+    SubscriptionOrigin:
+      name: Origin
+      in: header
+      required: true
+      description: Must match the configured PUBLIC_WEB_URL origin or the page's verified custom-domain origin.
+      schema: { type: string, format: uri }
     MonitorId:
       name: id
       in: path
@@ -585,8 +679,27 @@ components:
       description: Opaque pagination cursor returned as `nextCursor`.
       schema: { type: string }
   responses:
+    SubscriptionAccepted:
+      description: Neutral outcome; does not reveal address registration or whether a token changed anything.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [outcome]
+            additionalProperties: false
+            properties:
+              outcome: { const: accepted }
+          example: { outcome: accepted }
+    PublicRateLimited:
+      description: Shared public-page per-IP request budget exceeded; outcome limited.
+      headers:
+        Retry-After: { schema: { type: integer } }
+    PublicBusy:
+      description: Temporary public-route failure or process concurrency bound; outcome unavailable or busy.
+      headers:
+        Retry-After: { schema: { type: integer } }
     Unauthorized:
-      description: Missing, invalid, or revoked API key.
+      description: Missing, invalid, expired, revoked or removed API key, or unavailable/banned owner.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
@@ -635,6 +748,25 @@ components:
           schema: { $ref: "#/components/schemas/Error" }
           example: { error: { code: rate_limited, message: "Too many requests. Retry after 42 seconds." } }
   schemas:
+    StatusSubscriptionRequest:
+      type: object
+      required: [email, componentIds]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email, maxLength: 254, writeOnly: true, description: Trimmed and lowercased for per-page deduplication; never returned. }
+        componentIds:
+          type: array
+          uniqueItems: true
+          description: Empty follows the whole page, including future explicitly published components; otherwise exact page component IDs.
+          items: { type: string, minLength: 1, maxLength: 64 }
+        language: { type: string, enum: [en, ar, fr, de, es], default: en }
+    StatusSubscriptionRedeem:
+      type: object
+      required: [action, token]
+      additionalProperties: false
+      properties:
+        action: { type: string, enum: [confirm, unsubscribe] }
+        token: { type: string, pattern: "^[A-Za-z0-9_-]{43}$", writeOnly: true, description: Page-bound capability accepted only in this JSON body. }
     Error:
       type: object
       required: [error]
@@ -670,7 +802,7 @@ components:
         url: { type: string, description: HTTP destination. Empty for heartbeat and server monitors. }
         method: { type: string, enum: [GET, HEAD, POST] }
         expectedStatus: { type: integer }
-        expectedStatuses: { type: string, nullable: true, maxLength: 128, example: "200,204", description: "Optional accepted-status expression: comma-separated codes, classes such as 2xx, or ascending ranges such as 200-299. Null uses expectedStatus. Updating the numeric field alone clears this rule." }
+        expectedStatuses: { type: [string, "null"], maxLength: 128, example: "200,204", description: "Optional accepted-status expression: comma-separated codes, classes such as 2xx, or ascending ranges such as 200-299. Null uses expectedStatus. Updating the numeric field alone clears this rule." }
         tlsMonitoringEnabled: { type: boolean, default: true, description: "Collect HTTPS certificate expiry and dispatch eligible TLS alerts. Disabling clears stored certificate observations; HTTP transport verification remains enabled." }
         httpAssertions:
           type: array
@@ -706,13 +838,13 @@ components:
         createdAt: { type: string, format: date-time }
     MonitorCreate:
       type: object
-      required: [name, url]
+      required: [url]
       properties:
-        name: { type: string, minLength: 1, maxLength: 255 }
+        name: { type: string, maxLength: 255, default: "", description: "Trimmed; omission or an empty name uses the destination hostname." }
         url: { type: string, format: uri }
         method: { type: string, enum: [GET, HEAD, POST], default: GET }
         expectedStatus: { type: integer, minimum: 100, maximum: 599, default: 200 }
-        expectedStatuses: { type: string, nullable: true, maxLength: 128, example: "200,204", description: "Optional accepted-status expression: comma-separated codes, classes such as 2xx, or ascending ranges such as 200-299. Null uses expectedStatus. Updating the numeric field alone clears this rule." }
+        expectedStatuses: { type: [string, "null"], maxLength: 128, example: "200,204", description: "Optional accepted-status expression: comma-separated codes, classes such as 2xx, or ascending ranges such as 200-299. Null uses expectedStatus. Updating the numeric field alone clears this rule." }
         tlsMonitoringEnabled: { type: boolean, default: true, description: "Collect HTTPS certificate expiry and dispatch eligible TLS alerts. Disabling clears stored certificate observations; HTTP transport verification remains enabled." }
         httpAssertions:
           type: array
@@ -740,13 +872,13 @@ components:
           items: { type: string, minLength: 1, maxLength: 50 }
     MonitorUpdate:
       type: object
-      description: All fields optional; only provided fields change. Status-page fields are not editable here.
+      description: All fields optional; only provided fields change. Every monitor type supports active pause/resume. HTTP-only fields are rejected for other types; use configuration manifests for their settings. Status-page fields are not editable here.
       properties:
         name: { type: string, minLength: 1, maxLength: 255 }
         url: { type: string, format: uri }
         method: { type: string, enum: [GET, HEAD, POST] }
         expectedStatus: { type: integer, minimum: 100, maximum: 599 }
-        expectedStatuses: { type: string, nullable: true, maxLength: 128, example: "200,204", description: "Optional accepted-status expression: comma-separated codes, classes such as 2xx, or ascending ranges such as 200-299. Null uses expectedStatus. Updating the numeric field alone clears this rule." }
+        expectedStatuses: { type: [string, "null"], maxLength: 128, example: "200,204", description: "Optional accepted-status expression: comma-separated codes, classes such as 2xx, or ascending ranges such as 200-299. Null uses expectedStatus. Updating the numeric field alone clears this rule." }
         tlsMonitoringEnabled: { type: boolean, default: true, description: "Collect HTTPS certificate expiry and dispatch eligible TLS alerts. Disabling clears stored certificate observations; HTTP transport verification remains enabled." }
         httpAssertions:
           type: array
@@ -866,7 +998,7 @@ components:
         environment: { type: string, maxLength: 100 }
         version: { type: string, maxLength: 100 }
         text: { type: string, maxLength: 1000 }
-        link: { type: [string, "null"], description: Public http(s) link without credentials or query values. }
+        link: { type: [string, "null"], description: HTTP(S) link without credentials, query or fragment. }
         createdAt: { type: string, format: date-time }
     AnnotationCreate:
       type: object
@@ -877,7 +1009,7 @@ components:
         environment: { type: string, maxLength: 100, default: "" }
         version: { type: string, maxLength: 100, default: "" }
         text: { type: string, minLength: 1, maxLength: 1000 }
-        link: { type: [string, "null"], maxLength: 2048, default: null }
+        link: { type: [string, "null"], maxLength: 2048, default: null, description: "HTTP(S) URL without credentials, query or fragment; configured secret-bearing links are rejected." }
     ConfigurationCounts:
       type: object
       properties:
@@ -936,8 +1068,9 @@ components:
         name: { type: string, minLength: 1, maxLength: 255 }
         interval: { type: integer, description: "Seconds. HTTP/DNS/TCP: 30, 60, 300, 600, 1800 or 3600. Heartbeat: expected ping period, 30–604800. Server: reporting interval, 60–3600." }
         active: { type: boolean }
-        tags: { type: array, maxItems: 10, items: { type: string, minLength: 1, maxLength: 50 } }
-        channelIds: { type: array, maxItems: 20, items: { type: string }, description: Existing notification channel ids to bind. }
+        tags: { type: array, maxItems: 50, items: { type: string, minLength: 1, maxLength: 64 }, description: "HTTP/DNS/TCP entries use the narrower type-specific bounds below." }
+        needsReentry: { type: array, maxItems: 5, items: { type: string, enum: [request, url, assertions, heartbeatToken, serverToken] } }
+        channelIds: { type: array, maxItems: 20, items: { type: string, minLength: 1, maxLength: 64 }, description: Existing notification channel ids to bind. }
     ManifestHttpMonitor:
       allOf:
         - { $ref: "#/components/schemas/ManifestCommon" }
@@ -945,6 +1078,7 @@ components:
           required: [type, url, method, expectedStatus, timeout, failureThreshold, redirectPolicy]
           properties:
             type: { const: http }
+            tags: { type: array, maxItems: 10, items: { type: string, minLength: 1, maxLength: 50 } }
             url: { type: [string, "null"], description: "http(s) URL without credentials, query or fragment. null keeps an existing monitor's URL." }
             method: { type: string, enum: [GET, HEAD, POST] }
             expectedStatus: { type: integer, minimum: 100, maximum: 599 }
@@ -962,6 +1096,7 @@ components:
           required: [type, configuration, timeout, failureThreshold]
           properties:
             type: { type: string, enum: [dns, tcp] }
+            tags: { type: array, maxItems: 10, items: { type: string, minLength: 1, maxLength: 50 } }
             configuration:
               description: "`configuration.type` must equal `type`."
               oneOf:

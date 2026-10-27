@@ -13,7 +13,6 @@
     "start": "tsx src/index.ts",
     "seed": "tsx src/seed.ts",
     "seed:superadmin": "tsx src/seed-superadmin.ts",
-    "backfill:orders": "tsx src/backfill-orders.ts",
     "typecheck": "tsc --noEmit",
     "build": "tsc --noEmit",
     "lint": "tsc --noEmit",

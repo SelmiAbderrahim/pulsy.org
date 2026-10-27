@@ -41,7 +41,7 @@ type SecretFields = Pick<
 
 export type MaskedNotificationChannel = Omit<
 	UptimeNotificationChannelRow,
-	"webhookUrl" | "webhookHeaders" | "secretVersion" | "signingSecretCipher"
+	"webhookUrl" | "webhookHeaders" | "secretVersion" | "signingSecretCipher" | "userId"
 > & {
 	hasWebhookUrl: boolean;
 	webhookUrlMasked: string | null;
@@ -157,7 +157,8 @@ export function maskNotificationChannel(
 	}
 
 	const headerNames = Object.keys(channel.webhookHeaders ?? {}).sort();
-	const { webhookUrl, webhookHeaders, secretVersion, signingSecretCipher, ...safe } = channel;
+	const { webhookUrl, webhookHeaders, secretVersion, signingSecretCipher, userId, ...safe } = channel;
+	void userId;
 	void signingSecretCipher;
 	void webhookUrl;
 	void webhookHeaders;

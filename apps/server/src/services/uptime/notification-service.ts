@@ -997,9 +997,10 @@ function parseTelegramTarget(
 	target: string,
 	headers: Record<string, string> | null,
 ): { botToken: string; chatId: string } {
-	if (target.startsWith("https://")) {
+	if (target.includes("://")) {
 		const parsed = new URL(target);
-		const urlMatch = parsed.hostname === "api.telegram.org"
+		const urlMatch = parsed.protocol === "https:" && parsed.hostname === "api.telegram.org"
+			&& !parsed.port && !parsed.username && !parsed.password
 			? parsed.pathname.match(/^\/bot([^/]+)(?:\/sendMessage)?$/)
 			: null;
 		const botToken = urlMatch?.[1] ?? "";

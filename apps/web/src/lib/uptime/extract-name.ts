@@ -7,9 +7,11 @@
  * @module lib/uptime/extract-name
  */
 
+import { normalizeMonitorUrl } from "@pulsy/db/monitor-url";
+
 export function extractNameFromUrl(url: string): string {
 	try {
-		const parsed = new URL(url);
+		const parsed = new URL(normalizeMonitorUrl(url) ?? "");
 		return parsed.hostname;
 	} catch {
 		return "";

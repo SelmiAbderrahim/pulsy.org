@@ -47,6 +47,7 @@ import {
 	apiCreateUptimeNotificationChannel,
 	apiCreateUptimeDefaultNotificationChannel,
 	apiUpdateUptimeNotificationChannel,
+	apiWebhookSigningSecret,
 	apiCreateUptimeShareLink,
 	apiResolveUptimeShareLink,
 	apiCloneUptimeShareLink,
@@ -127,6 +128,8 @@ import {
 	encryptNotificationChannelSecrets,
 	maskNotificationChannel,
 	buildSlaReportModel,
+	renderSlaReportPdf,
+	accountReportTimezone,
 	processSubscription,
 } from "../../services/uptime";
 import { escapeHtml } from "../../lib/html";
@@ -1016,7 +1019,7 @@ const channelRouter = router({
 		.mutation(async ({ input, ctx }) => {
 			assertNotificationChannelConfig(input, ctx.t);
 			await assertNotificationChannelTarget(input, ctx.t);
-			const signingSecret = input.channelType === "webhook" ? newWebhookSecret() : undefined;
+			const signingSecret = input.channelType === "webhook" ? input.signingSecret ?? newWebhookSecret() : undefined;
 			const storedSecrets = encryptNotificationChannelSecrets(
 				input.channelType === "email" ? null : input.webhookUrl,
 				input.channelType === "email" ? null : input.webhookHeaders,
@@ -1054,7 +1057,7 @@ const channelRouter = router({
 				});
 			}
 
-			return { ...maskNotificationChannel(inserted), ...(signingSecret ? { signingSecret } : {}) };
+			return maskNotificationChannel(inserted);
 		}),
 
 	create: protectedProcedure
@@ -1063,7 +1066,7 @@ const channelRouter = router({
 			await findOwnedMonitorOrThrow(input.uptimeMonitorId, ctx.user.id, ctx.t);
 			assertNotificationChannelConfig(input, ctx.t);
 			await assertNotificationChannelTarget(input, ctx.t);
-			const signingSecret = input.channelType === "webhook" ? newWebhookSecret() : undefined;
+			const signingSecret = input.channelType === "webhook" ? input.signingSecret ?? newWebhookSecret() : undefined;
 			const storedSecrets = encryptNotificationChannelSecrets(
 				input.channelType === "email" ? null : input.webhookUrl,
 				input.channelType === "email" ? null : input.webhookHeaders,
@@ -1101,7 +1104,7 @@ const channelRouter = router({
 				});
 			}
 
-			return { ...maskNotificationChannel(inserted), ...(signingSecret ? { signingSecret } : {}) };
+			return maskNotificationChannel(inserted);
 		}),
 
 	update: protectedProcedure
@@ -1161,15 +1164,14 @@ const channelRouter = router({
 			return maskNotificationChannel(updated);
 		})),
 
-  rotateSecret: protectedProcedure.input(z.object({ channelId: z.string().min(1).max(64) }).strict())
+  rotateSecret: protectedProcedure.input(z.object({ channelId: z.string().min(1).max(64), signingSecret: apiWebhookSigningSecret }).strict())
     .mutation(({ input, ctx }) => db.transaction(async tx => {
       const scope = and(eq(uptimeNotificationChannel.channelId, input.channelId), eq(uptimeNotificationChannel.userId, ctx.user.id));
       const [channel] = await tx.select().from(uptimeNotificationChannel).where(scope).for("update");
       if (!channel) throw notFound(ctx.t, "notification channel");
       if (channel.channelType !== "webhook") throw badRequest(ctx.t, "errors.webhookOnly");
-      const signingSecret = newWebhookSecret();
-      await tx.update(uptimeNotificationChannel).set({ signingSecretCipher: encrypt(signingSecret) }).where(scope);
-      return { signingSecret };
+      await tx.update(uptimeNotificationChannel).set({ signingSecretCipher: encrypt(input.signingSecret) }).where(scope);
+      return { rotated: true };
     })),
 
 	delete: protectedProcedure
@@ -2392,11 +2394,14 @@ const slaReportSubscriptionRouter = router({
 					ctx.t,
 				);
 			}
-			await findOwnedEmailProviderOrThrow(
+			const provider = await findOwnedEmailProviderOrThrow(
 				input.emailProviderId,
 				ctx.user.id,
 				ctx.t,
 			);
+			if (input.active && !provider.verified) {
+				throw badRequest(ctx.t, "errors.slaProviderUnverified");
+			}
 
 			if (input.slaReportSubscriptionId) {
 				const [updated] = await db
@@ -2423,24 +2428,30 @@ const slaReportSubscriptionRouter = router({
 				return updated;
 			}
 
-			const [created] = await db
-				.insert(uptimeSlaReportSubscription)
-				.values({
-					uptimeMonitorId: input.uptimeMonitorId ?? null,
-					userId: ctx.user.id,
-					recipientAddresses: input.recipientAddresses,
-					emailProviderId: input.emailProviderId,
-					active: input.active,
-				})
-				.returning();
-			/* v8 ignore next 6 -- unreachable: INSERT ... RETURNING yields the row or throws */
-			if (!created) {
-				throw new TRPCError({
-					code: "INTERNAL_SERVER_ERROR",
-					message: ctx.t("errors.internal"),
-				});
-			}
-			return created;
+			return db.transaction(async tx => {
+				await tx.select({ id: user.id }).from(user).where(eq(user.id, ctx.user.id)).for("update");
+				const [subscriptions] = await tx.select({ value: count() }).from(uptimeSlaReportSubscription)
+					.where(eq(uptimeSlaReportSubscription.userId, ctx.user.id));
+				assertBelowCap(subscriptions?.value ?? 0, "slaSubscriptions", ctx.t);
+				const [created] = await tx
+					.insert(uptimeSlaReportSubscription)
+					.values({
+						uptimeMonitorId: input.uptimeMonitorId ?? null,
+						userId: ctx.user.id,
+						recipientAddresses: input.recipientAddresses,
+						emailProviderId: input.emailProviderId,
+						active: input.active,
+					})
+					.returning();
+				/* v8 ignore next 6 -- unreachable: INSERT ... RETURNING yields the row or throws */
+				if (!created) {
+					throw new TRPCError({
+						code: "INTERNAL_SERVER_ERROR",
+						message: ctx.t("errors.internal"),
+					});
+				}
+				return created;
+			});
 		}),
 
 	remove: protectedProcedure
@@ -2477,6 +2488,17 @@ const slaReportSubscriptionRouter = router({
 });
 
 const slaReportRouter = router({
+	// Keep the downloaded PDF and visible report on one owned measurement snapshot.
+	download: protectedProcedure.input(apiSlaReport).query(async ({ input, ctx }) => {
+		const report = await buildSlaReportModel({
+			monitorId: input.uptimeMonitorId,
+			userId: ctx.user.id,
+			window: { kind: "days", days: input.days },
+			t: ctx.t,
+		});
+		const pdf = await renderSlaReportPdf(report, ctx.t, ctx.language, input.timezone ?? await accountReportTimezone(ctx.user.id));
+		return { report, pdf: pdf.toString("base64") };
+	}),
 	data: protectedProcedure.input(apiSlaReport).query(async ({ input, ctx }) => {
 		return buildSlaReportModel({
 			monitorId: input.uptimeMonitorId,

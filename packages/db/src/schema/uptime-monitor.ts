@@ -471,7 +471,7 @@ export const uptimeShareLink = pgTable(
  * SLA report subscription — opt-in to receive a monthly SLA / uptime PDF report
  * by email on the 1st of each month. Either bound to one monitor
  * (`uptimeMonitorId` set) or account-wide (`uptimeMonitorId IS NULL`, covering
- * all of the user's monitors). Tier-gated (Team plan / OSS-free).
+ * all of the user's monitors). Available to every account.
  */
 export const uptimeSlaReportSubscription = pgTable(
 	"uptime_sla_report_subscription",

@@ -506,3 +506,63 @@ describe("getCheckLogs", () => {
 		).toBe(0);
 	});
 });
+
+// Distinct long-history and UTC-calendar regressions, in addition to the exact
+// rolling-window/ownership coverage above.
+describe("getUptimeBarData — long history and UTC boundaries", () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    vi.setSystemTime(new Date("2026-10-09T12:00:00.000Z"));
+  });
+  afterEach(() => vi.useRealTimers());
+
+  it("keeps every day of a fully failing 90-day history down beyond the 100-check page size", async () => {
+    await db.insert(uptimeCheckLog).values(Array.from({ length: 360 }, (_, index) => ({
+      uptimeMonitorId: monitorId, status: "down" as const,
+      createdAt: new Date(Date.UTC(2026, 9, 9) - Math.floor(index / 4) * 86_400_000 + (index % 4) * 3_600_000).toISOString(),
+    })));
+    const bars = await getUptimeBarData(monitorId, userId, 90);
+    expect(bars).toHaveLength(90);
+    expect(bars[0]?.date).toBe("2026-07-12");
+    expect(bars.at(-1)?.date).toBe("2026-10-09");
+    expect(bars.every(bar => bar.status === "down" && bar.uptimePercent === 0 && bar.totalChecks === 4)).toBe(true);
+  });
+
+  it("keeps an entire unobserved 90-day history unknown", async () => {
+    const bars = await getUptimeBarData(monitorId, userId, 90);
+    expect(bars).toHaveLength(90);
+    expect(bars.every(bar => bar.status === "unknown" && bar.uptimePercent === null && bar.totalChecks === 0)).toBe(true);
+  });
+
+  it.each([
+    ["2024-03-01T00:30:00.000Z", ["2024-02-28", "2024-02-29", "2024-03-01"]],
+    ["2026-11-02T00:30:00.000Z", ["2026-10-31", "2026-11-01", "2026-11-02"]],
+  ] as const)("keeps UTC dates through leap and DST boundaries at %s", async (now, dates) => {
+    const previous = process.env.TZ;
+    process.env.TZ = "America/New_York";
+    try {
+      vi.setSystemTime(new Date(now));
+      const bars = await getUptimeBarData(monitorId, userId, 3);
+      expect(bars.map(bar => bar.date)).toEqual([...dates]);
+    } finally {
+      if (previous === undefined) delete process.env.TZ;
+      else process.env.TZ = previous;
+    }
+  });
+
+  it("counts 288 scheduled checks plus a manual check without moving next-day midnight into that day", async () => {
+    vi.setSystemTime(new Date("2026-10-15T12:00:00.000Z"));
+    const start = Date.parse("2026-10-14T00:00:00.000Z");
+    await db.insert(uptimeCheckLog).values(Array.from({ length: 288 }, (_, index) => ({
+      uptimeMonitorId: monitorId, status: "up" as const, createdAt: new Date(start + index * 300_000).toISOString(),
+    })));
+    expect((await getUptimeBarData(monitorId, userId, 2))[0]?.totalChecks).toBe(288);
+    await insertLog("up", 10, "2026-10-14T12:02:00.000Z");
+    await insertLog("down", null, "2026-10-15T00:00:00.000Z");
+    await insertLog("down", null, "2026-10-13T23:59:59.999Z");
+    const bars = await getUptimeBarData(monitorId, userId, 2);
+    expect(bars.map(bar => [bar.date, bar.totalChecks])).toEqual([["2026-10-14", 289], ["2026-10-15", 1]]);
+    expect(bars[0]).toMatchObject({ status: "up", uptimePercent: 100 });
+    expect(bars[1]).toMatchObject({ status: "down", uptimePercent: 0 });
+  });
+});

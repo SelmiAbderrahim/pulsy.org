@@ -185,12 +185,14 @@ server-health-e2e: ## Real installed-agent and browser acceptance in disposable 
 	$(MAKE) server-health-e2e-run
 
 server-health-e2e-run: ## Rerun installed-agent acceptance using built images
-	@set -eu; trap 'result=$$?; if test $$result -ne 0; then $(SERVER_E2E) logs --tail=60 server proxy fixture > artifacts/server-health-e2e/service-failure.log; fi; $(SERVER_E2E) down -v --remove-orphans >/dev/null' EXIT; \
+	mkdir -p artifacts/server-health-e2e
+	find artifacts/server-health-e2e -maxdepth 1 -type f -delete
+	@set -eu; trap 'result=$$?; if test $$result -ne 0; then $(SERVER_E2E) logs --tail=60 server proxy fixture > artifacts/server-health-e2e/service-failure.log; fi; if docker container inspect pulsy-server-health-e2e-browser >/dev/null 2>&1; then docker cp pulsy-server-health-e2e-browser:/evidence/. artifacts/server-health-e2e/ || result=1; docker rm -f pulsy-server-health-e2e-browser >/dev/null; fi; $(SERVER_E2E) down -v --remove-orphans >/dev/null; exit $$result' EXIT; \
 	$(SERVER_E2E) up -d postgres fixture server web; \
 	$(SERVER_E2E) exec -d fixture python3 /test/e2e.py; \
 	$(SERVER_E2E) exec -T fixture sh -c 'for attempt in $$(seq 1 60); do curl --max-time 2 --fail --silent http://127.0.0.1:8080/ >/dev/null && exit 0; sleep 1; done; exit 1'; \
 	$(SERVER_E2E) up -d proxy; \
-	$(SERVER_E2E) run --rm browser
+	$(SERVER_E2E) run --name pulsy-server-health-e2e-browser browser
 
 server-health-e2e-logs: ## Inspect only disposable acceptance services
 	$(SERVER_E2E) logs --tail=40 server proxy fixture
