@@ -1,3 +1,8 @@
+import { createPublicStatusRouter } from "./api/status-route";
+import { startStatusSubscriptionWorker, stopStatusSubscriptionWorker } from "./services/uptime/status-subscription";
+import { cleanupReliabilityHistory } from "./services/uptime/cleanup-service";
+import { startIncidentEscalationWorker, stopIncidentEscalationWorker } from "./services/uptime/incident-escalation";
+import { startMaintenanceWorker, stopMaintenanceWorker, cleanupMaintenanceHistory } from "./services/uptime/maintenance-service";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import cors from "cors";
 import express from "express";
@@ -95,6 +100,9 @@ app.use(
 	}),
 );
 
+// Published page projections and body-only subscription capabilities precede cookie CORS/auth.
+app.use("/api/status", createPublicStatusRouter());
+
 app.use(
 	cors({
 		origin(origin, callback) {
@@ -161,6 +169,8 @@ async function runDailyCleanup(): Promise<void> {
 	try {
 		const logs = await cleanupOldCheckLogs(RETENTION_DAYS);
 		const serverMetrics = await cleanupServerMetrics();
+    await cleanupMaintenanceHistory(RETENTION_DAYS);
+    await cleanupReliabilityHistory(RETENTION_DAYS);
 		const statusChanges = await cleanupOldStatusChanges(RETENTION_DAYS);
 		const incidents = await cleanupOldIncidents(RETENTION_DAYS);
 		const notificationLogs = await cleanupOldNotificationLogs(RETENTION_DAYS);
@@ -196,7 +206,7 @@ if (migratedNotificationChannels > 0) {
 	);
 }
 
-const LEADER_JOBS = ["uptime-daily-cleanup", "uptime-monthly-sla", "uptime-heartbeat-deadlines", "uptime-server-deadlines"] as const;
+const LEADER_JOBS = ["uptime-daily-cleanup", "uptime-monthly-sla", "uptime-heartbeat-deadlines", "uptime-server-deadlines", "uptime-maintenance-resume", "uptime-incident-escalations", "uptime-status-subscriptions", "uptime-status-subscription-retention"] as const;
 let reconcileTimer: ReturnType<typeof setInterval> | undefined;
 
 async function startLeaderWork(): Promise<void> {
@@ -204,6 +214,9 @@ async function startLeaderWork(): Promise<void> {
   await initializeAllMonitors();
   startHeartbeatWorker();
   startServerHealthWorker();
+  startMaintenanceWorker();
+  startIncidentEscalationWorker();
+  startStatusSubscriptionWorker();
   reconcileTimer = setInterval(() => {
     void reconcileScheduledMonitors().catch(error => console.error(`[scheduler] Reconcile failed: ${safeErrorSummary(error)}`));
   }, 30_000);
@@ -239,6 +252,9 @@ async function stopLeaderWork(): Promise<void> {
   for (const name of LEADER_JOBS) scheduledJobs[name]?.cancel();
   await stopHeartbeatWorker();
   await stopServerHealthWorker();
+  await stopIncidentEscalationWorker();
+  await stopStatusSubscriptionWorker();
+  await stopMaintenanceWorker();
 }
 
 setSchedulingEnabled(false);

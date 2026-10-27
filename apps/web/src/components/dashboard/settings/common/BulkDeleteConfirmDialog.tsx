@@ -1,3 +1,5 @@
+import { FormField } from "@/components/ui/form-field";
+import { formatCount } from "@/lib/count-format";
 /**
  * BulkDeleteConfirmDialog Component
  *
@@ -25,8 +27,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { cn } from "@/lib/utils";
 import type { BulkDeleteConfirmDialogProps } from "@/types/bulk-selection";
-
-const MAX_VISIBLE_ITEMS = 5;
+import { BulkNameList } from "./BulkNameList";
 
 /**
  * Confirmation dialog for bulk delete operations.
@@ -38,10 +39,13 @@ export function BulkDeleteConfirmDialog<T>({
 	itemType,
 	getItemName,
 	getItemWarning,
+	getItemId,
+	constraints,
+	description,
 	onConfirm,
 	isDeleting = false,
 }: BulkDeleteConfirmDialogProps<T>) {
-	const { t } = useTranslation("common");
+	const { t, i18n } = useTranslation("common");
 	const [confirmInput, setConfirmInput] = useState("");
 
 	useEffect(() => {
@@ -61,8 +65,12 @@ export function BulkDeleteConfirmDialog<T>({
 		: [];
 	const warningCount = itemsWithWarnings.length;
 
-	const visibleItems = items.slice(0, MAX_VISIBLE_ITEMS);
-	const hiddenCount = items.length - visibleItems.length;
+	// Every affected name stays reachable: the list scrolls (and windows beyond 100 rows).
+	const listItems = items.map((item, index) => ({
+		id: getItemId?.(item) ?? String(index),
+		name: getItemName(item),
+		detail: getItemWarning?.(item) ?? null,
+	}));
 
 	const getItemTypeLabel = (count: number) => {
 		const labels: Record<string, { singular: string; plural: string }> = {
@@ -91,7 +99,7 @@ export function BulkDeleteConfirmDialog<T>({
 			singular: itemType,
 			plural: `${itemType}s`,
 		};
-		return count === 1 ? label.singular : label.plural;
+		return formatCount((key, options) => t(key, { ...options, defaultValue: count === 1 ? label.singular : label.plural }), `bulkSelection.itemTypes.${itemType}`, count, i18n.language);
 	};
 
 	const handleInputChange = useCallback(
@@ -133,6 +141,7 @@ export function BulkDeleteConfirmDialog<T>({
 						)}
 					</AlertDialogTitle>
 					<AlertDialogDescription>
+						{description ? `${description} ` : ""}
 						{t(
 							"bulkSelection.confirmDelete.warning",
 							"This action cannot be undone.",
@@ -147,43 +156,26 @@ export function BulkDeleteConfirmDialog<T>({
 							"You are about to delete:",
 						)}
 					</p>
-					<ul className="space-y-1 text-sm text-muted-foreground">
-						{visibleItems.map((item, index) => {
-							const warning = getItemWarning?.(item);
-							return (
-								<li
-									key={index}
-									className="flex items-center gap-2"
-								>
-									<span className="text-muted-foreground">•</span>
-									<span
-										className={cn(
-											warning && "text-amber-600 dark:text-amber-500",
-										)}
-									>
-										{getItemName(item)}
-										{warning && (
-											<span className="text-xs ms-1">({warning})</span>
-										)}
-									</span>
-								</li>
-							);
-						})}
-						{hiddenCount > 0 && (
-							<li className="text-muted-foreground">
-								{t(
-									"bulkSelection.confirmDelete.moreItems",
-									"+{{count}} more",
-									{ count: hiddenCount },
-								)}
-							</li>
-						)}
-					</ul>
+					<BulkNameList
+						items={listItems}
+						label={t("bulkSelection.confirmDelete.listLabel", "Items to delete ({{count}})", { count: itemCount })}
+					/>
 
-					{warningCount > 0 && (
-						<div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3">
+					{constraints && constraints.length > 0 ? (
+						<div role="note" className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3">
+							<ul className="space-y-1 text-sm text-amber-700 dark:text-amber-400">
+								{constraints.map(constraint => (
+									<li key={constraint.key} className="flex gap-1">
+										<AlertTriangle aria-hidden className="mt-0.5 h-4 w-4 shrink-0" />
+										<span>{constraint.message}</span>
+									</li>
+								))}
+							</ul>
+						</div>
+					) : warningCount > 0 && (
+						<div role="note" className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3">
 							<p className="text-sm text-amber-700 dark:text-amber-400">
-								<AlertTriangle className="inline h-4 w-4 me-1 align-text-bottom" />
+								<AlertTriangle aria-hidden className="inline h-4 w-4 me-1 align-text-bottom" />
 								{t(
 									"bulkSelection.warnings.someItemsHaveConstraints",
 									"{{count}} {{type}} have constraints that may require manual cleanup.",
@@ -196,12 +188,12 @@ export function BulkDeleteConfirmDialog<T>({
 						</div>
 					)}
 
-					<div className="space-y-2 pt-2">
+					<FormField className="space-y-2 pt-2">
 						<Label htmlFor="bulk-delete-confirm">
 							{t(
 								"bulkSelection.confirmDelete.inputLabel",
-								'Type "DELETE {{count}}" to confirm:',
-								{ count: itemCount },
+								'Type "{{confirmation}}" to confirm:',
+								{ confirmation: expectedInput },
 							)}
 						</Label>
 						<Input
@@ -215,7 +207,7 @@ export function BulkDeleteConfirmDialog<T>({
 							autoComplete="off"
 							autoFocus
 						/>
-					</div>
+					</FormField>
 				</div>
 
 				<AlertDialogFooter>

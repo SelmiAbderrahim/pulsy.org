@@ -1,3 +1,4 @@
+import type { PageSelectionPreview, PageReplacementPreview } from "@/types/page-selection";
 /**
  * Uptime Monitor Service - API operations for uptime monitoring
  *
@@ -10,6 +11,7 @@
 import { SERVER_URL, trpcQuery, trpcMutation } from "@/lib/api/trpc";
 import type {
   UptimeMonitor,
+  HttpConfigurationResult,
   UptimeStatusChange,
   UptimeCheckLog,
   UptimeEmailProvider,
@@ -18,12 +20,15 @@ import type {
   IncidentSearchResult,
   UptimeDashboardSummary,
   UptimeMonitorStats,
+  UptimeDailyDataPoint,
   PublicStatusPage,
   PaginatedUptimeCheckLogs,
   PaginatedUptimeNotificationLogs,
+  UptimeChannelHealth,
   CreateUptimeMonitorInput,
   UpdateUptimeMonitorInput,
   BulkUpdateUptimeMonitorsInput,
+  BulkUpdateUptimeMonitorsResult,
   CreateUptimeEmailProviderInput,
   UpdateUptimeEmailProviderInput,
   CreateUptimeNotificationChannelInput,
@@ -52,6 +57,9 @@ import type {
  * notification channels, incidents, and dashboard statistics via tRPC.
  */
 export const UptimeService = {
+  async testConfiguration(input: { uptimeMonitorId?: string; configuration: CreateUptimeMonitorInput; allowPost: boolean }): Promise<HttpConfigurationResult> {
+    return trpcMutation<HttpConfigurationResult>("uptimeMonitor", "monitor.testConfiguration", input);
+  },
   // ============================================
   // Monitor CRUD
   // ============================================
@@ -60,7 +68,15 @@ export const UptimeService = {
    * List all uptime monitors for the current user
    */
   async listMonitors(): Promise<UptimeMonitor[]> {
-    return trpcQuery<UptimeMonitor[]>("uptimeMonitor", "monitor.list");
+    const rows: UptimeMonitor[] = [];
+    let page = await trpcQuery<UptimeMonitor[]>("uptimeMonitor", "monitor.list");
+    while (page.length === 200) {
+      rows.push(...page);
+      const last = page[page.length-1];
+      if (!last) break;
+      page = await trpcQuery<UptimeMonitor[]>("uptimeMonitor", "monitor.list", {cursor:last.uptimeMonitorId});
+    }
+    return [...rows,...page];
   },
 
   /**
@@ -116,18 +132,21 @@ export const UptimeService = {
    */
   async updateMonitorsBulk(
     input: BulkUpdateUptimeMonitorsInput
-  ): Promise<UptimeMonitor[]> {
-    const result = await trpcMutation<{ updated: UptimeMonitor[]; results: Array<{ id: string; status: "updated" | "rejected"; reason?: string }> }>(
+  ): Promise<BulkUpdateUptimeMonitorsResult> {
+    return trpcMutation<BulkUpdateUptimeMonitorsResult>(
       "uptimeMonitor",
       "monitor.updateBulk",
       input
     );
-    return result.updated;
   },
 
   /**
    * Delete an uptime monitor
    */
+  async deleteMonitorsBulk(ids: string[]): Promise<Array<{id:string;status:"deleted"|"rejected";reason?:string}>> {
+    return trpcMutation("uptimeMonitor", "monitor.deleteBulk", {ids,count:ids.length});
+  },
+
   async deleteMonitor(uptimeMonitorId: string): Promise<void> {
     return trpcMutation<undefined>("uptimeMonitor", "monitor.delete", {
       uptimeMonitorId,
@@ -192,6 +211,14 @@ export const UptimeService = {
     );
   },
 
+  /**
+   * Per-channel delivery health for the current user. Used to surface a
+   * channel that is failing every send.
+   */
+  async listChannelHealth(): Promise<UptimeChannelHealth[]> {
+    return trpcQuery<UptimeChannelHealth[]>("uptimeMonitor", "channel.health");
+  },
+
   // ============================================
   // Check Logs
   // ============================================
@@ -220,6 +247,11 @@ export const UptimeService = {
       uptimeMonitorId,
       days,
     });
+  },
+
+  /** Observed daily check success for exact UTC calendar buckets. */
+  async getDailyUptime(uptimeMonitorId: string, days = 90): Promise<UptimeDailyDataPoint[]> {
+    return trpcQuery<UptimeDailyDataPoint[]>("uptimeMonitor", "checkLog.daily", { uptimeMonitorId, days });
   },
 
   // ============================================
@@ -252,11 +284,12 @@ export const UptimeService = {
    * Search incidents across all of the current user's monitors by monitor
    * name, url, or incident cause (powers the command palette).
    */
-  async searchIncidents(query: string): Promise<IncidentSearchResult[]> {
+  async searchIncidents(query: string, signal?: AbortSignal): Promise<IncidentSearchResult[]> {
     return trpcQuery<IncidentSearchResult[]>(
       "uptimeMonitor",
       "incident.search",
-      { query }
+      { query },
+      signal ? { signal } : undefined
     );
   },
 
@@ -350,7 +383,7 @@ export const UptimeService = {
    */
   async createDefaultChannel(
     input: CreateUptimeDefaultNotificationChannelInput
-  ): Promise<UptimeNotificationChannel> {
+  ): Promise<UptimeNotificationChannel & { signingSecret?: string }> {
     return trpcMutation<UptimeNotificationChannel>(
       "uptimeMonitor",
       "channel.createDefault",
@@ -363,7 +396,7 @@ export const UptimeService = {
    */
   async createChannel(
     input: CreateUptimeNotificationChannelInput
-  ): Promise<UptimeNotificationChannel> {
+  ): Promise<UptimeNotificationChannel & { signingSecret?: string }> {
     return trpcMutation<UptimeNotificationChannel>(
       "uptimeMonitor",
       "channel.create",
@@ -374,6 +407,10 @@ export const UptimeService = {
   /**
    * Update an existing notification channel
    */
+  async rotateChannelSecret(channelId: string): Promise<{ signingSecret: string }> {
+    return trpcMutation("uptimeMonitor", "channel.rotateSecret", { channelId });
+  },
+
   async updateChannel(
     input: UpdateUptimeNotificationChannelInput
   ): Promise<UptimeNotificationChannel> {
@@ -423,6 +460,10 @@ export const UptimeService = {
   /**
    * Create an expiring share link for a set of monitors
    */
+  async previewShareLink(uptimeMonitorIds: string[]): Promise<ResolvedShareLink["monitors"]> {
+    return trpcMutation("uptimeMonitor", "share.preview", { uptimeMonitorIds });
+  },
+
   async createShareLink(
     input: CreateUptimeShareLinkInput
   ): Promise<CreatedUptimeShareLink> {
@@ -485,12 +526,16 @@ export const UptimeService = {
   },
 
   // ============================================
-  // SLA Reports (tier-gated)
+  // SLA Reports
   // ============================================
 
   /**
    * Get the on-demand SLA report model for a monitor over a rolling window.
    */
+  async downloadSlaReport(uptimeMonitorId: string, days: number, timezone?: string): Promise<{ report: SlaReport; pdf: string }> {
+    return trpcQuery("uptimeMonitor", "slaReport.download", { uptimeMonitorId, days, ...(timezone ? { timezone } : {}) });
+  },
+
   async getSlaReport(
     uptimeMonitorId: string,
     days?: number
@@ -581,6 +626,8 @@ export const UptimeService = {
     return trpcMutation<StatusPage>("uptimeMonitor", "statusPage.create", input);
   },
 
+  duplicateStatusPage: (statusPageId: string, title: string) => trpcMutation<StatusPage>("uptimeMonitor", "statusPage.duplicate", { statusPageId, title }),
+
   /** Update a status page. */
   async updateStatusPage(input: UpdateStatusPageInput): Promise<StatusPage> {
     return trpcMutation<StatusPage>("uptimeMonitor", "statusPage.update", input);
@@ -596,13 +643,19 @@ export const UptimeService = {
   /** Replace a page's monitor set (empty array clears it). */
   async setStatusPageMonitors(
     statusPageId: string,
-    uptimeMonitorIds: string[]
+    uptimeMonitorIds: string[],
+    revision?: string
   ): Promise<{ success: boolean; count: number }> {
     return trpcMutation("uptimeMonitor", "statusPage.setMonitors", {
       statusPageId,
       uptimeMonitorIds,
+      ...(revision ? { revision } : {}),
     });
   },
+
+  previewStatusPageMonitors: (statusPageId: string, uptimeMonitorIds: string[]) => trpcMutation<PageReplacementPreview>("uptimeMonitor", "statusPage.setMonitorsPreviewPost", { statusPageId, uptimeMonitorIds }),
+  previewAddToStatusPage: (statusPageId: string, monitorIds: string[]) => trpcQuery<PageSelectionPreview>("uptimeMonitor", "statusPage.addSelectionPreview", { statusPageId, monitorIds }),
+  applyAddToStatusPage: (statusPageId: string, monitorIds: string[], revision: string) => trpcMutation<{ count: number; added: number; isPublished: boolean }>("uptimeMonitor", "statusPage.addSelectionApply", { statusPageId, monitorIds, revision }),
 
   /** Attach a custom domain; returns the TXT record to publish. */
   async attachStatusPageDomain(

@@ -9,7 +9,7 @@ import { scheduledJobs } from "node-schedule";
 import { PUBLIC_WEB_URL } from "../../../lib/auth-config";
 import { safeFetch } from "../../../lib/ssrf";
 import { serverHealthNotice } from "../server-health-notice";
-import * as notificationService from "../notification-service";
+import { resumeSuppressedNotifications } from "../maintenance-service";
 vi.mock("../../../lib/ssrf", () => ({ safeFetch: vi.fn(async () => new Response("ok", { status: 200 })), isEgressFilteringEnabled: () => false }));
 vi.mock("../scheduler-service", () => ({ scheduleMonitorCheck: vi.fn(), cancelMonitorCheck: vi.fn(), rescheduleMonitorCheck: vi.fn() }));
 useCleanDatabase();
@@ -96,44 +96,51 @@ describe("persisted server conditions and direct notification delivery", () => {
   });
   it("returns a committed pressure receipt while notification delivery is stalled", async () => {
     const f = await fixture();
-    await f.report({ cpuPercent: 99 }); await f.report({ cpuPercent: 99 });
-    let releaseDelivery!: () => void;
-    const heldDelivery = new Promise<void>(resolve => { releaseDelivery = resolve; });
-    const dispatch = vi.spyOn(notificationService, "dispatchNotifications").mockImplementation(() => heldDelivery);
-    let returned = false;
-    const receipt = f.report({ cpuPercent: 99 }).then(monitor => { returned = true; return monitor; });
+    await createTestChannel(f.monitorId, { channelType: "webhook", webhookUrl: "https://fixture.invalid/receiver", notifyOnDegraded: true });
+    for (let i = 0; i < 3; i++) await f.report({ cpuPercent: 99 });
+    vi.mocked(safeFetch).mockClear();
+    let releaseDelivery!: (response: Response) => void;
+    const heldDelivery = new Promise<Response>(resolve => { releaseDelivery = resolve; });
+    vi.mocked(safeFetch).mockImplementationOnce(() => heldDelivery);
+    const sending = resumeSuppressedNotifications();
     try {
+      await vi.waitFor(() => expect(safeFetch).toHaveBeenCalledTimes(1));
+      let returned = false;
+      const receipt = f.report({ cpuPercent: 99 }).then(monitor => { returned = true; return monitor; });
       await vi.waitFor(() => expect(returned).toBe(true), { timeout: 1000 });
       expect((await receipt).status).toBe("degraded");
-      expect(dispatch).toHaveBeenCalledTimes(1);
       expect(await db.select().from(uptimeIncident).where(eq(uptimeIncident.uptimeMonitorId, f.monitorId))).toHaveLength(1);
     } finally {
-      releaseDelivery();
-      await receipt;
-      await heldDelivery;
+      releaseDelivery(new Response("received"));
+      await sending;
     }
   });
   it("evaluates other missing deadlines and stops the worker while notification delivery is stalled", async () => {
     vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-10-26T12:00:00.000Z"));
     const first = await fixture(); const second = await fixture();
+    for (const f of [first, second]) await createTestChannel(f.monitorId, { channelType: "webhook", webhookUrl: "https://fixture.invalid/receiver" });
     await first.report(); await second.report();
     vi.setSystemTime(new Date(first.at().getTime() + 180_000));
-    let releaseDelivery!: () => void;
-    const heldDelivery = new Promise<void>(resolve => { releaseDelivery = resolve; });
-    const dispatch = vi.spyOn(notificationService, "dispatchNotifications").mockImplementation(() => heldDelivery);
-    startServerHealthWorker();
-    let stopped = false;
-    const stopping = stopServerHealthWorker().then(() => { stopped = true; });
+    await scanServerDeadlines();
+    let releaseDelivery!: (response: Response) => void;
+    const heldDelivery = new Promise<Response>(resolve => { releaseDelivery = resolve; });
+    vi.mocked(safeFetch).mockImplementationOnce(() => heldDelivery);
+    const sending = resumeSuppressedNotifications();
     try {
+      await vi.waitFor(() => expect(safeFetch).toHaveBeenCalledTimes(1));
+      vi.setSystemTime(new Date(first.at().getTime() + 240_000));
+      startServerHealthWorker();
+      let stopped = false;
+      const stopping = stopServerHealthWorker().then(() => { stopped = true; });
       await vi.waitFor(() => expect(stopped).toBe(true), { timeout: 1000 });
       expect((await first.read()).status).toBe("down"); expect((await second.read()).status).toBe("down");
-      expect(dispatch).toHaveBeenCalledTimes(2);
+      expect(await db.select().from(uptimeCheckLog).where(eq(uptimeCheckLog.uptimeMonitorId, second.monitorId))).toHaveLength(3);
       expect(scheduledJobs["uptime-server-deadlines"]).toBeUndefined();
       expect(await db.select().from(uptimeIncident)).toHaveLength(2);
-    } finally {
-      releaseDelivery();
       await stopping;
-      await heldDelivery;
+    } finally {
+      releaseDelivery(new Response("received"));
+      await sending;
     }
   });
   it("delivers one localized pressure notification and recovery after commit without contacting customers", async () => {
@@ -145,11 +152,13 @@ describe("persisted server conditions and direct notification delivery", () => {
       return new Response("ok", { status: 200 });
     });
     for (let i = 0; i < 3; i++) await f.report({ filesystems: [{ path: "/data", usedPercent: 97 }] });
+    await resumeSuppressedNotifications();
     await vi.waitFor(() => expect(safeFetch).toHaveBeenCalledTimes(1));
     expect(committedStates).toEqual(["degraded"]);
     const payload = JSON.parse(String(vi.mocked(safeFetch).mock.calls[0]?.[1]?.body));
-    expect(payload.reason).toContain("/data"); expect(payload.reason).toContain("97"); expect(payload.reason).toContain("90");
+    expect(payload.reason.message).toContain("/data"); expect(payload.reason.message).toContain("97"); expect(payload.reason.message).toContain("90");
     for (let i = 0; i < 2; i++) await f.report({ filesystems: [{ path: "/data", usedPercent: 10 }] });
+    await resumeSuppressedNotifications();
     await vi.waitFor(() => expect(safeFetch).toHaveBeenCalledTimes(2));
   });
   it("bounds mount churn and translates threshold reasons in every locale", () => {

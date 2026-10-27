@@ -6,6 +6,23 @@ import {
 } from "@pulsy/db";
 import { and, eq } from "drizzle-orm";
 import { decrypt, encrypt } from "../../lib/crypto";
+import { randomBytes } from "node:crypto";
+
+export const newWebhookSecret = () => randomBytes(32).toString("hex");
+
+/** Existing OSS channels receive a signing key under their owned row lock. */
+export async function ensureWebhookSecret(channel: UptimeNotificationChannelRow): Promise<string> {
+	if (channel.signingSecretCipher) return decrypt(channel.signingSecretCipher);
+	return db.transaction(async tx => {
+		const scope = and(eq(uptimeNotificationChannel.channelId, channel.channelId), eq(uptimeNotificationChannel.userId, channel.userId));
+		const [current] = await tx.select().from(uptimeNotificationChannel).where(scope).for("update");
+		if (!current || current.channelType !== "webhook") throw new Error("Webhook channel unavailable");
+		if (current.signingSecretCipher) return decrypt(current.signingSecretCipher);
+		const secret = newWebhookSecret();
+		await tx.update(uptimeNotificationChannel).set({ signingSecretCipher: encrypt(secret) }).where(scope);
+		return secret;
+	});
+}
 
 /**
  * Stored secret format for notification channels.
@@ -230,4 +247,16 @@ export function safeChannelError(error: unknown, stored: UptimeNotificationChann
     }
   }
   return message.replace(/https?:\/\/[^\s<>"']+/g, "[destination]").slice(0, 500);
+}
+
+export function channelDisplayTarget(channel: Pick<UptimeNotificationChannelRow, "channelType" | "webhookUrl" | "recipientAddresses">): string | null {
+  if (channel.channelType === "email") return channel.recipientAddresses?.map(address => `***@${address.split("@").at(-1)}`).join(", ") ?? null;
+  if (!channel.webhookUrl) return null;
+  if (channel.channelType === "telegram") return "api.telegram.org/…***";
+  try {
+    const host = new URL(channel.webhookUrl).hostname;
+    if (channel.channelType === "slack") return host === "hooks.slack.com" ? `${host}/…***` : "••••";
+    if (channel.channelType === "discord") return ["discord.com", "discordapp.com"].includes(host) ? `${host}/…***` : "••••";
+    return host;
+  } catch { return "••••"; }
 }

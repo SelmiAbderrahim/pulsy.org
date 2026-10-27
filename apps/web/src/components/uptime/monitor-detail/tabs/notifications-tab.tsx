@@ -1,7 +1,18 @@
+import { uptimeKeys } from "@/hooks/uptime/queryKeys";
+import { useQueryClient } from "@tanstack/react-query";
+import { isSessionClientActive } from "@/lib/session-query-client";
+import { DocsHelpLink } from "@/components/ui/docs-help-link";
+import { WebhookSecretDialog, RotateWebhookSecret } from "@/components/uptime/webhook-secret-dialog";
+import { SectionCard } from "@/components/ui/section-card";
+import { requestConfirmation } from "@/lib/confirmation";
+import { parseRecipients } from "@/lib/uptime/recipients";
+import { channelDestination } from "@/lib/uptime/channel-destination";
+import { MonitorTemplatesService } from "@/services/uptime/monitorTemplatesService";
 import { Bell, Info, Loader2, Pencil, Plus, Send, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useConfirmation } from "@/hooks/use-confirmation";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -34,29 +45,25 @@ import type {
 } from "@/types/uptime";
 import { EmailProvidersSection } from "./email-providers-section";
 
-function DeliveryHistorySection({ monitorId }: { monitorId: string }) {
+function DeliveryHistorySection({ monitorId, effectiveChannelCount }: { monitorId: string; effectiveChannelCount?: number }) {
 	const { t } = useTranslation("uptimeMonitor");
+ const client = useQueryClient();
 	return (
-		<div className="flex flex-col gap-3">
-			<div>
-				<h3 className="text-lg font-medium">
-					{t("notifications.history.title")}
-				</h3>
-				<p className="text-sm text-muted-foreground">
-					{t("notifications.history.description")}
-				</p>
-			</div>
-			<NotificationLogTable monitorId={monitorId} />
-		</div>
+<SectionCard title={t("notifications.history.title")} description={t("notifications.history.description")}>
+      <NotificationLogTable monitorId={monitorId} effectiveChannelCount={effectiveChannelCount} />
+    </SectionCard>
 	);
 }
 
 interface NotificationsTabProps {
+ supportsTls?: boolean;
+  referencedChannels?: Array<{ id: string; type: UptimeNotificationChannelType }>;
 	monitorId: string;
 }
 
 function DefaultChannelsNotice() {
 	const { t } = useTranslation("uptimeMonitor");
+ const client = useQueryClient();
 	const { data: defaultChannels } = useUptimeDefaultChannels();
 
 	if (!defaultChannels || defaultChannels.length === 0) {
@@ -69,21 +76,34 @@ function DefaultChannelsNotice() {
 			<p>
 				{t("notifications.defaultsNotice", {
 					count: defaultChannels.length,
-				})}
+				})}<span className="mt-2 block">{t("notificationUX.defaultPolicy")}</span><DocsHelpLink docPath="saved-views" />
 			</p>
 		</div>
 	);
 }
 
-export function NotificationsTab({ monitorId }: NotificationsTabProps) {
+export function NotificationsTab({ monitorId, supportsTls = true, referencedChannels = [] }: NotificationsTabProps) {
 	const { t } = useTranslation("uptimeMonitor");
-	const { data: channels } = useUptimeNotificationChannels(monitorId);
+ const client = useQueryClient();
+	const { data: channels, isPending: channelsLoading, error: channelsError, refetch: retryChannels } = useUptimeNotificationChannels(monitorId);
 	const { data: emailProviders } = useUptimeEmailProviders();
+  const { data: inheritedChannels } = useUptimeDefaultChannels();
 	const createMutation = useCreateUptimeNotificationChannel();
 	const updateMutation = useUpdateUptimeNotificationChannel();
 	const deleteMutation = useDeleteUptimeNotificationChannel();
 	const testMutation = useTestUptimeNotificationChannel();
-	const [createOpen, setCreateOpen] = useState(false);
+	const { confirm, dialog: testDialog } = useConfirmation();
+	const testing = useRef(false);
+	const [testPending, setTestPending] = useState(false);
+  const [detached, setDetached] = useState<string[]>([]); const [detaching, setDetaching] = useState(false);
+  const referenceKey = referencedChannels.map(channel => channel.id).sort().join("\u0000");
+  useEffect(() => { setDetached([]); }, [monitorId, referenceKey]);
+  const references = referencedChannels.filter(channel => !detached.includes(channel.id));
+  const referenceSection = references.length > 0 ? <SectionCard title={t("templates.linkedChannels")} description={t("templates.linkedDescription")}><div className="grid gap-2">{references.map(channel => <div key={channel.id} className="flex flex-wrap items-center justify-between gap-2"><span className="min-w-0 break-words text-sm"><bdi>{channel.type} · {channel.id}</bdi></span><Button variant="outline" className="min-h-11" disabled={detaching} onClick={async () => { if (!await requestConfirmation(t("templates.detachConfirm"), { title: t("templates.detach"), action: t("templates.detach") })) return; if (!isSessionClientActive(client)) return; setDetaching(true); try { await MonitorTemplatesService.detachChannel(monitorId, channel.id); await Promise.all([client.invalidateQueries({ queryKey: uptimeKeys.monitors.detail(monitorId) }), client.invalidateQueries({ queryKey: uptimeKeys.monitors.lists() })]); if (!isSessionClientActive(client)) return; setDetached(ids => [...ids, channel.id]); } catch (error) {
+ if (!isSessionClientActive(client)) return; toast.error(extractErrorMessage(error, t("templates.error"))); } finally { setDetaching(false); } }}>{t("templates.detach")}</Button></div>)}</div></SectionCard> : null;
+	const [signingSecret, setSigningSecret] = useState<string | null>(null);
+	const editorGeneration = useRef(0);
+ const [createOpen, setCreateOpen] = useState(false);
 	const [editChannel, setEditChannel] =
 		useState<UptimeNotificationChannel | null>(null);
 
@@ -93,39 +113,48 @@ export function NotificationsTab({ monitorId }: NotificationsTabProps) {
 	const [emailProviderId, setEmailProviderId] = useState("");
 	const [webhookUrl, setWebhookUrl] = useState("");
 	const [webhookHeaders, setWebhookHeaders] = useState("");
+  const [submissionError, setSubmissionError] = useState<unknown>(null);
 	const [recipients, setRecipients] = useState("");
 	const [notifyOnDown, setNotifyOnDown] = useState(true);
+	const [notifyOnDegraded, setNotifyOnDegraded] = useState(false);
 	const [notifyOnRecovery, setNotifyOnRecovery] = useState(true);
 	const [notifyOnTlsExpiry, setNotifyOnTlsExpiry] = useState(false);
 	const [tlsExpiryThresholdDays, setTlsExpiryThresholdDays] = useState("14");
 
 	const resetForm = () => {
+    setSubmissionError("");
 		setChannelType("webhook");
 		setEmailProviderId("");
 		setWebhookUrl("");
 		setWebhookHeaders("");
 		setRecipients("");
 		setNotifyOnDown(true);
+		setNotifyOnDegraded(false);
 		setNotifyOnRecovery(true);
 		setNotifyOnTlsExpiry(false);
 		setTlsExpiryThresholdDays("14");
 	};
+	const handleChannelTypeChange = (type: UptimeNotificationChannelType) => {
+		setChannelType(type);
+	};
 
 	const openCreateDialog = () => {
+ editorGeneration.current++;
 		resetForm();
 		setCreateOpen(true);
 	};
 
 	const openEditDialog = (channel: UptimeNotificationChannel) => {
+ editorGeneration.current++;
+    setSubmissionError("");
 		setEditChannel(channel);
 		setChannelType(channel.channelType);
 		setEmailProviderId(channel.emailProviderId ?? "");
-		// Secret values are write-only. A blank edit field means "keep the stored
-		// value"; the masked DTO fields are used only as placeholders below.
 		setWebhookUrl("");
 		setWebhookHeaders("");
 		setRecipients(channel.recipientAddresses?.join(", ") ?? "");
 		setNotifyOnDown(channel.notifyOnDown);
+		setNotifyOnDegraded(channel.notifyOnDegraded ?? false);
 		setNotifyOnRecovery(channel.notifyOnRecovery);
 		setNotifyOnTlsExpiry(channel.notifyOnTlsExpiry);
 		setTlsExpiryThresholdDays(String(channel.tlsExpiryThresholdDays));
@@ -133,8 +162,10 @@ export function NotificationsTab({ monitorId }: NotificationsTabProps) {
 
 	const handleCreate = async (e: React.FormEvent) => {
 		e.preventDefault();
+ const requestGeneration = editorGeneration.current;
+    setSubmissionError("");
 		if (channelType === "email" && !emailProviderId) {
-			toast.error(
+			setSubmissionError(
 				t(
 					"notifications.create.emailProviderRequired",
 					"Select an email provider before adding an email channel",
@@ -142,12 +173,9 @@ export function NotificationsTab({ monitorId }: NotificationsTabProps) {
 			);
 			return;
 		}
-		const parsedWebhookHeaders =
-			channelType === "email"
-				? undefined
-				: parseWebhookHeaders(webhookHeaders);
+		const parsedWebhookHeaders = channelType !== "webhook" ? undefined : parseWebhookHeaders(webhookHeaders);
 		if (parsedWebhookHeaders === false) {
-			toast.error(
+			setSubmissionError(
 				t(
 					"notifications.fields.webhookHeadersInvalid",
 					"Headers must be a JSON object with string values",
@@ -156,41 +184,48 @@ export function NotificationsTab({ monitorId }: NotificationsTabProps) {
 			return;
 		}
 		try {
-			await createMutation.mutateAsync({
+			const created = await createMutation.mutateAsync({
 				uptimeMonitorId: monitorId,
 				channelType,
 				emailProviderId: channelType === "email" ? emailProviderId : undefined,
 				webhookUrl: channelType !== "email" ? webhookUrl : undefined,
 				webhookHeaders:
-					channelType !== "email" ? parsedWebhookHeaders : undefined,
+					channelType === "webhook" ? parsedWebhookHeaders : undefined,
 				recipientAddresses:
 					channelType === "email"
-						? recipients
-								.split(",")
-								.map((s) => s.trim())
-								.filter(Boolean)
+						? parseRecipients(recipients).recipients
 						: undefined,
 				notifyOnDown,
+				notifyOnDegraded,
 				notifyOnRecovery,
 				notifyOnTlsExpiry,
 				tlsExpiryThresholdDays: Number(tlsExpiryThresholdDays),
 			});
-			toast.success(t("notifications.create.success"));
+			if (!isSessionClientActive(client)) return;
+ setSigningSecret(created?.signingSecret ?? null);
+      createMutation.reset?.();
+			if (!isSessionClientActive(client)) return;
+ toast.success(t("notifications.create.success"));
+ if (requestGeneration !== editorGeneration.current) return;
 			resetForm();
 			setCreateOpen(false);
 		} catch (error) {
-			toast.error(extractErrorMessage(error, t("notifications.create.error")));
+ if (requestGeneration !== editorGeneration.current) return;
+ if (!isSessionClientActive(client)) return;
+			setSubmissionError(error);
 		}
 	};
 
 	const handleEdit = async (e: React.FormEvent) => {
 		e.preventDefault();
+ const requestGeneration = editorGeneration.current;
+    setSubmissionError("");
 		// defensive: the edit form only renders when `editChannel` is set, so this
 		// guard's early-return is unreachable from the UI.
 		/* v8 ignore next */
 		if (!editChannel) return;
 		if (channelType === "email" && !emailProviderId) {
-			toast.error(
+			setSubmissionError(
 				t(
 					"notifications.create.emailProviderRequired",
 					"Select an email provider before saving an email channel",
@@ -198,12 +233,9 @@ export function NotificationsTab({ monitorId }: NotificationsTabProps) {
 			);
 			return;
 		}
-		const parsedWebhookHeaders =
-			channelType === "email"
-				? undefined
-				: parseWebhookHeaders(webhookHeaders);
+		const parsedWebhookHeaders = channelType !== "webhook" ? undefined : parseWebhookHeaders(webhookHeaders);
 		if (parsedWebhookHeaders === false) {
-			toast.error(
+			setSubmissionError(
 				t(
 					"notifications.fields.webhookHeadersInvalid",
 					"Headers must be a JSON object with string values",
@@ -211,79 +243,88 @@ export function NotificationsTab({ monitorId }: NotificationsTabProps) {
 			);
 			return;
 		}
-		const secretUpdates =
-			channelType === "email"
-				? { webhookUrl: null, webhookHeaders: null }
-				: {
-						...(webhookUrl.trim() ? { webhookUrl } : {}),
-						...(parsedWebhookHeaders !== undefined
-							? { webhookHeaders: parsedWebhookHeaders }
-							: {}),
-					};
 		try {
 			await updateMutation.mutateAsync({
 				channelId: editChannel.channelId,
 				uptimeMonitorId: monitorId,
 				channelType,
 				emailProviderId: channelType === "email" ? emailProviderId : null,
-				...secretUpdates,
+				...(channelType === "email" ? { webhookUrl: null, webhookHeaders: null } : {
+          ...(webhookUrl.trim() ? { webhookUrl } : {}),
+          ...(channelType === "webhook" && parsedWebhookHeaders !== undefined ? { webhookHeaders: parsedWebhookHeaders } : {}),
+        }),
 				recipientAddresses:
 					channelType === "email"
-						? recipients
-								.split(",")
-								.map((s) => s.trim())
-								.filter(Boolean)
+						? parseRecipients(recipients).recipients
 						: undefined,
 				notifyOnDown,
+				notifyOnDegraded,
 				notifyOnRecovery,
 				notifyOnTlsExpiry,
 				tlsExpiryThresholdDays: Number(tlsExpiryThresholdDays),
 			});
-			toast.success(
+			if (!isSessionClientActive(client)) return;
+ toast.success(
 				t("notifications.edit.success", "Channel updated successfully"),
 			);
+ if (requestGeneration !== editorGeneration.current) return;
 			setEditChannel(null);
 			resetForm();
 		} catch (error) {
-			toast.error(
-				extractErrorMessage(
-					error,
-					t("notifications.edit.error", "Failed to update channel"),
-				),
-			);
+ if (requestGeneration !== editorGeneration.current) return;
+ if (!isSessionClientActive(client)) return;
+			setSubmissionError(error);
 		}
 	};
 
 	const handleDelete = async (channelId: string) => {
+ if (!await requestConfirmation(t("notificationUX.deleteChannel"), { title: t("notificationUX.deleteChannelTitle"), action: t("common:actions.delete") })) return;
 		try {
 			await deleteMutation.mutateAsync({
 				channelId,
 				uptimeMonitorId: monitorId,
 			});
-			toast.success(t("notifications.delete.success"));
+			if (!isSessionClientActive(client)) return;
+ toast.success(t("notifications.delete.success"));
 		} catch (error) {
+ if (!isSessionClientActive(client)) return;
 			toast.error(extractErrorMessage(error, t("notifications.delete.error")));
 		}
 	};
 
-	const handleTest = async (channelId: string) => {
+	// A test is a real send: name the destination first, and report only what the provider actually accepted.
+	const handleTest = async (channel: UptimeNotificationChannel) => {
+		if (testing.current) return;
+		testing.current = true;
+		const destination = channelDestination(channel);
 		try {
-			await testMutation.mutateAsync(channelId);
-			toast.success(t("notifications.test.success"));
+			if (!await confirm({ title: t("notificationUX.testTitle"), description: t("notificationUX.confirmTest", { destination }), action: t("actions.test") })) return;
+			setTestPending(true);
+			await testMutation.mutateAsync(channel.channelId);
+			if (!isSessionClientActive(client)) return;
+ toast.success(t("notificationUX.testAccepted", { destination }));
 		} catch (error) {
+ if (!isSessionClientActive(client)) return;
 			toast.error(extractErrorMessage(error, t("notifications.test.error")));
+		} finally {
+			testing.current = false;
+			setTestPending(false);
 		}
 	};
+
+ if (channelsLoading) return <SectionCard title={t("notifications.title")}><p role="status">{t("notificationUX.loadingChannels")}</p></SectionCard>;
+ if (channelsError && !channels) return <SectionCard title={t("notifications.title")}><div role="alert"><p>{t("notificationUX.errorChannels")}</p><Button variant="outline" onClick={() => void retryChannels()}>{t("workspace.retry")}</Button></div></SectionCard>;
 
 	if (!channels || channels.length === 0) {
 		return (
 			<div className="flex min-w-0 flex-col gap-4">
 				<DefaultChannelsNotice />
-				<div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
-					<Bell className="h-10 w-10 text-muted-foreground mb-3" />
-					<p className="font-medium">{t("notifications.empty")}</p>
+        {referenceSection}
+				<SectionCard title={t("notifications.title")}><div className="flex flex-col items-center justify-center text-center">
+					<Bell className="h-6 w-6 text-muted-foreground mb-2" />
+					<p className="font-medium">{t(inheritedChannels?.length || references.length ? "notificationUX.noOverrides" : "notifications.empty")}</p>
 					<p className="text-sm text-muted-foreground mt-1">
-						{t("notifications.emptyDescription")}
+						{t(inheritedChannels?.length || references.length ? "notificationUX.inheritedActive" : "notifications.emptyDescription")}
 					</p>
 					<Button
 						onClick={openCreateDialog}
@@ -292,12 +333,13 @@ export function NotificationsTab({ monitorId }: NotificationsTabProps) {
 						<Plus className="h-4 w-4 me-2" />
 						{t("actions.addChannel")}
 					</Button>
-				</div>
-				<ChannelFormDialog
+				</div></SectionCard>
+				<WebhookSecretDialog secret={signingSecret} onClose={() => setSigningSecret(null)} />
+      <ChannelFormDialog supportsTls={supportsTls}
 					open={createOpen}
-					onOpenChange={setCreateOpen}
+					onOpenChange={open => { if (!open) editorGeneration.current++; setCreateOpen(open); }}
 					channelType={channelType}
-					setChannelType={setChannelType}
+					setChannelType={handleChannelTypeChange}
 					emailProviders={emailProviders ?? []}
 					emailProviderId={emailProviderId}
 					setEmailProviderId={setEmailProviderId}
@@ -308,6 +350,8 @@ export function NotificationsTab({ monitorId }: NotificationsTabProps) {
 					recipients={recipients}
 					setRecipients={setRecipients}
 					notifyOnDown={notifyOnDown}
+					notifyOnDegraded={notifyOnDegraded}
+					setNotifyOnDegraded={setNotifyOnDegraded}
 					setNotifyOnDown={setNotifyOnDown}
 					notifyOnRecovery={notifyOnRecovery}
 					setNotifyOnRecovery={setNotifyOnRecovery}
@@ -316,32 +360,33 @@ export function NotificationsTab({ monitorId }: NotificationsTabProps) {
 					tlsExpiryThresholdDays={tlsExpiryThresholdDays}
 					setTlsExpiryThresholdDays={setTlsExpiryThresholdDays}
 					onSubmit={handleCreate}
-					isPending={createMutation.isPending}
+					isPending={createMutation.isPending} error={submissionError || undefined}
 				/>
 
-				{/* Email Providers */}
+				{/* Email providers */}
 				<EmailProvidersSection />
 
 				{/* Delivery history */}
-				<DeliveryHistorySection monitorId={monitorId} />
+				<DeliveryHistorySection monitorId={monitorId} effectiveChannelCount={channels && inheritedChannels ? new Set([...channels.map(channel => channel.channelId), ...inheritedChannels.map(channel => channel.channelId), ...references.map(channel => channel.id)]).size : undefined} />
+
 			</div>
 		);
 	}
 
 	return (
 		<div className="flex min-w-0 flex-col gap-4">
+			{testDialog}
+      <WebhookSecretDialog secret={signingSecret} onClose={() => setSigningSecret(null)} />
 			<DefaultChannelsNotice />
-			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-				<h3 className="text-lg font-medium">{t("notifications.title")}</h3>
-				<Button
+        {referenceSection}
+<SectionCard title={t("notifications.title")} description={t("notificationUX.monitorScope")} headerEnd={<Button
 					onClick={openCreateDialog}
 					size="sm"
-					className="h-[44px] w-full sm:w-auto"
+					className="max-w-full whitespace-normal"
 				>
 					<Plus className="h-4 w-4 me-2" />
 					{t("actions.addChannel")}
-				</Button>
-			</div>
+				</Button>}>
 
 			<div className="w-full min-w-0 overflow-x-auto rounded-lg border">
 				<Table>
@@ -356,6 +401,7 @@ export function NotificationsTab({ monitorId }: NotificationsTabProps) {
 							<TableHead className="text-start">
 								{t("notifications.fields.notifyOnDown")}
 							</TableHead>
+							<TableHead className="text-start">{t("notifications.fields.notifyOnDegraded")}</TableHead>
 							<TableHead className="text-start">
 								{t("notifications.fields.notifyOnRecovery")}
 							</TableHead>
@@ -379,15 +425,14 @@ export function NotificationsTab({ monitorId }: NotificationsTabProps) {
 									</Badge>
 								</TableCell>
 								<TableCell className="text-sm text-muted-foreground max-w-[200px] truncate">
-									{ch.channelType === "email"
-										? ch.recipientAddresses?.join(", ")
-										: ch.webhookUrlMasked}
+									{channelDestination(ch)}
 								</TableCell>
 								<TableCell>
 									{ch.notifyOnDown
 										? t("notifications.fields.yes")
 										: t("notifications.fields.no")}
 								</TableCell>
+								<TableCell>{ch.notifyOnDegraded ? t("notifications.fields.yes") : t("notifications.fields.no")}</TableCell>
 								<TableCell>
 									{ch.notifyOnRecovery
 										? t("notifications.fields.yes")
@@ -407,17 +452,18 @@ export function NotificationsTab({ monitorId }: NotificationsTabProps) {
 												`notifications.channelTypes.${ch.channelType}`,
 												ch.channelType,
 											)}`}
-											onClick={() => handleTest(ch.channelId)}
-											disabled={testMutation.isPending}
+											onClick={() => handleTest(ch)}
+											disabled={testMutation.isPending || testPending}
 											className="h-[44px] min-w-[44px]"
 										>
-											{testMutation.isPending ? (
+											{testMutation.isPending || testPending ? (
 												<Loader2 className="h-3.5 w-3.5 animate-spin" />
 											) : (
 												<Send className="h-3.5 w-3.5" />
 											)}
 										</Button>
-										<Button
+										{ch.channelType === "webhook" && <RotateWebhookSecret channelId={ch.channelId} onSecret={setSigningSecret} />}
+<Button
 											variant="ghost"
 											size="sm"
 											aria-label={`${t("actions.edit")} ${t(
@@ -449,13 +495,13 @@ export function NotificationsTab({ monitorId }: NotificationsTabProps) {
 						))}
 					</TableBody>
 				</Table>
-			</div>
+			</div></SectionCard>
 
-			<ChannelFormDialog
+			<ChannelFormDialog supportsTls={supportsTls}
 				open={createOpen}
-				onOpenChange={setCreateOpen}
+				onOpenChange={open => { if (!open) editorGeneration.current++; setCreateOpen(open); }}
 				channelType={channelType}
-				setChannelType={setChannelType}
+				setChannelType={handleChannelTypeChange}
 				emailProviders={emailProviders ?? []}
 				emailProviderId={emailProviderId}
 				setEmailProviderId={setEmailProviderId}
@@ -466,6 +512,8 @@ export function NotificationsTab({ monitorId }: NotificationsTabProps) {
 				recipients={recipients}
 				setRecipients={setRecipients}
 				notifyOnDown={notifyOnDown}
+					notifyOnDegraded={notifyOnDegraded}
+					setNotifyOnDegraded={setNotifyOnDegraded}
 				setNotifyOnDown={setNotifyOnDown}
 				notifyOnRecovery={notifyOnRecovery}
 				setNotifyOnRecovery={setNotifyOnRecovery}
@@ -474,20 +522,21 @@ export function NotificationsTab({ monitorId }: NotificationsTabProps) {
 				tlsExpiryThresholdDays={tlsExpiryThresholdDays}
 				setTlsExpiryThresholdDays={setTlsExpiryThresholdDays}
 				onSubmit={handleCreate}
-				isPending={createMutation.isPending}
+				isPending={createMutation.isPending} error={submissionError || undefined}
 			/>
 
-			<ChannelFormDialog
+			<ChannelFormDialog supportsTls={supportsTls}
 				open={Boolean(editChannel)}
 				onOpenChange={(open) => {
 					if (!open) {
+ editorGeneration.current++;
 						setEditChannel(null);
 						resetForm();
 					}
 				}}
-				isEdit
+				isEdit storedTargetLabel={editChannel?.webhookUrlMasked} storedHeaderNames={editChannel?.webhookHeaderNames} storedChannelType={editChannel?.channelType} hasStoredTarget={Boolean(editChannel?.hasWebhookUrl)}
 				channelType={channelType}
-				setChannelType={setChannelType}
+				setChannelType={handleChannelTypeChange}
 				emailProviders={emailProviders ?? []}
 				emailProviderId={emailProviderId}
 				setEmailProviderId={setEmailProviderId}
@@ -495,13 +544,11 @@ export function NotificationsTab({ monitorId }: NotificationsTabProps) {
 				setWebhookUrl={setWebhookUrl}
 				webhookHeaders={webhookHeaders}
 				setWebhookHeaders={setWebhookHeaders}
-				hasStoredWebhookUrl={editChannel?.hasWebhookUrl}
-				webhookUrlMasked={editChannel?.webhookUrlMasked}
-				hasStoredWebhookHeaders={editChannel?.hasWebhookHeaders}
-				webhookHeaderNames={editChannel?.webhookHeaderNames}
 				recipients={recipients}
 				setRecipients={setRecipients}
 				notifyOnDown={notifyOnDown}
+					notifyOnDegraded={notifyOnDegraded}
+					setNotifyOnDegraded={setNotifyOnDegraded}
 				setNotifyOnDown={setNotifyOnDown}
 				notifyOnRecovery={notifyOnRecovery}
 				setNotifyOnRecovery={setNotifyOnRecovery}
@@ -510,14 +557,15 @@ export function NotificationsTab({ monitorId }: NotificationsTabProps) {
 				tlsExpiryThresholdDays={tlsExpiryThresholdDays}
 				setTlsExpiryThresholdDays={setTlsExpiryThresholdDays}
 				onSubmit={handleEdit}
-				isPending={updateMutation.isPending}
+				isPending={updateMutation.isPending} error={submissionError || undefined}
 			/>
 
-			{/* Email Providers */}
+			{/* Email providers */}
 			<EmailProvidersSection />
 
 			{/* Delivery history */}
-			<DeliveryHistorySection monitorId={monitorId} />
+			<DeliveryHistorySection monitorId={monitorId} effectiveChannelCount={channels && inheritedChannels ? new Set([...channels.map(channel => channel.channelId), ...inheritedChannels.map(channel => channel.channelId), ...references.map(channel => channel.id)]).size : undefined} />
+
 		</div>
 	);
 }

@@ -139,8 +139,8 @@ The complete `publicProcedure` whitelist is:
 Every other tRPC procedure is protected or superadmin-only. Public procedures
 accept Zod-validated identifiers/tokens and return hand-written projections,
 never raw database rows. Status projections omit owner identity, target URL,
-HTTP code, TLS details, notification configuration, and history outside the
-limited incident summary. Share-link resolution exposes only cloneable monitor
+HTTP code, TLS details, notification configuration, and private history. Explicitly
+enabled compact history uses a separate seven-completed-UTC-day projection. Share-link resolution exposes only cloneable monitor
 configuration plus limited attribution.
 
 ### Other externally reachable surfaces
@@ -153,6 +153,8 @@ configuration plus limited attribution.
 | `/api/heartbeat/:token/:event` or `/api/heartbeat/:event` | Random 43-character token in the path or exact Bearer header; `event` is `start`, `success`, or `fail`. GET, HEAD, and POST only; bounded 10 KB raw body before the general parser, no compression. Uniform unavailable 404; explicit outcome and optional run ID only. |
 | `/api/agent/v1/metrics` | POST with an exact 43-character agent Bearer token; strict 48 KB JSON before the general parser, no compression. Audited response permits only outcome, reporting interval, and filesystem exclusions; unknown credentials yield the same unavailable 401. |
 | `/api/agent/releases/v1.0.0/*` | Public version-keyed allowlist of installer, Compose definition, checksums, and Linux amd64/arm64 binaries; GET/HEAD only, immutable one-year caching, 240 requests per IP per minute. |
+| `/api/status/pages/:key/{feed.rss,feed.atom,status.json,badge.svg,history.json}` | Published page key, hand-audited display/health/announcement projections; history requires explicit opt-in. CORS `*`, no-store, shared 240 requests/IP/minute, bounded 16 concurrent projections, uniform unavailable 404. |
+| `/api/status/pages/:key/{subscribe,subscription}` | POST/OPTIONS with exact configured or verified page origin, shared IP budget, 16 KB uncompressed JSON, bounded 16 active requests. Confirm/unsubscribe capabilities only in the JSON body, neutral accepted outcomes, no address/token disclosure. |
 | Public status and share pages | Render only the sanitized tRPC procedures listed above; mutations such as clone require a session. |
 
 Every tRPC input and REST body/query is validated with Zod. Express applies a
@@ -477,3 +479,29 @@ GitHub Actions performs a production-dependency audit, workspace typechecks and
 tests, a web build, and independent server/web Docker builds. Separate workflows
 run CodeQL and gitleaks. Version tags publish amd64/arm64 GHCR images with SBOM
 and provenance and create a GitHub release with generated notes.
+
+### Status-page publication and subscription delivery
+
+Component membership, display aliases and ordering are owner-scoped. Preview revisions
+bind the exact names, selection and publication state; apply rejects stale disclosures.
+Replacing membership preserves retained component IDs and metadata. Duplicates are
+drafts without custom-domain claims, announcements or subscribers. There is no page
+or component count limit. Missing and draft public pages are unavailable; pending or
+empty published components produce an unknown state rather than false availability.
+
+Published announcements are immutable snapshots with request credentials redacted
+before storage. Public maintenance overlays require an explicitly published occurrence
+that still matches its enabled owned schedule. Public feeds use audited display fields
+and XML escaping; compact history exposes seven completed UTC days without private
+monitor IDs, policy details or annotations.
+
+Subscription requests store page-specific HMAC email hashes and encrypted addresses.
+A 24-hour confirmation capability enables a versioned component selection. Mail links
+use PUBLIC_WEB_URL with fragment capabilities that the browser redeems in JSON only;
+verified custom domains are allowed request origins, never sources for mail links.
+Publishing enqueues fan-out in the page transaction; jobs bind the provider/config and
+subscriber versions. Fan-out batches 100 subscribers, scans claim at most 25 jobs, and
+four sends share a persisted provider pacing gate. Uncertain delivery is terminal;
+definite transient failures receive at most four attempts. Leader-owned workers drain
+on shutdown. Terminal jobs and unconfirmed/unsubscribed addresses expire after 30 days.
+Public responses never contain subscriber addresses, provider responses or capabilities.

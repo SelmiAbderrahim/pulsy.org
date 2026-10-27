@@ -20,8 +20,13 @@ import { Route as ShareTokenRouteImport } from './routes/share.$token'
 import { Route as AppSuperadminRouteImport } from './routes/_app/superadmin'
 import { Route as AppDashboardRouteImport } from './routes/_app/dashboard'
 import { Route as StatusUserIdSlugRouteImport } from './routes/status.$userId.$slug'
+import { Route as AppDashboardIncidentsRouteImport } from './routes/_app/dashboard_.incidents'
+import { Route as AppDashboardImportExportRouteImport } from './routes/_app/dashboard_.import-export'
+import { Route as AppDashboardHelpRouteImport } from './routes/_app/dashboard_.help'
+import { Route as AppDashboardConfigurationRouteImport } from './routes/_app/dashboard_.configuration'
 import { Route as AppDashboardApiKeysRouteImport } from './routes/_app/dashboard_.api-keys'
 import { Route as AppDashboardApiDocsRouteImport } from './routes/_app/dashboard_.api-docs'
+import { Route as AppDashboardHelpIndexRouteImport } from './routes/_app/dashboard_.help.index'
 import { Route as AppDashboardUptimeMonitorIdRouteImport } from './routes/_app/dashboard_.uptime.$monitorId'
 
 const SignupRoute = SignupRouteImport.update({
@@ -78,6 +83,28 @@ const StatusUserIdSlugRoute = StatusUserIdSlugRouteImport.update({
   path: '/$slug',
   getParentRoute: () => StatusUserIdRoute,
 } as any)
+const AppDashboardIncidentsRoute = AppDashboardIncidentsRouteImport.update({
+  id: '/dashboard_/incidents',
+  path: '/dashboard/incidents',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDashboardImportExportRoute =
+  AppDashboardImportExportRouteImport.update({
+    id: '/dashboard_/import-export',
+    path: '/dashboard/import-export',
+    getParentRoute: () => AppRoute,
+  } as any)
+const AppDashboardHelpRoute = AppDashboardHelpRouteImport.update({
+  id: '/dashboard_/help',
+  path: '/dashboard/help',
+  getParentRoute: () => AppRoute,
+} as any)
+const AppDashboardConfigurationRoute =
+  AppDashboardConfigurationRouteImport.update({
+    id: '/dashboard_/configuration',
+    path: '/dashboard/configuration',
+    getParentRoute: () => AppRoute,
+  } as any)
 const AppDashboardApiKeysRoute = AppDashboardApiKeysRouteImport.update({
   id: '/dashboard_/api-keys',
   path: '/dashboard/api-keys',
@@ -87,6 +114,11 @@ const AppDashboardApiDocsRoute = AppDashboardApiDocsRouteImport.update({
   id: '/dashboard_/api-docs',
   path: '/dashboard/api-docs',
   getParentRoute: () => AppRoute,
+} as any)
+const AppDashboardHelpIndexRoute = AppDashboardHelpIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => AppDashboardHelpRoute,
 } as any)
 const AppDashboardUptimeMonitorIdRoute =
   AppDashboardUptimeMonitorIdRouteImport.update({
@@ -107,8 +139,13 @@ export interface FileRoutesByFullPath {
   '/status/$userId': typeof StatusUserIdRouteWithChildren
   '/dashboard/api-docs': typeof AppDashboardApiDocsRoute
   '/dashboard/api-keys': typeof AppDashboardApiKeysRoute
+  '/dashboard/configuration': typeof AppDashboardConfigurationRoute
+  '/dashboard/help': typeof AppDashboardHelpRouteWithChildren
+  '/dashboard/import-export': typeof AppDashboardImportExportRoute
+  '/dashboard/incidents': typeof AppDashboardIncidentsRoute
   '/status/$userId/$slug': typeof StatusUserIdSlugRoute
   '/dashboard/uptime/$monitorId': typeof AppDashboardUptimeMonitorIdRoute
+  '/dashboard/help/': typeof AppDashboardHelpIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -122,8 +159,12 @@ export interface FileRoutesByTo {
   '/status/$userId': typeof StatusUserIdRouteWithChildren
   '/dashboard/api-docs': typeof AppDashboardApiDocsRoute
   '/dashboard/api-keys': typeof AppDashboardApiKeysRoute
+  '/dashboard/configuration': typeof AppDashboardConfigurationRoute
+  '/dashboard/import-export': typeof AppDashboardImportExportRoute
+  '/dashboard/incidents': typeof AppDashboardIncidentsRoute
   '/status/$userId/$slug': typeof StatusUserIdSlugRoute
   '/dashboard/uptime/$monitorId': typeof AppDashboardUptimeMonitorIdRoute
+  '/dashboard/help': typeof AppDashboardHelpIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -139,8 +180,13 @@ export interface FileRoutesById {
   '/status/$userId': typeof StatusUserIdRouteWithChildren
   '/_app/dashboard_/api-docs': typeof AppDashboardApiDocsRoute
   '/_app/dashboard_/api-keys': typeof AppDashboardApiKeysRoute
+  '/_app/dashboard_/configuration': typeof AppDashboardConfigurationRoute
+  '/_app/dashboard_/help': typeof AppDashboardHelpRouteWithChildren
+  '/_app/dashboard_/import-export': typeof AppDashboardImportExportRoute
+  '/_app/dashboard_/incidents': typeof AppDashboardIncidentsRoute
   '/status/$userId/$slug': typeof StatusUserIdSlugRoute
   '/_app/dashboard_/uptime/$monitorId': typeof AppDashboardUptimeMonitorIdRoute
+  '/_app/dashboard_/help/': typeof AppDashboardHelpIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -156,8 +202,13 @@ export interface FileRouteTypes {
     | '/status/$userId'
     | '/dashboard/api-docs'
     | '/dashboard/api-keys'
+    | '/dashboard/configuration'
+    | '/dashboard/help'
+    | '/dashboard/import-export'
+    | '/dashboard/incidents'
     | '/status/$userId/$slug'
     | '/dashboard/uptime/$monitorId'
+    | '/dashboard/help/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -171,8 +222,12 @@ export interface FileRouteTypes {
     | '/status/$userId'
     | '/dashboard/api-docs'
     | '/dashboard/api-keys'
+    | '/dashboard/configuration'
+    | '/dashboard/import-export'
+    | '/dashboard/incidents'
     | '/status/$userId/$slug'
     | '/dashboard/uptime/$monitorId'
+    | '/dashboard/help'
   id:
     | '__root__'
     | '/'
@@ -187,8 +242,13 @@ export interface FileRouteTypes {
     | '/status/$userId'
     | '/_app/dashboard_/api-docs'
     | '/_app/dashboard_/api-keys'
+    | '/_app/dashboard_/configuration'
+    | '/_app/dashboard_/help'
+    | '/_app/dashboard_/import-export'
+    | '/_app/dashboard_/incidents'
     | '/status/$userId/$slug'
     | '/_app/dashboard_/uptime/$monitorId'
+    | '/_app/dashboard_/help/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -281,6 +341,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof StatusUserIdSlugRouteImport
       parentRoute: typeof StatusUserIdRoute
     }
+    '/_app/dashboard_/incidents': {
+      id: '/_app/dashboard_/incidents'
+      path: '/dashboard/incidents'
+      fullPath: '/dashboard/incidents'
+      preLoaderRoute: typeof AppDashboardIncidentsRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/dashboard_/import-export': {
+      id: '/_app/dashboard_/import-export'
+      path: '/dashboard/import-export'
+      fullPath: '/dashboard/import-export'
+      preLoaderRoute: typeof AppDashboardImportExportRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/dashboard_/help': {
+      id: '/_app/dashboard_/help'
+      path: '/dashboard/help'
+      fullPath: '/dashboard/help'
+      preLoaderRoute: typeof AppDashboardHelpRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/dashboard_/configuration': {
+      id: '/_app/dashboard_/configuration'
+      path: '/dashboard/configuration'
+      fullPath: '/dashboard/configuration'
+      preLoaderRoute: typeof AppDashboardConfigurationRouteImport
+      parentRoute: typeof AppRoute
+    }
     '/_app/dashboard_/api-keys': {
       id: '/_app/dashboard_/api-keys'
       path: '/dashboard/api-keys'
@@ -295,6 +383,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardApiDocsRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/dashboard_/help/': {
+      id: '/_app/dashboard_/help/'
+      path: '/'
+      fullPath: '/dashboard/help/'
+      preLoaderRoute: typeof AppDashboardHelpIndexRouteImport
+      parentRoute: typeof AppDashboardHelpRoute
+    }
     '/_app/dashboard_/uptime/$monitorId': {
       id: '/_app/dashboard_/uptime/$monitorId'
       path: '/dashboard/uptime/$monitorId'
@@ -305,11 +400,26 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface AppDashboardHelpRouteChildren {
+  AppDashboardHelpIndexRoute: typeof AppDashboardHelpIndexRoute
+}
+
+const AppDashboardHelpRouteChildren: AppDashboardHelpRouteChildren = {
+  AppDashboardHelpIndexRoute: AppDashboardHelpIndexRoute,
+}
+
+const AppDashboardHelpRouteWithChildren =
+  AppDashboardHelpRoute._addFileChildren(AppDashboardHelpRouteChildren)
+
 interface AppRouteChildren {
   AppDashboardRoute: typeof AppDashboardRoute
   AppSuperadminRoute: typeof AppSuperadminRoute
   AppDashboardApiDocsRoute: typeof AppDashboardApiDocsRoute
   AppDashboardApiKeysRoute: typeof AppDashboardApiKeysRoute
+  AppDashboardConfigurationRoute: typeof AppDashboardConfigurationRoute
+  AppDashboardHelpRoute: typeof AppDashboardHelpRouteWithChildren
+  AppDashboardImportExportRoute: typeof AppDashboardImportExportRoute
+  AppDashboardIncidentsRoute: typeof AppDashboardIncidentsRoute
   AppDashboardUptimeMonitorIdRoute: typeof AppDashboardUptimeMonitorIdRoute
 }
 
@@ -318,6 +428,10 @@ const AppRouteChildren: AppRouteChildren = {
   AppSuperadminRoute: AppSuperadminRoute,
   AppDashboardApiDocsRoute: AppDashboardApiDocsRoute,
   AppDashboardApiKeysRoute: AppDashboardApiKeysRoute,
+  AppDashboardConfigurationRoute: AppDashboardConfigurationRoute,
+  AppDashboardHelpRoute: AppDashboardHelpRouteWithChildren,
+  AppDashboardImportExportRoute: AppDashboardImportExportRoute,
+  AppDashboardIncidentsRoute: AppDashboardIncidentsRoute,
   AppDashboardUptimeMonitorIdRoute: AppDashboardUptimeMonitorIdRoute,
 }
 

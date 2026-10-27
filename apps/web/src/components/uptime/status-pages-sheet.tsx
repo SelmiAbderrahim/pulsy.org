@@ -1,3 +1,12 @@
+import { registerDraftGuard } from "@/lib/draft-guards";
+import { useDirtyBeforeUnload } from "@/hooks/use-dirty-before-unload";
+import { isSessionClientActive } from "@/lib/session-query-client";
+import { FormErrorSummary, useFormValidation } from "@/components/ui/form-validation";
+import { FormField } from "@/components/ui/form-field";
+import { FormFooter } from "@/components/ui/form-footer";
+import { SectionCard } from "@/components/ui/section-card";
+import { layoutTokens } from "@/components/ui/layout-tokens";
+import { requestConfirmation, requestDiscardConfirmation } from "@/lib/confirmation";
 /**
  * Status pages management sheet.
  *
@@ -5,17 +14,20 @@
  * pick which monitors each shows, publish, and attach a DNS-verified custom
  * domain. Opened from the dashboard header, mirroring the share-links sheet.
  *
+ *
  * @module components/uptime/status-pages-sheet
  */
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
+  AlertTriangle,
   CheckCircle2,
   Circle,
   Copy,
   ExternalLink,
   Globe,
   Loader2,
+  MoreHorizontal,
   Pencil,
   Plus,
   RefreshCw,
@@ -23,8 +35,10 @@ import {
   XCircle,
 } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
+import { useSession } from "@/lib/auth-client";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -44,7 +58,6 @@ import {
   useCreateStatusPage,
   useDeleteStatusPage,
   useDetachStatusPageDomain,
-  useSetStatusPageMonitors,
   useStatusPage,
   useStatusPageDomainStatus,
   useStatusPages,
@@ -52,9 +65,11 @@ import {
   useVerifyStatusPageDomain,
 } from "@/hooks/uptime";
 import { useUptimeMonitors } from "@/hooks/uptime";
-import { useQueryClient } from "@tanstack/react-query";
+import { UptimeService } from "@/services/uptime/uptimeService";
+import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { uptimeKeys } from "@/hooks/uptime/queryKeys";
-import { extractErrorMessage } from "@/lib/api/extractErrorMessage";
+import { statusPageSlugSchema } from "@pulsy/db/status-page-slug";
+import { extractFieldErrors, extractErrorMessage } from "@/lib/api/extractErrorMessage";
 import { statusPageUrl } from "@/lib/status-domain";
 import { cn } from "@/lib/utils";
 import type { DomainRoutingRecord, StatusPage } from "@/types/uptime";
@@ -68,25 +83,27 @@ interface StatusPagesSheetProps {
 
 export function StatusPagesSheet({ open, onOpenChange }: StatusPagesSheetProps) {
   const { t } = useTranslation("uptimeMonitor");
-  const { data: pages, isLoading } = useStatusPages({ enabled: open });
+  const { data: pages, isLoading, error, refetch } = useStatusPages({ enabled: open });
   const deleteMutation = useDeleteStatusPage();
+  const updatePage = useUpdateStatusPage(); const client = useQueryClient();
+  const duplicate = useMutation({ mutationFn: (page: StatusPage) => UptimeService.duplicateStatusPage(page.statusPageId, t("statusUX.copyTitle", { title: page.title }).slice(0, 255)), onSuccess: async () => { await client.invalidateQueries({ queryKey: uptimeKeys.statusPages.all() }); if (!isSessionClientActive(client)) return; toast.success(t("statusUX.duplicated")); }, onError: error => { if (!isSessionClientActive(client)) return; toast.error(extractErrorMessage(error, t("statusPages.saveError"))); } });
+  const unpublish = async (page: StatusPage) => { if (!await requestConfirmation(t("statusUX.unpublishConfirm", { name: page.title }), { title: t("statusUX.unpublishTitle"), action: t("statusUX.unpublish") })) return; try { await updatePage.mutateAsync({ statusPageId: page.statusPageId, isPublished: false }); } catch (error) { if (!isSessionClientActive(client)) return; toast.error(extractErrorMessage(error, t("statusPages.saveError"))); } };
 
-  const [editingId, setEditingId] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
+  const [createDirty, setCreateDirty] = useState(false);
 
   const list = pages ?? [];
-
   const handleDelete = async (page: StatusPage) => {
     if (
-      !confirm(
-        t("statusPages.deleteConfirm", "Delete this status page?"),
+      !await requestConfirmation(
+        t("statusUX.deleteNamed", { name: page.title }), { title: t("statusUX.deleteTitle"), action: t("statusPages.delete") },
       )
     )
       return;
     try {
       await deleteMutation.mutateAsync({ statusPageId: page.statusPageId });
-      toast.success(t("statusPages.deleted", "Status page deleted"));
-    } catch (error) {
+      if (!isSessionClientActive(client)) return; toast.success(t("statusPages.deleted", "Status page deleted"));
+    } catch (error) { if (!isSessionClientActive(client)) return;
       toast.error(
         extractErrorMessage(
           error,
@@ -97,8 +114,8 @@ export function StatusPagesSheet({ open, onOpenChange }: StatusPagesSheetProps) 
   };
 
   return (
-    <Sheet open={open} onOpenChange={onOpenChange}>
-      <SheetContent side="right" className="sm:max-w-lg overflow-y-auto">
+    <Sheet open={open} onOpenChange={async value => { if (value || !createDirty || await requestDiscardConfirmation()) onOpenChange(value); }}>
+      <SheetContent side="right" className={`flex flex-col overflow-hidden ${layoutTokens.listDrawer}`}>
         <SheetHeader>
           <SheetTitle>{t("statusPages.title", "Status pages")}</SheetTitle>
           <SheetDescription>
@@ -109,306 +126,138 @@ export function StatusPagesSheet({ open, onOpenChange }: StatusPagesSheetProps) 
           </SheetDescription>
         </SheetHeader>
 
-        <div className="mt-6 flex flex-col gap-3">
+        <div className="mt-6 flex min-h-0 flex-col gap-3 overflow-y-auto pb-[env(safe-area-inset-bottom)]">
           {creating ? (
-            <StatusPageForm onClose={() => setCreating(false)} />
-          ) : (
-            <Button
-              variant="outline"
+            // Creation is its own view: the list of existing pages is not shown beneath the form.
+            <>
+              <h3 className="text-base font-semibold">{t("statusPages.create", "New status page")}</h3>
+              <StatusPageForm onDirtyChange={setCreateDirty} onClose={() => { setCreateDirty(false); setCreating(false); }} />
+            </>
+          ) : <>
+<Button
               onClick={() => {
-                setEditingId(null);
                 setCreating(true);
               }}
-              className="h-[44px] justify-start"
+              className="h-[44px] justify-start w-full sm:w-auto sm:justify-self-start sm:self-start"
             >
               <Plus className="h-4 w-4 me-2" />
               {t("statusPages.create", "New status page")}
             </Button>
-          )}
 
-          {isLoading ? (
-            <div className="flex items-center justify-center py-8">
-              <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
+          {error && <div role="alert" className="grid gap-2"><p className="text-sm text-destructive">{extractErrorMessage(error, t("communication.error"))}</p><Button className="w-full sm:w-auto sm:justify-self-start sm:self-start" variant="outline" onClick={() => void refetch()}>{t("communication.retry")}</Button></div>}
+          {isLoading ? <div role="status" className="flex items-center gap-2 py-6"><Loader2 className="h-5 w-5 animate-spin" />{t("common:states.loading")}</div> : !error && list.length === 0 ? <p className="py-4 text-sm text-muted-foreground">{t("statusPages.empty", "No status pages yet.")}</p> : list.map(page => <div key={page.statusPageId} className="grid min-w-0 gap-3 rounded-lg border p-4">
+            <div className="flex items-start gap-2"><div className="min-w-0 flex-1"><h3 className="break-words font-medium" dir="auto">{page.title}</h3><div className="mt-2 flex flex-wrap gap-2">{page.slug === DEFAULT_STATUS_PAGE_SLUG && <Badge variant="outline">{t("statusPages.defaultBadge", "Default")}</Badge>}<Badge variant="outline">{t(page.isPublished ? "statusPages.published" : "statusPages.draft", page.isPublished ? "Published" : "Draft")}</Badge><span className="text-sm text-muted-foreground">{t("statusUX.componentCount", { count: page.componentCount ?? 0 })}</span></div></div>
+              <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label={t("statusUX.moreNamed", { name: page.title })}><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem asChild><a href={`/dashboard/status-pages/${encodeURIComponent(page.statusPageId)}?tab=general`}><Pencil className="me-2 h-4 w-4" />{t("statusPages.edit", "Edit")}</a></DropdownMenuItem><DropdownMenuItem disabled={duplicate.isPending} onSelect={() => duplicate.mutate(page)}><Copy className="me-2 h-4 w-4" />{t("statusUX.duplicate")}</DropdownMenuItem>{page.isPublished && <DropdownMenuItem disabled={updatePage.isPending} onSelect={() => void unpublish(page)}>{t("statusUX.unpublish")}</DropdownMenuItem>} {page.slug !== DEFAULT_STATUS_PAGE_SLUG && <><DropdownMenuSeparator /><DropdownMenuItem className="text-destructive" disabled={deleteMutation.isPending} onSelect={() => void handleDelete(page)}><Trash2 className="me-2 h-4 w-4" />{t("statusPages.delete", "Delete")}</DropdownMenuItem></>}</DropdownMenuContent></DropdownMenu>
             </div>
-          ) : list.length === 0 ? (
-            <div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center">
-              <Globe className="h-8 w-8 text-muted-foreground mb-2" />
-              <p className="text-sm text-muted-foreground">
-                {t("statusPages.empty", "No status pages yet.")}
-              </p>
-            </div>
-          ) : (
-            list.map((page) =>
-              editingId === page.statusPageId ? (
-                <StatusPageForm
-                  key={page.statusPageId}
-                  page={page}
-                  onClose={() => setEditingId(null)}
-                />
-              ) : (
-                <div
-                  key={page.statusPageId}
-                  className="flex items-center justify-between gap-3 rounded-lg border p-3"
-                >
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2">
-                      <p className="truncate text-sm font-medium">
-                        {page.title}
-                      </p>
-                      {page.slug === DEFAULT_STATUS_PAGE_SLUG ? (
-                        <Badge variant="outline" className="text-muted-foreground">
-                          {t("statusPages.defaultBadge", "Default")}
-                        </Badge>
-                      ) : null}
-                      {page.isPublished ? (
-                        <Badge
-                          variant="outline"
-                          className="border-success/30 bg-success/10 text-success"
-                        >
-                          {t("statusPages.published", "Published")}
-                        </Badge>
-                      ) : (
-                        <Badge variant="outline" className="text-muted-foreground">
-                          {t("statusPages.draft", "Draft")}
-                        </Badge>
-                      )}
-                    </div>
-                    <p className="mt-1 truncate text-xs text-muted-foreground">
-                      /status/{page.userId}/{page.slug}
-                      {page.customDomain ? ` · ${page.customDomain}` : ""}
-                    </p>
-                  </div>
-                  <div className="flex shrink-0 items-center gap-1">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() =>
-                        window.open(
-                          statusPageUrl(page),
-                          "_blank",
-                          "noopener,noreferrer",
-                        )
-                      }
-                      disabled={!page.isPublished}
-                      className="h-[44px] w-[44px]"
-                      aria-label={t("statusPages.open", "Open page")}
-                    >
-                      <ExternalLink className="h-4 w-4 rtl:scale-x-[-1]" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => {
-                        setCreating(false);
-                        setEditingId(page.statusPageId);
-                      }}
-                      className="h-[44px] w-[44px]"
-                      aria-label={t("statusPages.edit", "Edit")}
-                    >
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    {page.slug === DEFAULT_STATUS_PAGE_SLUG ? null : (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => handleDelete(page)}
-                        disabled={deleteMutation.isPending}
-                        className="h-[44px] w-[44px] text-destructive hover:text-destructive"
-                        aria-label={t("statusPages.delete", "Delete")}
-                      >
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    )}
-                  </div>
-                </div>
-              ),
-            )
-          )}
+            {page.isPublished && (page.componentCount ?? 0) === 0 && <p className="flex items-start gap-2 text-sm text-warning"><AlertTriangle aria-hidden="true" className="mt-0.5 h-4 w-4 shrink-0" />{t("statusUX.emptyPublishedWarning")}</p>}
+            <p className="break-all text-xs text-muted-foreground" dir="ltr"><span className="sr-only">{t("statusPages.fieldSlug", "Slug")}: </span>{page.slug}{page.customDomain ? ` · ${page.customDomain}` : ""}</p>
+            <div className="flex flex-wrap gap-2"><Button variant="outline" asChild><a href={`/dashboard/status-pages/${encodeURIComponent(page.statusPageId)}`}>{t("statusUX.manage")}</a></Button>{page.isPublished && <Button variant="ghost" asChild><a href={statusPageUrl(page)} target="_blank" rel="noopener noreferrer">{t("statusPages.open", "Open page")}<ExternalLink className="h-4 w-4 rtl:scale-x-[-1]" /></a></Button>}</div>
+          </div>)}
+          </>}
         </div>
       </SheetContent>
     </Sheet>
   );
 }
 
-interface StatusPageFormProps {
-  page?: StatusPage;
-  onClose: () => void;
-}
+interface StatusPageFormProps { page?: StatusPage; onClose: () => void; embedded?: boolean; onDirtyChange?: (dirty: boolean) => void; }
+const pageFields = (page?: StatusPage) => ({ title: page?.title ?? "", slug: page?.slug ?? "", description: page?.description ?? null, isPublished: page?.isPublished ?? false });
 
-export function StatusPageForm({ page, onClose }: StatusPageFormProps) {
-  const { t } = useTranslation("uptimeMonitor");
-  const isEdit = Boolean(page);
-  const { data: detail } = useStatusPage(page?.statusPageId ?? "", {
-    enabled: isEdit,
-  });
+export function StatusPageForm({ page, onClose, embedded = false, onDirtyChange }: StatusPageFormProps) {
+  const client = useQueryClient();
+  const { t } = useTranslation("uptimeMonitor"); const { t: common } = useTranslation("common"); const { data: session } = useSession();
   const { data: monitors } = useUptimeMonitors();
-
-  const createMutation = useCreateStatusPage();
-  const updateMutation = useUpdateStatusPage();
-  const setMonitorsMutation = useSetStatusPageMonitors();
-
-  const [title, setTitle] = useState(page?.title ?? "");
-  const [slug, setSlug] = useState(page?.slug ?? "");
-  const [description, setDescription] = useState(page?.description ?? "");
-  const [isPublished, setIsPublished] = useState(page?.isPublished ?? false);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-
-  // Hydrate the monitor selection once the page detail loads.
+  const createMutation = useCreateStatusPage(), updateMutation = useUpdateStatusPage();
+  const [fields, setFields] = useState(() => pageFields(page)), [baseline, setBaseline] = useState(() => pageFields(page));
+  const [selected, setSelected] = useState<Set<string>>(new Set()), [search, setSearch] = useState(""), [error, setError] = useState("");
+  const [fieldErrors, setFieldErrors] = useState<Partial<Record<"title" | "slug" | "description", string>>>({});
+  const validation = useFormValidation();
+  const formRef = validation.formRef;
+  const slugResult = statusPageSlugSchema.safeParse(fields.slug);
   useEffect(() => {
-    if (detail) {
-      setSelected(new Set(detail.monitorIds));
-    }
-  }, [detail]);
-
-  const toggleMonitor = (id: string) => {
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(id)) {
-        next.delete(id);
-      } else {
-        next.add(id);
-      }
-      return next;
-    });
-  };
-
+    formRef.current?.querySelector<HTMLInputElement>("#sp-slug")?.setCustomValidity(
+      statusPageSlugSchema.safeParse(fields.slug).success ? "" : t("statusUX.slugHint"),
+    );
+  }, [fields.slug, t]);
+  const [domainDirty, setDomainDirty] = useState(false);
+  const submitting = useRef(false), snapshot = JSON.stringify({ ...fields, description: fields.description || null }), serverSnapshot = JSON.stringify(pageFields(page));
+  const dirty = snapshot !== JSON.stringify({ ...baseline, description: baseline.description || null }) || !page && selected.size > 0 || domainDirty;
+  const routeDraft = useRef({ dirty, onClose }); routeDraft.current = { dirty, onClose };
+  useDirtyBeforeUnload(() => !embedded && routeDraft.current.dirty);
+  useEffect(() => registerDraftGuard({
+    dirty: () => !embedded && routeDraft.current.dirty,
+    discard: () => { routeDraft.current.dirty = false; routeDraft.current.onClose(); },
+  }), [embedded]);
+  useEffect(() => { onDirtyChange?.(dirty); }, [dirty, onDirtyChange]);
+  const stale = Boolean(page && serverSnapshot !== JSON.stringify(baseline));
+  useEffect(() => { if (!dirty) { setFields(pageFields(page)); setBaseline(pageFields(page)); } }, [serverSnapshot]);
   const saving = createMutation.isPending || updateMutation.isPending;
-
-  const handleSave = async () => {
-    try {
-      const ids = [...selected];
-      if (isEdit && page) {
-        await updateMutation.mutateAsync({
-          statusPageId: page.statusPageId,
-          title,
-          slug,
-          description: description || null,
-          isPublished,
-        });
-        await setMonitorsMutation.mutateAsync({
-          statusPageId: page.statusPageId,
-          uptimeMonitorIds: ids,
-        });
-      } else {
-        const created = await createMutation.mutateAsync({
-          slug,
-          title,
-          description: description || null,
-          isPublished,
-        });
-        await setMonitorsMutation.mutateAsync({
-          statusPageId: created.statusPageId,
-          uptimeMonitorIds: ids,
-        });
-      }
-      toast.success(t("statusPages.saved", "Status page saved"));
-      onClose();
-    } catch (error) {
-      toast.error(
-        extractErrorMessage(
-          error,
-          t("statusPages.saveError", "Failed to save status page"),
-        ),
-      );
-    }
+  const update = <K extends keyof typeof fields>(key: K, value: (typeof fields)[K]) => {
+    validation.clear(`sp-${key === "description" ? "desc" : key}`);
+    setFields(previous => ({ ...previous, [key]: value }));
+    setFieldErrors(previous => ({ ...previous, [key]: key === "title" && !String(value).trim() ? t("statusUX.titleRequired") : key === "slug" && !statusPageSlugSchema.safeParse(value).success ? t("statusUX.slugHint") : undefined })); setError("");
   };
-
-  return (
-    <div className="flex flex-col gap-4 rounded-lg border p-4">
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="sp-title">{t("statusPages.fieldTitle", "Title")}</Label>
-        <Input
-          id="sp-title"
-          value={title}
-          onChange={(e) => setTitle(e.target.value)}
-          placeholder={t("statusPages.titlePlaceholder", "Acme Status")}
-        />
+  const handleSave = async (event: React.FormEvent) => {
+    event.preventDefault(); if (submitting.current) return;
+    const localErrors: typeof fieldErrors = {};
+    if (!slugResult.success) localErrors.slug = t("statusUX.slugHint");
+    if (!fields.title.trim()) localErrors.title = t("statusUX.titleRequired");
+    else if (fields.title.trim().length > 255) localErrors.title = common("nav.invalidField");
+    if ((fields.description?.length ?? 0) > 1000) localErrors.description = common("nav.invalidField");
+    setFieldErrors(localErrors); setError("");
+    if (Object.keys(localErrors).length) {
+      validation.show(Object.entries(localErrors).map(([key, message]) => ({ id: `sp-${key === "description" ? "desc" : key}`, message }))); return;
+    }
+    validation.clear();
+    submitting.current = true;
+    try {
+      let confirmEmptyPublication = false;
+      if (fields.isPublished && !baseline.isPublished && (page ? (page.componentCount ?? 0) === 0 : selected.size === 0)) {
+        confirmEmptyPublication = await requestConfirmation(t("statusUX.confirmEmptyPublication"), { title: t("statusUX.publishEmptyTitle"), action: t("statusUX.publishEmptyAction"), destructive: false });
+        if (!confirmEmptyPublication || !isSessionClientActive(client)) return;
+      }
+      const confirmation = confirmEmptyPublication ? { confirmEmptyPublication: true } : {};
+      const values = { ...fields, title: fields.title.trim(), slug: statusPageSlugSchema.parse(fields.slug), description: fields.description || null };
+      if (page) await updateMutation.mutateAsync({ statusPageId: page.statusPageId, ...values, ...confirmation, expected: baseline });
+      else await createMutation.mutateAsync({ ...values, ...confirmation, uptimeMonitorIds: [...selected] });
+      if (!isSessionClientActive(client)) return; setFields(values); setBaseline(values); setSelected(new Set()); if (!isSessionClientActive(client)) return; toast.success(t("statusPages.saved", "Status page saved")); onClose();
+    } catch (caught) { if (!isSessionClientActive(client)) return;
+      const errors = extractFieldErrors(caught, ["title", "slug", "description"] as const);
+      setFieldErrors(errors);
+      if (Object.keys(errors).length) { validation.show(Object.entries(errors).map(([key, message]) => ({ id: `sp-${key === "description" ? "desc" : key}`, message: message! }))); return; }
+      const message = extractErrorMessage(caught, Object.keys(errors).length ? t("statusUX.validationError") : t("statusPages.saveError", "Failed to save status page"));
+      setError(message); toast.error(message);
+    }
+    finally { submitting.current = false; }
+  };
+  const publicPath = statusPageUrl({ userId: page?.userId ?? session?.user.id ?? "…", slug: slugResult.success ? slugResult.data : "", customDomain: null, domainVerified: false });
+  return <div className="grid min-w-0 gap-6">
+    {page && <a className="inline-flex min-h-11 items-center gap-2 rounded-md border bg-muted/30 px-4 text-sm font-medium underline" href="#status-custom-domain">{t("statusUX.customDomainLink")}</a>}
+    <SectionCard title={t("statusUX.tabs.general")}><form ref={formRef} noValidate className="grid min-w-0 gap-4" onSubmit={event => void handleSave(event)}>
+      <FormErrorSummary issues={validation.issues} />
+      <p className="text-sm text-muted-foreground">{t("statusUX.requiredHint")}{dirty && <> · {t("statusUX.unsaved")}</>}</p>
+      {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+      {stale && <div role="alert" className="grid gap-2 text-sm"><p>{t("statusUX.stale")}</p><Button className="w-full sm:w-auto sm:justify-self-start sm:self-start" type="button" variant="outline" onClick={async () => { if (!dirty || await requestDiscardConfirmation()) { setFields(pageFields(page)); setBaseline(pageFields(page)); setFieldErrors({}); setError(""); } }}>{t("statusUX.reload")}</Button></div>}
+      <div className="grid min-w-0 gap-4">
+        <FormField label={t("statusPages.fieldTitle", "Title")} control={<Input id="sp-title" aria-invalid={Boolean(fieldErrors.title)} dir="auto" required maxLength={255} disabled={saving} value={fields.title} onChange={event => update("title", event.target.value)} placeholder={t("statusPages.titlePlaceholder", "Example: Acme Status")} />} error={fieldErrors.title} />
+        <FormField label={t("statusPages.fieldSlug", "Slug")} control={<Input id="sp-slug" dir="ltr" required aria-invalid={Boolean(fieldErrors.slug)} disabled={saving} readOnly={page?.slug === DEFAULT_STATUS_PAGE_SLUG} className={page?.slug === DEFAULT_STATUS_PAGE_SLUG ? "bg-muted text-muted-foreground" : undefined} value={fields.slug} onChange={event => {
+          const value = event.target.value;
+          event.currentTarget.setCustomValidity(statusPageSlugSchema.safeParse(value).success ? "" : t("statusUX.slugHint"));
+          update("slug", value);
+        }} onBlur={event => {
+          const valid = statusPageSlugSchema.safeParse(event.currentTarget.value).success;
+          event.currentTarget.setCustomValidity(valid ? "" : t("statusUX.slugHint"));
+          setFieldErrors(previous => valid ? previous : { ...previous, slug: t("statusUX.slugHint") });
+        }} placeholder={t("formUX.example", { value: "status" })} />} helper={t(page?.slug === DEFAULT_STATUS_PAGE_SLUG ? "statusUX.defaultSlugHelp" : "statusUX.slugHint")} error={fieldErrors.slug} />
+        <FormField label={t("statusPages.fieldDescription", "Description")} control={<Textarea id="sp-desc" aria-invalid={Boolean(fieldErrors.description)} dir="auto" maxLength={1000} rows={3} disabled={saving} value={fields.description ?? ""} onChange={event => update("description", event.target.value)} />} helper={t("statusUX.optionalDescription", { max: 1000 })} error={fieldErrors.description} />
       </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="sp-slug">{t("statusPages.fieldSlug", "Slug")}</Label>
-        <Input
-          id="sp-slug"
-          value={slug}
-          onChange={(e) => setSlug(e.target.value)}
-          placeholder="status"
-          disabled={page?.slug === DEFAULT_STATUS_PAGE_SLUG}
-        />
-        {page?.slug === DEFAULT_STATUS_PAGE_SLUG ? (
-          <p className="text-xs text-muted-foreground">
-            {t(
-              "statusPages.slugLockedHint",
-              "The default page slug can't be changed.",
-            )}
-          </p>
-        ) : null}
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <Label htmlFor="sp-desc">
-          {t("statusPages.fieldDescription", "Description")}
-        </Label>
-        <Textarea
-          id="sp-desc"
-          value={description}
-          onChange={(e) => setDescription(e.target.value)}
-          rows={2}
-        />
-      </div>
-
-      <div className="flex items-center justify-between gap-3 rounded-md bg-muted/50 p-3">
-        <Label htmlFor="sp-pub" className="cursor-pointer">
-          {t("statusPages.publish", "Published")}
-        </Label>
-        <Switch
-          id="sp-pub"
-          checked={isPublished}
-          onCheckedChange={setIsPublished}
-        />
-      </div>
-
-      <div className="flex flex-col gap-2">
-        <p className="text-sm font-medium">
-          {t("statusPages.monitors", "Monitors")}
-        </p>
-        <div className="flex max-h-48 flex-col gap-1 overflow-y-auto">
-          {(monitors ?? []).map((m) => (
-            <label
-              key={m.uptimeMonitorId}
-              className="flex cursor-pointer items-center gap-2 rounded-md p-2 hover:bg-muted/50"
-            >
-              <Checkbox
-                checked={selected.has(m.uptimeMonitorId)}
-                onCheckedChange={() => toggleMonitor(m.uptimeMonitorId)}
-              />
-              <span className="truncate text-sm">{m.name}</span>
-            </label>
-          ))}
-          {(monitors ?? []).length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {t("statusPages.noMonitorsToPick", "No monitors to add yet.")}
-            </p>
-          ) : null}
-        </div>
-      </div>
-
-      {isEdit && page ? <DomainSection page={page} /> : null}
-
-      <div className="flex items-center justify-end gap-2">
-        <Button variant="ghost" onClick={onClose} className="h-[44px]">
-          {t("common:cancel", "Cancel")}
-        </Button>
-        <Button
-          onClick={handleSave}
-          disabled={saving || !title || !slug}
-          className="h-[44px]"
-        >
-          {saving ? (
-            <Loader2 className="h-4 w-4 me-2 animate-spin" />
-          ) : null}
-          {t("statusPages.save", "Save")}
-        </Button>
-      </div>
-    </div>
-  );
+      {slugResult.success && (!page || slugResult.data !== page.slug) && <p className="break-all text-sm"><span className="text-muted-foreground">{t("statusUX.addressAfterSaving")}: </span><bdi dir="ltr">{publicPath}</bdi></p>}
+      <div className="grid gap-2"><div className="flex min-h-11 items-center justify-between gap-3"><Label htmlFor="sp-pub">{t("statusPages.publish", "Published")}</Label><Switch id="sp-pub" disabled={saving} checked={fields.isPublished} onCheckedChange={value => update("isPublished", value)} aria-describedby="sp-publication-help" /></div><p id="sp-publication-help" className="text-sm text-muted-foreground">{t(fields.isPublished ? "statusUX.publishHint" : "statusUX.draftLimit")}{fields.isPublished && (page ? page.componentCount === 0 : selected.size === 0) && <> {t("statusUX.publishEmpty")}</>}</p></div>
+      {!page && <fieldset className="grid min-w-0 gap-2"><legend className="mb-2 text-sm font-medium">{t("statusPages.monitors", "Monitors")}</legend><Input type="search" aria-label={t("notificationUX.searchMonitors")} placeholder={t("search.shortPlaceholder")} value={search} onChange={event => setSearch(event.target.value)} /><p className="text-sm">{t("statusUX.selectedCount", { count: selected.size })}</p><div className="">{(monitors ?? []).filter(monitor => monitor.name.toLocaleLowerCase().includes(search.toLocaleLowerCase())).map(monitor => <label key={monitor.uptimeMonitorId} className="flex min-h-11 cursor-pointer items-center gap-3 p-2"><Checkbox disabled={saving} checked={selected.has(monitor.uptimeMonitorId)} onCheckedChange={checked => setSelected(previous => { const next = new Set(previous); if (checked) next.add(monitor.uptimeMonitorId); else next.delete(monitor.uptimeMonitorId); return next; })} /><bdi className="min-w-0 break-words text-sm">{monitor.name}</bdi></label>)}</div>{!monitors?.length && <p className="text-sm text-muted-foreground">{t("statusPages.noMonitorsToPick", "No monitors to add yet.")}</p>}<p className="text-xs text-muted-foreground">{t("pageSelection.disclosure")}</p></fieldset>}
+      <FormFooter sticky className="bg-card">{!embedded && <Button type="button" variant="ghost" disabled={saving} onClick={async () => { if (!dirty || await requestDiscardConfirmation()) onClose(); }}>{t("common:actions.cancel", "Cancel")}</Button>}<Button type="submit" disabled={saving || !dirty}>{saving && <Loader2 className="h-4 w-4 animate-spin" />}{t("statusPages.save", "Save")}</Button></FormFooter>
+    </form></SectionCard>
+    {page && <section id="status-custom-domain" className="scroll-mt-20"><DomainSection page={page} onDirtyChange={setDomainDirty} /></section>}
+  </div>;
 }
 
 /**
@@ -464,9 +313,10 @@ function DomainCheckRow({
   );
 }
 
-export function DomainSection({ page }: { page: StatusPage }) {
+export function DomainSection({ page, onDirtyChange }: { page: StatusPage; onDirtyChange?: (dirty: boolean) => void }) {
+  const client = useQueryClient();
   const { t } = useTranslation("uptimeMonitor");
-  const queryClient = useQueryClient();
+  const queryClient = client;
   const attachMutation = useAttachStatusPageDomain();
   const verifyMutation = useVerifyStatusPageDomain();
   const detachMutation = useDetachStatusPageDomain();
@@ -476,6 +326,7 @@ export function DomainSection({ page }: { page: StatusPage }) {
   });
 
   const [domain, setDomain] = useState("");
+  useEffect(() => { onDirtyChange?.(Boolean(domain.trim())); }, [domain, onDirtyChange]);
   const [record, setRecord] = useState<{
     domain: string;
     name: string;
@@ -490,6 +341,17 @@ export function DomainSection({ page }: { page: StatusPage }) {
       : null,
   );
 
+  // A later owner action in another tab can replace the ownership proof.
+  useEffect(() => {
+    setRecord(page.customDomain && page.domainVerifyToken ? {
+      domain: page.customDomain, name: `_pulsy-verify.${page.customDomain}`, value: page.domainVerifyToken,
+    } : null);
+  }, [page.customDomain, page.domainVerifyToken]);
+  const copyRecord = async (value: string) => {
+    try { await navigator.clipboard.writeText(value); if (!isSessionClientActive(client)) return; toast.success(t("statusPages.copied", "Copied")); }
+    catch { if (!isSessionClientActive(client)) return; toast.error(t("statusUX.urlCopyFailed", "Could not copy. Select and copy the value manually.")); }
+  };
+
   // The domain to display comes from the persisted page or a just-attached
   // record (the page prop refreshes on the next query invalidation).
   const activeDomain = page.customDomain ?? record?.domain ?? null;
@@ -502,13 +364,15 @@ export function DomainSection({ page }: { page: StatusPage }) {
         statusPageId: page.statusPageId,
         customDomain: domain,
       });
+      if (!isSessionClientActive(client)) return;
+      setDomain("");
       setRecord({
         domain: res.customDomain ?? domain,
         name: res.recordName,
         value: res.recordValue,
       });
-      toast.success(t("statusPages.domainAttached", "Domain attached"));
-    } catch (error) {
+      if (!isSessionClientActive(client)) return; toast.success(t("statusPages.domainAttached", "Domain attached"));
+    } catch (error) { if (!isSessionClientActive(client)) return;
       toast.error(
         extractErrorMessage(
           error,
@@ -524,9 +388,9 @@ export function DomainSection({ page }: { page: StatusPage }) {
         statusPageId: page.statusPageId,
       });
       if (res.domainVerified) {
-        toast.success(t("statusPages.domainVerified", "Domain verified"));
+        if (!isSessionClientActive(client)) return; toast.success(t("statusPages.domainVerified", "Domain verified"));
       }
-    } catch (error) {
+    } catch (error) { if (!isSessionClientActive(client)) return;
       toast.error(
         extractErrorMessage(
           error,
@@ -549,8 +413,8 @@ export function DomainSection({ page }: { page: StatusPage }) {
       await detachMutation.mutateAsync({ statusPageId: page.statusPageId });
       setRecord(null);
       setDomain("");
-      toast.success(t("statusPages.domainDetached", "Domain removed"));
-    } catch (error) {
+      if (!isSessionClientActive(client)) return; toast.success(t("statusPages.domainDetached", "Domain removed"));
+    } catch (error) { if (!isSessionClientActive(client)) return;
       toast.error(
         extractErrorMessage(
           error,
@@ -561,12 +425,7 @@ export function DomainSection({ page }: { page: StatusPage }) {
   };
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border p-3">
-      <div className="flex items-center justify-between gap-2">
-        <p className="text-sm font-medium">
-          {t("statusPages.customDomain", "Custom domain")}
-        </p>
-        {activeDomain ? (
+    <SectionCard title={t("statusPages.customDomain", "Custom domain")} headerEnd={activeDomain ? (
           page.domainVerified ? (
             provisionStatus === "active" ? (
               <Badge
@@ -590,8 +449,8 @@ export function DomainSection({ page }: { page: StatusPage }) {
               {t("statusPages.notVerified", "Not verified")}
             </Badge>
           )
-        ) : null}
-      </div>
+        ) : null}>
+      <div className="grid gap-3">
 
       {activeDomain ? (
         <>
@@ -605,8 +464,8 @@ export function DomainSection({ page }: { page: StatusPage }) {
               <p className="font-medium">
                 {t(
                   "statusPages.routingRecord",
-                  "1. Point your domain here ({{type}} record):",
-                  { type: routingRecord.recordType },
+                  "{{step}}. Point your domain here ({{type}} record):",
+                  { type: routingRecord.recordType, step: 1 },
                 )}
               </p>
               <p className="break-all font-mono">{routingRecord.recordName}</p>
@@ -615,12 +474,9 @@ export function DomainSection({ page }: { page: StatusPage }) {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 shrink-0"
+                  className="h-11 w-11 shrink-0"
                   aria-label={t("statusPages.copyRecord", "Copy record value")}
-                  onClick={() => {
-                    void navigator.clipboard.writeText(routingRecord.recordValue);
-                    toast.success(t("statusPages.copied", "Copied"));
-                  }}
+                  onClick={() => void copyRecord(routingRecord.recordValue)}
                 >
                   <Copy className="h-3 w-3" />
                 </Button>
@@ -640,7 +496,8 @@ export function DomainSection({ page }: { page: StatusPage }) {
                 {routingRecord
                   ? t(
                       "statusPages.dnsRecordOwnership",
-                      "2. Add this TXT record to prove ownership:",
+                      "{{step}}. Add this TXT record to prove ownership:",
+                      { step: 2 },
                     )
                   : t("statusPages.dnsRecord", "Add this TXT record:")}
               </p>
@@ -650,12 +507,9 @@ export function DomainSection({ page }: { page: StatusPage }) {
                 <Button
                   variant="ghost"
                   size="icon"
-                  className="h-7 w-7 shrink-0"
+                  className="h-11 w-11 shrink-0"
                   aria-label={t("statusPages.copyRecord", "Copy record value")}
-                  onClick={() => {
-                    void navigator.clipboard.writeText(record.value);
-                    toast.success(t("statusPages.copied", "Copied"));
-                  }}
+                  onClick={() => void copyRecord(record.value)}
                 >
                   <Copy className="h-3 w-3" />
                 </Button>
@@ -780,9 +634,10 @@ export function DomainSection({ page }: { page: StatusPage }) {
       ) : (
         <div className="flex items-center gap-2">
           <Input
+            disabled={attachMutation.isPending}
             value={domain}
             onChange={(e) => setDomain(e.target.value)}
-            placeholder="status.example.com"
+            placeholder={t("formUX.example", { value: "status.example.com" })}
             aria-label={t("statusPages.customDomain", "Custom domain")}
           />
           <Button
@@ -798,6 +653,7 @@ export function DomainSection({ page }: { page: StatusPage }) {
           </Button>
         </div>
       )}
-    </div>
+      </div>
+    </SectionCard>
   );
 }

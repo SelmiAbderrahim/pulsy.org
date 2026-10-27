@@ -21,6 +21,8 @@ export const uptimeMaintenance = pgTable("uptime_maintenance", {
 export interface DeferredAlertSnapshot {
 	statusChangeId: string; uptimeMonitorId: string; statusBefore: string; statusAfter: string;
 	httpStatus: number | null; responseTime: number | null; reason: string | null; createdAt: string;
+	/** Internal exact webhook bytes, committed before first transport. Never credentials. */
+	webhookBodies?: Record<string, string>;
 }
 
 export const uptimeDeferredAlert = pgTable("uptime_deferred_alert", {

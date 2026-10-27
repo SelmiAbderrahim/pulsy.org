@@ -1,4 +1,5 @@
-import { sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { beforeEach } from "vitest";
 import { createHash } from "node:crypto";
@@ -23,6 +24,16 @@ import {
 // ---------------------------------------------------------------------------
 
 export { db };
+
+/** Read private engine state explicitly in integration tests, never through an owner DTO. */
+export async function storedMonitorSnapshot(monitorId: string, ownerId: string) {
+	const monitor = await db.query.uptimeMonitor.findFirst({
+		where: and(eq(uptimeMonitor.uptimeMonitorId, monitorId), eq(uptimeMonitor.userId, ownerId)),
+		with: { incidents: true },
+	});
+	if (!monitor) throw new Error("Owned fixture monitor missing");
+	return monitor;
+}
 
 // Every table the suite writes to, in an order safe for TRUNCATE ... CASCADE.
 const ALL_TABLES = [
@@ -253,7 +264,7 @@ export async function createTestStatusPage(
 	const [row] = await db
 		.insert(uptimeStatusPage)
 		.values({
-			slug: overrides.slug ?? `page-${nanoid()}`,
+			slug: overrides.slug ?? `page-${randomUUID()}`,
 			title: overrides.title ?? "Test Status Page",
 			isPublished: overrides.isPublished ?? true,
 			...overrides,

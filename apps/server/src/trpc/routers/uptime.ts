@@ -1,3 +1,26 @@
+import { assertCountersConsistent, countMonitorStates, meanUptimePercentage } from "@pulsy/db/monitor-counters";
+import { monitorPortabilityRouter } from "./monitor-portability";
+import { monitorViewsRouter } from "./monitor-views";
+import { monitorTemplatesRouter } from "./monitor-templates";
+import { statusCommunicationRouter } from "./status-communication";
+import { publicSubscriptionReady } from "../../services/uptime/status-subscription";
+import { publishedAnnouncements, publicMaintenanceComponents } from "../../services/uptime/status-communication";
+import { previewPageSelection, applyPageSelection, previewPageReplacement, replacePageSelection, replacePageSelectionInTransaction } from "../../services/uptime/page-selection";
+import { portableHttpUrl } from "@pulsy/db";
+import { overallStatus as computeOverallStatus } from "@pulsy/db/status-math";
+import { redactIncidentText } from "../../services/uptime/incident-text";
+import { assertBelowCap } from "../../lib/account-caps";
+import { FieldValidationError } from "../validation-errors";
+import { isUniqueViolation } from "../../lib/db-errors";
+import { reliabilityRouter } from "./reliability";
+import { incidentWorkspaceRouter } from "./incident-workspace";
+import { maintenanceRouter } from "./maintenance";
+import { effectiveSuppression, effectiveSuppressions, loadMaintenance } from "../../services/uptime/maintenance-service";
+import { assertNotificationChannelTarget } from "../../services/uptime/channel-target";
+import { insertOwnedChannel } from "../../services/uptime/channel-service";
+import { newWebhookSecret } from "../../services/uptime/notification-channel-secrets";
+import { encrypt } from "../../lib/crypto";
+import { withManualActionLimit } from "../../lib/manual-limit";
 import { apiNetworkMonitor } from "@pulsy/db/validation-network";
 import { heartbeatRouter } from "./heartbeat";
 import { serverHealthRouter } from "./server-health";
@@ -44,6 +67,7 @@ import {
 	apiResolveStatusPageByDomain,
 	db,
 	uptimeMonitor,
+	uptimeMonitorChannelBinding,
 	uptimeHeartbeat,
 	uptimeStatusChange,
 	uptimeCheckLog,
@@ -67,6 +91,7 @@ import { TRPCError } from "@trpc/server";
 import {
 	and,
 	desc,
+	gt,
 	eq,
 	gte,
 	ilike,
@@ -74,6 +99,7 @@ import {
 	isNull,
 	lte,
 	count,
+	sum,
 	getTableColumns,
 	ne,
 	or,
@@ -226,30 +252,38 @@ async function findLiveShareLinkOrThrow(token: string, t: Translator) {
  */
 async function findSharedMonitors(
 	link: Pick<UptimeShareLinkRow, "monitorIds" | "userId">,
+ t: Translator,
 ): Promise<UptimeMonitorRow[]> {
-	return db.query.uptimeMonitor.findMany({
+	const rows = await db.query.uptimeMonitor.findMany({
 		where: and(
+			eq(uptimeMonitor.monitorType, "http"),
 			inArray(uptimeMonitor.uptimeMonitorId, link.monitorIds),
 			eq(uptimeMonitor.userId, link.userId),
 		),
 	});
+ return rows.filter(row => isSafeToShare(row, t));
 }
 
 /**
  * The only monitor fields a share link ever exposes or clones. Never current
  * status, history, TLS data, status-page settings, or anything owner-scoped.
  */
-function toSharedMonitorConfig(m: UptimeMonitorRow) {
+function isSafeToShare(m: UptimeMonitorRow, t: Translator) {
+  const url = portableHttpUrl(m.url);
+  return url !== null && redactIncidentText(m, url, t) === url;
+}
+function toSharedMonitorConfig(m: UptimeMonitorRow, t: Translator) {
 	return {
 		uptimeMonitorId: m.uptimeMonitorId,
-		name: m.name,
+		name: redactIncidentText(m, m.name, t),
 		url: m.url,
 		method: m.method,
 		expectedStatus: m.expectedStatus,
+    expectedStatuses: m.expectedStatuses, tlsMonitoringEnabled: m.tlsMonitoringEnabled,
 		timeout: m.timeout,
 		interval: m.interval,
 		failureThreshold: m.failureThreshold,
-		tags: m.tags ?? [],
+		tags: (m.tags ?? []).map(tag => redactIncidentText(m, tag, t)),
 	};
 }
 
@@ -331,6 +365,8 @@ const localizedHttpProcedure = protectedProcedure.use(async ({ ctx, next }) => {
 });
 
 
+const manualActionProcedure = protectedProcedure.use(({ ctx, next }) => withManualActionLimit(ctx.user.id, ctx.t, () => next()));
+
 const activeHttpTests = new Set<string>();
 const monitorRouter = router({
   testConfiguration: localizedHttpProcedure.input(z.object({
@@ -364,17 +400,37 @@ const monitorRouter = router({
     }
     finally { activeHttpTests.delete(ctx.user.id); }
   }),
-	list: protectedProcedure.query(async ({ ctx }) => {
+	list: protectedProcedure.input(z.object({ cursor: z.string().min(1).max(64).optional() }).strict().optional()).query(async ({ ctx, input }) => {
 		const monitors = await db.query.uptimeMonitor.findMany({
-			where: eq(uptimeMonitor.userId, ctx.user.id),
-			orderBy: desc(uptimeMonitor.createdAt),
+			where: and(eq(uptimeMonitor.userId, ctx.user.id), input?.cursor ? gt(uptimeMonitor.uptimeMonitorId, input.cursor) : undefined),
+			orderBy: uptimeMonitor.uptimeMonitorId,
+      limit: 200,
 		});
+    const monitorIds = monitors.map(m => m.uptimeMonitorId);
+    const [directChannels, bindings, pageLinks] = monitorIds.length ? await Promise.all([
+      db.select({ monitorId: uptimeNotificationChannel.uptimeMonitorId, channelId: uptimeNotificationChannel.channelId }).from(uptimeNotificationChannel)
+        .where(and(eq(uptimeNotificationChannel.userId, ctx.user.id), inArray(uptimeNotificationChannel.uptimeMonitorId, monitorIds))),
+      db.select({ monitorId: uptimeMonitorChannelBinding.monitorId, channelId: uptimeMonitorChannelBinding.channelId }).from(uptimeMonitorChannelBinding)
+        .innerJoin(uptimeNotificationChannel, eq(uptimeNotificationChannel.channelId, uptimeMonitorChannelBinding.channelId))
+        .where(and(eq(uptimeMonitorChannelBinding.userId, ctx.user.id), eq(uptimeNotificationChannel.userId, ctx.user.id), inArray(uptimeMonitorChannelBinding.monitorId, monitorIds))),
+      db.select({ monitorId: uptimeStatusPageMonitor.uptimeMonitorId, statusPageId: uptimeStatusPageMonitor.statusPageId }).from(uptimeStatusPageMonitor)
+        .innerJoin(uptimeStatusPage, eq(uptimeStatusPage.statusPageId, uptimeStatusPageMonitor.statusPageId))
+        .where(and(eq(uptimeStatusPage.userId, ctx.user.id), inArray(uptimeStatusPageMonitor.uptimeMonitorId, monitorIds))),
+    ]) : [[], [], []];
+    const overrideChannels = new Map<string, Set<string>>(), statusPages = new Map<string, Set<string>>();
+    for (const channel of [...directChannels, ...bindings]) if (channel.monitorId) {
+      const ids = overrideChannels.get(channel.monitorId) ?? new Set<string>(); ids.add(channel.channelId); overrideChannels.set(channel.monitorId, ids);
+    }
+    for (const link of pageLinks) {
+      const ids = statusPages.get(link.monitorId) ?? new Set<string>(); ids.add(link.statusPageId); statusPages.set(link.monitorId, ids);
+    }
 		const aggregates = await getOwnedUptimeAggregates(ctx.user.id, 30, monitors.map(m => m.uptimeMonitorId));
     const heartbeatIds = monitors.filter(m => m.monitorType === "heartbeat").map(m => m.uptimeMonitorId);
     const heartbeats = heartbeatIds.length ? await db.select({ monitorId: uptimeHeartbeat.monitorId, lastReceivedAt: uptimeHeartbeat.lastReceivedAt, expectedAt: uptimeHeartbeat.expectedAt, graceSeconds: uptimeHeartbeat.graceSeconds })
       .from(uptimeHeartbeat).where(and(eq(uptimeHeartbeat.userId, ctx.user.id), inArray(uptimeHeartbeat.monitorId, heartbeatIds))) : [];
     const heartbeatStates = new Map(heartbeats.map(h => [h.monitorId, { lastReceivedAt: h.lastReceivedAt, expectedAt: h.expectedAt, deadlineAt: new Date(Date.parse(h.expectedAt) + h.graceSeconds * 1000).toISOString() }]));
-    return monitors.map(m => ({ ...toOwnerMonitor(m), heartbeat: heartbeatStates.get(m.uptimeMonitorId) ?? null, ...(aggregates.get(m.uptimeMonitorId) ?? { uptimePercentage: null, uptimeChecks: 0 }) }));
+    const suppressions = effectiveSuppressions(await loadMaintenance(ctx.user.id));
+    return monitors.map(m => ({ ...toOwnerMonitor(m), overrideChannelCount: overrideChannels.get(m.uptimeMonitorId)?.size ?? 0, statusPageCount: statusPages.get(m.uptimeMonitorId)?.size ?? 0, alertSuppression: suppressions.get(m.uptimeMonitorId) ?? null, heartbeat: heartbeatStates.get(m.uptimeMonitorId) ?? null, ...(aggregates.get(m.uptimeMonitorId) ?? { uptimePercentage: null, uptimeChecks: 0 }) }));
 	}),
 
 	one: protectedProcedure
@@ -404,8 +460,14 @@ const monitorRouter = router({
 			if (!monitor) {
 				throw notFound(ctx.t, "monitor");
 			}
+      const referencedChannels = await db.select({ id: uptimeNotificationChannel.channelId, type: uptimeNotificationChannel.channelType }).from(uptimeMonitorChannelBinding)
+        .innerJoin(uptimeNotificationChannel, eq(uptimeMonitorChannelBinding.channelId, uptimeNotificationChannel.channelId))
+        .where(and(eq(uptimeMonitorChannelBinding.userId, ctx.user.id), eq(uptimeMonitorChannelBinding.monitorId, monitor.uptimeMonitorId), eq(uptimeNotificationChannel.userId, ctx.user.id)));
+
 			return {
 				...toOwnerMonitor(monitor),
+        referencedChannels,
+        alertSuppression: effectiveSuppression(await loadMaintenance(ctx.user.id), monitor.uptimeMonitorId),
         incidents: monitor.incidents,
 				notificationChannels: monitor.notificationChannels.map(
 					maskNotificationChannel,
@@ -677,8 +739,8 @@ const checkLogRouter = router({
         getMonitorIncidentSummary(input.uptimeMonitorId, ctx.user.id, since, until),
       ]);
       return { ...stats, upChecks: stats.successfulChecks, downChecks: stats.failedChecks,
-        uptimePercentage: stats.totalChecks ? stats.uptimePercentage : 0,
-        avgResponseTime: stats.avgResponseTime ?? 0, minResponseTime: stats.minResponseTime ?? 0, maxResponseTime: stats.maxResponseTime ?? 0,
+        uptimePercentage: stats.uptimePercentage,
+        avgResponseTime: stats.avgResponseTime, minResponseTime: stats.minResponseTime, maxResponseTime: stats.maxResponseTime,
         incidentCount: incidents.count, days: input.days };
     }),
 });
@@ -832,7 +894,7 @@ const emailProviderRouter = router({
 			return { success: true };
 		}),
 
-	test: protectedProcedure
+	test: manualActionProcedure
 		.input(
 			z.object({
 				emailProviderId: z.string(),
@@ -898,10 +960,63 @@ const channelRouter = router({
 		return channels.map(maskNotificationChannel);
 	}),
 
+	health: protectedProcedure.query(async ({ ctx }) => {
+		const channels = await db
+			.select({
+				channelId: uptimeNotificationChannel.channelId,
+				channelType: uptimeNotificationChannel.channelType,
+				uptimeMonitorId: uptimeNotificationChannel.uptimeMonitorId,
+			})
+			.from(uptimeNotificationChannel)
+			.where(eq(uptimeNotificationChannel.userId, ctx.user.id));
+
+		if (channels.length === 0) {
+			return [];
+		}
+
+		// One bounded scan, newest first, grouped in memory. The window only has
+		// to be deep enough to find the last success per channel; a channel that
+		// has not succeeded within it is already unambiguously broken.
+		const logs = await db
+			.select({
+				channelId: uptimeNotificationLog.channelId,
+				target: uptimeNotificationLog.target,
+				outcome: uptimeNotificationLog.outcome,
+				error: uptimeNotificationLog.error,
+				createdAt: uptimeNotificationLog.createdAt,
+			})
+			.from(uptimeNotificationLog)
+			.where(eq(uptimeNotificationLog.userId, ctx.user.id))
+			.orderBy(desc(uptimeNotificationLog.createdAt))
+			.limit(500);
+
+		return channels.map((channel) => {
+			const own = logs.filter((log) => log.channelId === channel.channelId);
+			// `own` is newest-first: the streak ends at the first success.
+			const firstSuccess = own.findIndex((log) => log.outcome === "sent");
+			const consecutiveFailures =
+				firstSuccess === -1 ? own.length : firstSuccess;
+
+			return {
+				channelId: channel.channelId,
+				channelType: channel.channelType,
+				uptimeMonitorId: channel.uptimeMonitorId,
+				target: own[0]?.target ?? null,
+				consecutiveFailures,
+				lastError: own[0]?.outcome === "failed" ? (own[0].error ?? null) : null,
+				lastAttemptAt: own[0]?.createdAt ?? null,
+				lastSuccessAt:
+					firstSuccess === -1 ? null : (own[firstSuccess]?.createdAt ?? null),
+			};
+		});
+	}),
+
 	createDefault: protectedProcedure
 		.input(apiCreateUptimeDefaultNotificationChannel)
 		.mutation(async ({ input, ctx }) => {
 			assertNotificationChannelConfig(input, ctx.t);
+			await assertNotificationChannelTarget(input, ctx.t);
+			const signingSecret = input.channelType === "webhook" ? newWebhookSecret() : undefined;
 			const storedSecrets = encryptNotificationChannelSecrets(
 				input.channelType === "email" ? null : input.webhookUrl,
 				input.channelType === "email" ? null : input.webhookHeaders,
@@ -916,22 +1031,20 @@ const channelRouter = router({
 				);
 			}
 
-			const [inserted] = await db
-				.insert(uptimeNotificationChannel)
-				.values({
+			const inserted = await insertOwnedChannel({
 					uptimeMonitorId: null,
 					userId: ctx.user.id,
 					channelType: input.channelType,
 					emailProviderId: input.emailProviderId ?? null,
 					recipientAddresses: input.recipientAddresses ?? null,
 					...storedSecrets,
+					signingSecretCipher: signingSecret ? encrypt(signingSecret) : null,
 					notifyOnDown: input.notifyOnDown,
           notifyOnDegraded: input.notifyOnDegraded,
 					notifyOnRecovery: input.notifyOnRecovery,
 					notifyOnTlsExpiry: input.notifyOnTlsExpiry,
 					tlsExpiryThresholdDays: input.tlsExpiryThresholdDays,
-				})
-				.returning();
+				}, ctx.t);
 
 			/* v8 ignore next 6 -- unreachable: INSERT ... RETURNING yields the row or throws */
 			if (!inserted) {
@@ -941,7 +1054,7 @@ const channelRouter = router({
 				});
 			}
 
-			return maskNotificationChannel(inserted);
+			return { ...maskNotificationChannel(inserted), ...(signingSecret ? { signingSecret } : {}) };
 		}),
 
 	create: protectedProcedure
@@ -949,6 +1062,8 @@ const channelRouter = router({
 		.mutation(async ({ input, ctx }) => {
 			await findOwnedMonitorOrThrow(input.uptimeMonitorId, ctx.user.id, ctx.t);
 			assertNotificationChannelConfig(input, ctx.t);
+			await assertNotificationChannelTarget(input, ctx.t);
+			const signingSecret = input.channelType === "webhook" ? newWebhookSecret() : undefined;
 			const storedSecrets = encryptNotificationChannelSecrets(
 				input.channelType === "email" ? null : input.webhookUrl,
 				input.channelType === "email" ? null : input.webhookHeaders,
@@ -963,22 +1078,20 @@ const channelRouter = router({
 				);
 			}
 
-			const [inserted] = await db
-				.insert(uptimeNotificationChannel)
-				.values({
+			const inserted = await insertOwnedChannel({
 					uptimeMonitorId: input.uptimeMonitorId,
 					userId: ctx.user.id,
 					channelType: input.channelType,
 					emailProviderId: input.emailProviderId ?? null,
 					recipientAddresses: input.recipientAddresses ?? null,
 					...storedSecrets,
+					signingSecretCipher: signingSecret ? encrypt(signingSecret) : null,
 					notifyOnDown: input.notifyOnDown,
           notifyOnDegraded: input.notifyOnDegraded,
 					notifyOnRecovery: input.notifyOnRecovery,
 					notifyOnTlsExpiry: input.notifyOnTlsExpiry,
 					tlsExpiryThresholdDays: input.tlsExpiryThresholdDays,
-				})
-				.returning();
+				}, ctx.t);
 
 			/* v8 ignore next 6 -- unreachable: INSERT ... RETURNING yields the row or throws */
 			if (!inserted) {
@@ -988,17 +1101,15 @@ const channelRouter = router({
 				});
 			}
 
-			return maskNotificationChannel(inserted);
+			return { ...maskNotificationChannel(inserted), ...(signingSecret ? { signingSecret } : {}) };
 		}),
 
 	update: protectedProcedure
 		.input(apiUpdateUptimeNotificationChannel)
-		.mutation(async ({ input, ctx }) => {
-			const channel = await findOwnedChannelOrThrow(
-				input.channelId,
-				ctx.user.id,
-				ctx.t,
-			);
+		.mutation(async ({ input, ctx }) => db.transaction(async tx => {
+			const scope = and(eq(uptimeNotificationChannel.channelId, input.channelId), eq(uptimeNotificationChannel.userId, ctx.user.id));
+      const [channel] = await tx.select().from(uptimeNotificationChannel).where(scope).for("update");
+      if (!channel) throw notFound(ctx.t, "notification channel");
 			const decryptedChannel = decryptNotificationChannelSecrets(channel);
 			const { channelId, ...updates } = input;
 			const nextChannel = {
@@ -1010,6 +1121,7 @@ const channelRouter = router({
 				nextChannel.webhookHeaders = null;
 			}
 			assertNotificationChannelConfig(nextChannel, ctx.t);
+			await assertNotificationChannelTarget(nextChannel, ctx.t);
 
 			// Validate email provider if changing
 			if (nextChannel.emailProviderId) {
@@ -1020,10 +1132,11 @@ const channelRouter = router({
 				);
 			}
 
-			const [updated] = await db
+			const [updated] = await tx
 				.update(uptimeNotificationChannel)
 				.set({
 					...updates,
+          signingSecretCipher: nextChannel.channelType === "webhook" ? channel.signingSecretCipher ?? encrypt(newWebhookSecret()) : null,
 					...encryptNotificationChannelSecrets(
 						nextChannel.webhookUrl,
 						nextChannel.webhookHeaders,
@@ -1046,7 +1159,18 @@ const channelRouter = router({
 			}
 
 			return maskNotificationChannel(updated);
-		}),
+		})),
+
+  rotateSecret: protectedProcedure.input(z.object({ channelId: z.string().min(1).max(64) }).strict())
+    .mutation(({ input, ctx }) => db.transaction(async tx => {
+      const scope = and(eq(uptimeNotificationChannel.channelId, input.channelId), eq(uptimeNotificationChannel.userId, ctx.user.id));
+      const [channel] = await tx.select().from(uptimeNotificationChannel).where(scope).for("update");
+      if (!channel) throw notFound(ctx.t, "notification channel");
+      if (channel.channelType !== "webhook") throw badRequest(ctx.t, "errors.webhookOnly");
+      const signingSecret = newWebhookSecret();
+      await tx.update(uptimeNotificationChannel).set({ signingSecretCipher: encrypt(signingSecret) }).where(scope);
+      return { signingSecret };
+    })),
 
 	delete: protectedProcedure
 		.input(z.object({ channelId: z.string() }))
@@ -1065,7 +1189,7 @@ const channelRouter = router({
 			return { success: true };
 		}),
 
-	test: protectedProcedure
+	test: manualActionProcedure
 		.input(z.object({ channelId: z.string() }))
 		.mutation(async ({ input, ctx }) => {
 			const channel = await findOwnedChannelOrThrow(
@@ -1124,6 +1248,7 @@ const channelRouter = router({
 						);
 
 			const testPayload = {
+				test: true,
 				statusChangeId: `test-${channel.channelId}-${Date.now()}`,
 				uptimeMonitorId: monitor.uptimeMonitorId,
 				statusBefore: "up" as const,
@@ -1238,81 +1363,30 @@ const channelRouter = router({
 
 const dashboardRouter = router({
 	summary: protectedProcedure.query(async ({ ctx }) => {
-		const monitors = await db
-			.select()
-			.from(uptimeMonitor)
-			.where(eq(uptimeMonitor.userId, ctx.user.id));
+    const groups = await db.select({status:uptimeMonitor.status,active:uptimeMonitor.active,total:count(),responseTotal:sum(uptimeMonitor.responseTime),responseCount:count(uptimeMonitor.responseTime)})
+      .from(uptimeMonitor).where(eq(uptimeMonitor.userId,ctx.user.id)).groupBy(uptimeMonitor.status,uptimeMonitor.active);
+    // One partition shared with the browser counters: paused wins over the last
+    // measured health, so the per-state counters add up to Total by construction.
+    const counters=countMonitorStates(groups);
+    assertCountersConsistent(counters);
+    const [incidentResult] = await db.select({value:count()}).from(uptimeIncident)
+      .innerJoin(uptimeMonitor,eq(uptimeMonitor.uptimeMonitorId,uptimeIncident.uptimeMonitorId))
+      .where(and(eq(uptimeMonitor.userId,ctx.user.id),eq(uptimeIncident.status,"ongoing")));
+    const ongoingIncidents=incidentResult?.value??0;
 
-		const totalMonitors = monitors.length;
-		const activeMonitors = monitors.filter((m) => m.active).length;
-		const monitorsUp = monitors.filter((m) => m.status === "up").length;
-		const monitorsDown = monitors.filter((m) => m.status === "down").length;
-		const monitorsDegraded = monitors.filter(
-			(m) => m.status === "degraded",
-		).length;
-		const monitorsPending = monitors.filter(
-			(m) => m.status === "pending",
-		).length;
+		// Equal-weight mean of monitors with recorded checks in the last 30 days.
+		// Missing coverage is unknown; genuine zero stays in the average.
+		const aggregates = await getOwnedUptimeAggregates(ctx.user.id);
+		const { avgUptimePercentage, uptimeMonitorsWithData } = meanUptimePercentage([...aggregates.values()].map(m => m.uptimePercentage));
 
-		// Ongoing incidents across all monitors
-		const monitorIds = monitors.map((m) => m.uptimeMonitorId);
-
-		let ongoingIncidents = 0;
-		if (monitorIds.length > 0) {
-			const [incidentResult] = await db
-				.select({ value: count() })
-				.from(uptimeIncident)
-				.where(
-					and(
-						inArray(uptimeIncident.uptimeMonitorId, monitorIds),
-						eq(uptimeIncident.status, "ongoing"),
-					),
-				);
-			/* v8 ignore next -- defensive: COUNT(*) always returns exactly one row */
-			ongoingIncidents = incidentResult?.value ?? 0;
-		}
-
-		// Average uptime percentage across all monitors with data
-		const monitorsWithUptime = monitors.filter(
-			(m) => m.uptimePercentage !== null,
-		);
-		const avgUptimePercentage =
-			monitorsWithUptime.length > 0
-				? Math.round(
-						(monitorsWithUptime.reduce(
-							/* v8 ignore next -- defensive: list is pre-filtered to non-null uptimePercentage */
-							(sum, m) => sum + (m.uptimePercentage ?? 0),
-							0,
-						) /
-							monitorsWithUptime.length) *
-							100,
-					) / 100
-				: null;
-
-		// Average response time across monitors with data
-		const monitorsWithResponseTime = monitors.filter(
-			(m) => m.responseTime !== null,
-		);
-		const avgResponseTime =
-			monitorsWithResponseTime.length > 0
-				? Math.round(
-						monitorsWithResponseTime.reduce(
-							/* v8 ignore next -- defensive: list is pre-filtered to non-null responseTime */
-							(sum, m) => sum + (m.responseTime ?? 0),
-							0,
-						) / monitorsWithResponseTime.length,
-					)
-				: null;
+    const responseCount=groups.reduce((total,row)=>total+row.responseCount,0);
+    const avgResponseTime=responseCount ? Math.round(groups.reduce((total,row)=>total+Number(row.responseTotal??0),0)/responseCount) : null;
 
 		return {
-			totalMonitors,
-			activeMonitors,
-			monitorsUp,
-			monitorsDown,
-			monitorsDegraded,
-			monitorsPending,
+			...counters,
 			ongoingIncidents,
 			avgUptimePercentage,
+			uptimeMonitorsWithData,
 			avgResponseTime,
 		};
 	}),
@@ -1322,47 +1396,38 @@ const dashboardRouter = router({
 // share.* — expiring share links that let anyone clone monitor configs
 // ---------------------------------------------------------------------------
 
-const shareRouter = router({
-	create: protectedProcedure
-		.input(apiCreateUptimeShareLink)
-		.mutation(async ({ input, ctx }) => {
-			const monitorIds = [...new Set(input.uptimeMonitorIds)];
+async function previewShareConfiguration(userId: string, ids: string[], t: Translator) {
+			const monitorIds = [...new Set(ids)];
 
 			// Every shared monitor must belong to the caller. Report a plain
 			// NOT_FOUND without revealing which id failed.
 			const owned = await db.query.uptimeMonitor.findMany({
 				where: and(
 					inArray(uptimeMonitor.uptimeMonitorId, monitorIds),
-					eq(uptimeMonitor.userId, ctx.user.id),
+					eq(uptimeMonitor.userId, userId),
 				),
-				columns: { uptimeMonitorId: true },
 			});
 			if (owned.length !== monitorIds.length) {
-				throw notFound(ctx.t, "monitor");
+				throw notFound(t, "monitor");
 			}
+			if (owned.some(monitor => monitor.monitorType !== "http")) throw badRequest(t, "errors.monitorTypeAction");
+      if (owned.some(monitor => !isSafeToShare(monitor, t))) throw badRequest(t, "errors.sharePrivateValues");
 
-			const [link] = await db
-				.insert(uptimeShareLink)
-				.values({
-					token: generateShareToken(),
-					monitorIds,
-					expiresAt: new Date(
-						Date.now() + input.expiresInDays * 24 * 60 * 60 * 1000,
-					).toISOString(),
-					userId: ctx.user.id,
-				})
-				.returning();
+ return owned.map(monitor => toSharedMonitorConfig(monitor, t));
+}
 
-			/* v8 ignore next 6 -- unreachable: INSERT ... RETURNING yields the row or throws */
-			if (!link) {
-				throw new TRPCError({
-					code: "INTERNAL_SERVER_ERROR",
-					message: ctx.t("errors.internal"),
-				});
-			}
-
-			return link;
-		}),
+const shareRouter = router({
+  preview: protectedProcedure.input(apiCreateUptimeShareLink.omit({ expiresInDays: true, showSharerName: true })).mutation(({ ctx, input }) => previewShareConfiguration(ctx.user.id, input.uptimeMonitorIds, ctx.t)),
+  create: protectedProcedure.input(apiCreateUptimeShareLink).mutation(async ({ input, ctx }) => db.transaction(async tx => {
+    const [owner] = await tx.select({ id: user.id }).from(user).where(eq(user.id, ctx.user.id)).for("update");
+    if (!owner) throw notFound(ctx.t, "account");
+    const preview = await previewShareConfiguration(ctx.user.id, input.uptimeMonitorIds, ctx.t);
+    const [live] = await tx.select({ value: count() }).from(uptimeShareLink).where(and(eq(uptimeShareLink.userId, ctx.user.id), gt(uptimeShareLink.expiresAt, new Date().toISOString())));
+    assertBelowCap(live?.value ?? 0, "shareLinks", ctx.t);
+    const [link] = await tx.insert(uptimeShareLink).values({ token: generateShareToken(), monitorIds: preview.map(monitor => monitor.uptimeMonitorId), expiresAt: new Date(Date.now() + input.expiresInDays * 86400000).toISOString(), showSharerName: input.showSharerName, userId: ctx.user.id }).returning();
+    if (!link) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: ctx.t("errors.internal") });
+    return link;
+  })),
 
 	list: protectedProcedure.query(async ({ ctx }) => {
 		const links = await db.query.uptimeShareLink.findMany({
@@ -1391,6 +1456,7 @@ const shareRouter = router({
 			token: link.token,
 			createdAt: link.createdAt,
 			expiresAt: link.expiresAt,
+			showSharerName: link.showSharerName,
 			monitorCount: link.monitorIds.length,
 			monitorNames: link.monitorIds
 				.map((id) => nameById.get(id))
@@ -1421,7 +1487,7 @@ const shareRouter = router({
 		.input(apiCloneUptimeShareLink)
 		.mutation(async ({ input, ctx }) => {
 			const link = await findLiveShareLinkOrThrow(input.token, ctx.t);
-			const shared = await findSharedMonitors(link);
+			const shared = await findSharedMonitors(link, ctx.t);
 
 			// Only monitors that are both still shared AND requested get cloned;
 			// ids outside the share are silently dropped, never cloned.
@@ -1435,36 +1501,23 @@ const shareRouter = router({
 
 			// Clones start fresh in the recipient's account: pending, private,
 			// no history, scheduled like any newly created monitor.
-			const inserted = await db
-				.insert(uptimeMonitor)
-				.values(
-					toClone.map((m) => {
-						const config = toSharedMonitorConfig(m);
-						return {
-							name: config.name,
-							url: config.url,
-							method: config.method,
-							expectedStatus: config.expectedStatus,
-							timeout: config.timeout,
-							interval: config.interval,
-							failureThreshold: config.failureThreshold,
-							tags: config.tags,
-							active: true,
-							status: "pending" as const,
-							consecutiveFailures: 0,
-							isPublic: false,
-							nextCheckAt: new Date(
-								Date.now() + config.interval * 1000,
-							).toISOString(),
-							userId: ctx.user.id,
-						};
-					}),
-				)
-				.returning();
-
-			for (const monitor of inserted) {
-				scheduleMonitorCheck(monitor);
-			}
+      // Explicit cloning preserves OSS duplicate semantics while using the same
+      // owner lock, egress policy and first-check spread as ordinary creation.
+      const configurations = toClone.map(m => ({ ...apiCreateUptimeMonitor.parse({ ...toSharedMonitorConfig(m, ctx.t), active: true }), url: m.url }));
+      for (const config of configurations) await assertMonitorUrlAllowed(config.url, ctx.t);
+      const inserted = await db.transaction(async tx => {
+        const [owner] = await tx.select({ id: user.id }).from(user).where(eq(user.id, ctx.user.id)).for("update");
+        if (!owner) throw notFound(ctx.t, "account");
+        return tx.insert(uptimeMonitor).values(configurations.map(config => ({
+          userId: ctx.user.id, name: config.name, url: config.url, method: config.method,
+          expectedStatus: config.expectedStatus, expectedStatuses: config.expectedStatuses ?? null,
+          tlsMonitoringEnabled: config.tlsMonitoringEnabled ?? true, timeout: config.timeout,
+          interval: config.interval, failureThreshold: config.failureThreshold, tags: config.tags,
+          active: true, status: "pending" as const, isPublic: false, consecutiveFailures: 0,
+          nextCheckAt: firstCheckAt(configurations.length),
+        }))).returning();
+      });
+      for (const monitor of inserted) if (monitor.active) scheduleMonitorCheck(monitor, { checkIfDue: true });
 
 			return inserted;
 		}),
@@ -1616,11 +1669,12 @@ async function statusPageDomainTxtMatches(
 }
 
 const statusPageRouter = router({
+  communication: statusCommunicationRouter,
 	list: protectedProcedure.query(async ({ ctx }) => {
-		// Guarantee the free default page exists so it is always present in the
-		// list and openable. Created published (empty page renders "operational").
+		// Guarantee the default page exists so it is always present in the
+		// list and openable. New empty defaults remain drafts until explicitly published.
 		// `onConflictDoNothing` against the per-user unique slug keeps concurrent
-		// list calls safe and bypasses the tier limit (this is the free default).
+		// list calls safe.
 		const existingDefault = await db.query.uptimeStatusPage.findFirst({
 			where: and(
 				eq(uptimeStatusPage.userId, ctx.user.id),
@@ -1635,14 +1689,16 @@ const statusPageRouter = router({
 					userId: ctx.user.id,
 					slug: DEFAULT_STATUS_PAGE_SLUG,
 					title: DEFAULT_STATUS_PAGE_TITLE,
-					isPublished: true,
+					isPublished: false,
 				})
 				.onConflictDoNothing();
 		}
-		return db.query.uptimeStatusPage.findMany({
-			where: eq(uptimeStatusPage.userId, ctx.user.id),
-			orderBy: desc(uptimeStatusPage.createdAt),
-		});
+    const pages = await db.query.uptimeStatusPage.findMany({
+      where: eq(uptimeStatusPage.userId, ctx.user.id),
+      orderBy: desc(uptimeStatusPage.createdAt),
+      with: { monitors: { columns: { uptimeMonitorId: true } } },
+    });
+    return pages.map(({ monitors, ...page }) => ({ ...page, componentCount: monitors.length }));
 	}),
 
 	one: protectedProcedure
@@ -1678,15 +1734,25 @@ const statusPageRouter = router({
 				)
 				.where(eq(uptimeStatusPageMonitor.statusPageId, page.statusPageId))
 				.orderBy(uptimeStatusPageMonitor.sortOrder);
-			return { ...page, monitorIds: links.map((l) => l.uptimeMonitorId) };
+			return { ...page, componentCount: links.length, monitorIds: links.map((l) => l.uptimeMonitorId) };
 		}),
 
 	create: protectedProcedure
 		.input(apiCreateUptimeStatusPage)
 		.mutation(async ({ input, ctx }) => {
-			await assertStatusPageSlugAvailable(ctx.user.id, input.slug, null, ctx.t);
+      const requestId = randomUUID();
+      try { return await db.transaction(async tx => {
+      const [owner] = await tx.select({ id: user.id }).from(user).where(eq(user.id, ctx.user.id)).for("update");
+      if (!owner) throw notFound(ctx.t, "account");
+      const existing = await tx.query.uptimeStatusPage.findFirst({where:and(eq(uptimeStatusPage.userId,ctx.user.id),eq(uptimeStatusPage.slug,input.slug))});
+      if (existing) {
+        const links = await tx.select({id:uptimeStatusPageMonitor.uptimeMonitorId}).from(uptimeStatusPageMonitor).where(eq(uptimeStatusPageMonitor.statusPageId,existing.statusPageId));
+        if(existing.title===input.title && existing.description===(input.description??null) && existing.logoUrl===(input.logoUrl??null) && existing.isPublished===input.isPublished && JSON.stringify(links.map(row=>row.id).sort())===JSON.stringify([...(input.uptimeMonitorIds??[])].sort())) return existing;
+        throw new TRPCError({code:"CONFLICT",message:ctx.t("errors.statusPageSlugTaken"),cause:new FieldValidationError("slug","errors.statusPageSlugTaken")});
+      }
+      if (input.isPublished && !input.uptimeMonitorIds?.length && !input.confirmEmptyPublication) throw new TRPCError({ code: "BAD_REQUEST", message: ctx.t("errors.emptyPublication") });
 
-			const [created] = await db
+			const [created] = await tx
 				.insert(uptimeStatusPage)
 				.values({
 					userId: ctx.user.id,
@@ -1696,25 +1762,48 @@ const statusPageRouter = router({
 					logoUrl: input.logoUrl ?? null,
 					isPublished: input.isPublished,
 				})
+        .onConflictDoNothing({target:[uptimeStatusPage.userId,uptimeStatusPage.slug]})
 				.returning();
 			/* v8 ignore next 6 -- unreachable: INSERT ... RETURNING yields the row or throws */
 			if (!created) {
 				throw new TRPCError({
-					code: "INTERNAL_SERVER_ERROR",
-					message: ctx.t("errors.internal"),
+					code: "CONFLICT",
+          message: ctx.t("errors.statusPageSlugTaken"),
+          cause: new FieldValidationError("slug", "errors.statusPageSlugTaken"),
 				});
 			}
+      if (input.uptimeMonitorIds) await replacePageSelectionInTransaction(tx, ctx.user.id, created.statusPageId, input.uptimeMonitorIds, ctx.t);
 			return created;
-		}),
+      }); } catch(error) {
+        if(error instanceof TRPCError) throw error;
+        if(isUniqueViolation(error)) throw new TRPCError({code:"CONFLICT",message:ctx.t("errors.statusPageSlugTaken"),cause:new FieldValidationError("slug","errors.statusPageSlugTaken")});
+        console.error(JSON.stringify({event:"statusPage.create.failed",requestId}));
+        throw new TRPCError({code:"INTERNAL_SERVER_ERROR",message:ctx.t("errors.requestFailed",{requestId})});
+      }
+    }),
+
+  duplicate: protectedProcedure.input(z.object({ statusPageId: z.string().min(1).max(64), title: z.string().trim().min(1).max(255) }).strict()).mutation(async ({ ctx, input }) => db.transaction(async tx => {
+    const [owner] = await tx.select({ id: user.id }).from(user).where(eq(user.id, ctx.user.id)).for("update");
+    if (!owner) throw notFound(ctx.t, "account");
+    const [source] = await tx.select().from(uptimeStatusPage).where(and(eq(uptimeStatusPage.statusPageId, input.statusPageId), eq(uptimeStatusPage.userId, ctx.user.id))).for("share");
+    if (!source) throw notFound(ctx.t, "statusPage");
+    const [created] = await tx.insert(uptimeStatusPage).values({ userId: ctx.user.id, title: input.title, slug: `page-${randomUUID()}`, description: source.description, logoUrl: source.logoUrl, historyEnabled: source.historyEnabled, isPublished: false }).returning();
+    if (!created) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: ctx.t("errors.internal") });
+    const components = await tx.select({ uptimeMonitorId: uptimeStatusPageMonitor.uptimeMonitorId, sortOrder: uptimeStatusPageMonitor.sortOrder, publicName: uptimeStatusPageMonitor.publicName, publicDescription: uptimeStatusPageMonitor.publicDescription, publicGroup: uptimeStatusPageMonitor.publicGroup }).from(uptimeStatusPageMonitor).innerJoin(uptimeMonitor, and(eq(uptimeMonitor.uptimeMonitorId, uptimeStatusPageMonitor.uptimeMonitorId), eq(uptimeMonitor.userId, ctx.user.id))).where(eq(uptimeStatusPageMonitor.statusPageId, source.statusPageId));
+    if (components.length) await tx.insert(uptimeStatusPageMonitor).values(components.map(component => ({ ...component, statusPageId: created.statusPageId })));
+    return created;
+  })),
 
 	update: protectedProcedure
 		.input(apiUpdateUptimeStatusPage)
-		.mutation(async ({ input, ctx }) => {
-			const page = await findOwnedStatusPageOrThrow(
-				input.statusPageId,
-				ctx.user.id,
-				ctx.t,
-			);
+		.mutation(async ({ input, ctx }) => db.transaction(async tx => {
+      const [page] = await tx.select().from(uptimeStatusPage).where(and(eq(uptimeStatusPage.statusPageId, input.statusPageId), eq(uptimeStatusPage.userId, ctx.user.id))).for("update");
+      if (!page) throw notFound(ctx.t, "statusPage");
+      if (input.isPublished && !page.isPublished && !input.confirmEmptyPublication) {
+        const [component] = await tx.select({ id: uptimeStatusPageMonitor.id }).from(uptimeStatusPageMonitor).where(eq(uptimeStatusPageMonitor.statusPageId, page.statusPageId)).limit(1);
+        if (!component) throw new TRPCError({ code: "BAD_REQUEST", message: ctx.t("errors.emptyPublication") });
+      }
+      if (input.expected && (Object.keys(input.expected) as Array<keyof typeof input.expected>).some(key => input.expected![key] !== page[key])) throw new TRPCError({ code: "CONFLICT", message: ctx.t("errors.statusPageConflict") });
 			// The default page's slug is locked (other fields stay editable).
 			if (
 				page.slug === DEFAULT_STATUS_PAGE_SLUG &&
@@ -1734,23 +1823,21 @@ const statusPageRouter = router({
 					ctx.t,
 				);
 			}
-			const { statusPageId, ...updates } = input;
-			const [updated] = await db
+			const { statusPageId, expected: _expected, confirmEmptyPublication: _confirmation, ...updates } = input;
+			const [updated] = await tx
 				.update(uptimeStatusPage)
 				.set(updates)
-				.where(
-					and(
-						eq(uptimeStatusPage.statusPageId, statusPageId),
-						eq(uptimeStatusPage.userId, ctx.user.id),
-					),
-				)
+				.where(and(eq(uptimeStatusPage.statusPageId, statusPageId), eq(uptimeStatusPage.userId, ctx.user.id)))
 				.returning();
-			/* v8 ignore next 3 -- defensive: ownership was checked immediately above */
+			/* v8 ignore next 6 -- unreachable: UPDATE ... RETURNING on an existing row */
 			if (!updated) {
-				throw notFound(ctx.t, "statusPage");
+				throw new TRPCError({
+					code: "INTERNAL_SERVER_ERROR",
+					message: ctx.t("errors.internal"),
+				});
 			}
 			return updated;
-		}),
+		})),
 
 	delete: protectedProcedure
 		.input(apiDeleteUptimeStatusPage)
@@ -1760,7 +1847,7 @@ const statusPageRouter = router({
 				ctx.user.id,
 				ctx.t,
 			);
-			// The default page is the guaranteed free page and can't be deleted.
+			// The default page is the stable legacy URL and cannot be deleted.
 			if (page.slug === DEFAULT_STATUS_PAGE_SLUG) {
 				throw new TRPCError({
 					code: "FORBIDDEN",
@@ -1783,81 +1870,11 @@ const statusPageRouter = router({
 			return { success: true };
 		}),
 
-	// Replace a page's monitor set wholesale. Every id must belong to the caller;
-	// a mismatch is a plain NOT_FOUND that never reveals which id failed (mirrors
-	// share.create).
-	setMonitors: protectedProcedure
-		.input(apiSetStatusPageMonitors)
-		.mutation(async ({ input, ctx }) => {
-			const ids = [...new Set(input.uptimeMonitorIds)];
-			return db.transaction(async (tx) => {
-				// Lock the owned parent and every submitted monitor for the full
-				// replace, closing the ownership-check/mutation race and making a
-				// rejected mixed-owner batch leave the previous links untouched.
-				const [page] = await tx
-					.select()
-					.from(uptimeStatusPage)
-					.where(
-						and(
-							eq(uptimeStatusPage.statusPageId, input.statusPageId),
-							eq(uptimeStatusPage.userId, ctx.user.id),
-						),
-					)
-					.limit(1)
-					.for("update");
-				if (!page) {
-					throw notFound(ctx.t, "statusPage");
-				}
-
-				if (ids.length > 0) {
-					const owned = await tx
-						.select({ uptimeMonitorId: uptimeMonitor.uptimeMonitorId })
-						.from(uptimeMonitor)
-						.where(
-							and(
-								inArray(uptimeMonitor.uptimeMonitorId, ids),
-								eq(uptimeMonitor.userId, ctx.user.id),
-							),
-						)
-						.for("update");
-					if (owned.length !== ids.length) {
-						throw notFound(ctx.t, "monitor");
-					}
-				}
-
-				// Wholesale replace: clear then re-link in the submitted order. The
-				// delete itself is also constrained through the owned parent row.
-				await tx
-					.delete(uptimeStatusPageMonitor)
-					.where(
-						inArray(
-							uptimeStatusPageMonitor.statusPageId,
-							tx
-								.select({ statusPageId: uptimeStatusPage.statusPageId })
-								.from(uptimeStatusPage)
-								.where(
-									and(
-										eq(
-											uptimeStatusPage.statusPageId,
-											page.statusPageId,
-										),
-										eq(uptimeStatusPage.userId, ctx.user.id),
-									),
-								),
-						),
-					);
-				if (ids.length > 0) {
-					await tx.insert(uptimeStatusPageMonitor).values(
-						ids.map((uptimeMonitorId, i) => ({
-							statusPageId: page.statusPageId,
-							uptimeMonitorId,
-							sortOrder: i,
-						})),
-					);
-				}
-				return { success: true, count: ids.length };
-			});
-		}),
+  addSelectionPreview: protectedProcedure.input(z.object({ statusPageId: z.string().min(1).max(64), monitorIds: z.array(z.string().min(1).max(64)).min(1) }).strict()).query(({ ctx, input }) => previewPageSelection(ctx.user.id, input.statusPageId, input.monitorIds, ctx.t)),
+  addSelectionApply: protectedProcedure.input(z.object({ statusPageId: z.string().min(1).max(64), monitorIds: z.array(z.string().min(1).max(64)).min(1), revision: z.string().regex(/^[0-9a-f]{64}$/) }).strict()).mutation(({ ctx, input }) => applyPageSelection(ctx.user.id, input.statusPageId, input.monitorIds, input.revision, ctx.t)),
+  setMonitorsPreview: protectedProcedure.input(apiSetStatusPageMonitors.omit({ revision: true })).query(({ ctx, input }) => previewPageReplacement(ctx.user.id, input.statusPageId, input.uptimeMonitorIds, ctx.t)),
+  setMonitorsPreviewPost: protectedProcedure.input(apiSetStatusPageMonitors.omit({ revision: true })).mutation(({ ctx, input }) => previewPageReplacement(ctx.user.id, input.statusPageId, input.uptimeMonitorIds, ctx.t)),
+  setMonitors: protectedProcedure.input(apiSetStatusPageMonitors).mutation(({ ctx, input }) => replacePageSelection(ctx.user.id, input.statusPageId, input.uptimeMonitorIds, ctx.t, input.revision)),
 
 	// Attach (or re-point) a custom domain. Enforces global uniqueness; returns
 	// the TXT record the user must publish to verify.
@@ -1873,6 +1890,7 @@ const statusPageRouter = router({
 			const clash = await db.query.uptimeStatusPage.findFirst({
 				where: and(
 					eq(uptimeStatusPage.customDomain, input.customDomain),
+					eq(uptimeStatusPage.domainVerified, true),
 					ne(uptimeStatusPage.statusPageId, page.statusPageId),
 				),
 				columns: { statusPageId: true },
@@ -1977,7 +1995,11 @@ const statusPageRouter = router({
 						eq(uptimeStatusPage.domainVerifyToken, page.domainVerifyToken),
 					),
 				)
-				.returning({ statusPageId: uptimeStatusPage.statusPageId });
+				.returning({ statusPageId: uptimeStatusPage.statusPageId })
+        .catch((error: unknown) => {
+          if (isUniqueViolation(error)) throw new TRPCError({ code: "CONFLICT", message: ctx.t("errors.customDomainTaken") });
+          throw error;
+        });
 			if (!updated) {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
@@ -2076,11 +2098,21 @@ const statusPageRouter = router({
  * shape a public resolve exposes — never url/httpStatus/TLS/channels/owner
  * identity. Centralized so no caller inlines an alternative.
  */
-function toPublicMonitorStatus(m: UptimeMonitorRow) {
+type PublicMonitorSource = UptimeMonitorRow & { componentId?: string; publicDescription?: string | null; publicGroup?: string | null };
+function toPublicMonitorStatus(m: PublicMonitorSource, sample: { availabilityPercentage: number; slowPercentage: number } | undefined) {
 	return {
+		componentId: m.componentId ?? null,
+		description: m.publicDescription ?? null,
+		group: m.publicGroup ?? null,
+		monitorType: m.monitorType,
 		name: m.name,
 		status: m.status,
-		uptimePercentage: m.uptimePercentage,
+		// Rolling 30-day availability: (up + degraded) / recorded checks (see
+		// availabilityPercent). A degraded check answered correctly, so a slow
+		// monitor reads ≈100% with `slowPercentage` reported separately. The
+		// stored monitor column is never written, so it is not read here.
+		uptimePercentage: sample?.availabilityPercentage ?? null,
+		slowPercentage: sample?.slowPercentage ?? null,
 		responseTime: m.responseTime,
 		lastCheckedAt: m.lastCheckedAt,
 	};
@@ -2091,19 +2123,17 @@ function toPublicMonitorStatus(m: UptimeMonitorRow) {
  * last-7-day incidents) from a set of the owner's monitor rows. Shared by every
  * public entry point so the three surfaces are byte-identical.
  */
-async function buildPublicStatusAggregate(monitors: UptimeMonitorRow[]) {
-	const hasDown = monitors.some((m) => m.status === "down");
-	const hasDegraded = monitors.some((m) => m.status === "degraded");
-	const overallStatus = hasDown
-		? "outage"
-		: hasDegraded
-			? "degraded"
-			: "operational";
+async function buildPublicStatusAggregate(monitors: PublicMonitorSource[]) {
+	const overallStatus = computeOverallStatus(monitors);
 
 	const sevenDaysAgo = new Date(
 		Date.now() - 7 * 24 * 60 * 60 * 1000,
 	).toISOString();
 	const monitorIds = monitors.map((m) => m.uptimeMonitorId);
+	// Every monitor of a public page is re-queried with the page owner's userId.
+	const samples = monitors[0]
+		? await getOwnedUptimeAggregates(monitors[0].userId, 30, monitorIds)
+		: new Map<string, { availabilityPercentage: number; slowPercentage: number }>();
 
 	let recentIncidents: Array<{
 		monitorName: string;
@@ -2115,8 +2145,9 @@ async function buildPublicStatusAggregate(monitors: UptimeMonitorRow[]) {
 
 	if (monitorIds.length > 0) {
 		const incidents = await db
-			.select()
+			.select({ ...getTableColumns(uptimeIncident) })
 			.from(uptimeIncident)
+      .innerJoin(uptimeMonitor, and(eq(uptimeMonitor.uptimeMonitorId, uptimeIncident.uptimeMonitorId), eq(uptimeMonitor.userId, monitors[0]!.userId)))
 			.where(
 				and(
 					inArray(uptimeIncident.uptimeMonitorId, monitorIds),
@@ -2140,23 +2171,29 @@ async function buildPublicStatusAggregate(monitors: UptimeMonitorRow[]) {
 	}
 
 	return {
-		monitors: monitors.map(toPublicMonitorStatus),
+		asOf: new Date().toISOString(),
+		monitors: monitors.map((m) => toPublicMonitorStatus(m, samples.get(m.uptimeMonitorId))),
 		overallStatus,
 		recentIncidents,
 	};
 }
 
-/** Wrap an aggregate with the page's display metadata (nullable for the legacy
- * per-user surface when the user has no default page). */
-function toPublicStatusPageView(
-	page: UptimeStatusPageRow | null,
+/** Wrap a published page aggregate with its display metadata. */
+async function toPublicStatusPageView(
+	page: UptimeStatusPageRow,
 	aggregate: Awaited<ReturnType<typeof buildPublicStatusAggregate>>,
 ) {
+  const maintenance = await publicMaintenanceComponents(page.userId, page.statusPageId);
 	return {
-		title: page?.title ?? null,
-		description: page?.description ?? null,
-		logoUrl: page?.logoUrl ?? null,
+		title: page.title,
+		description: page.description,
+		logoUrl: page.logoUrl,
+		publicKey: page.statusPageId,
+		historyEnabled: page.historyEnabled,
+		emailSubscriptionsEnabled: await publicSubscriptionReady(page.userId, page.statusPageId),
+		announcements: await publishedAnnouncements(page.userId, page.statusPageId),
 		...aggregate,
+    monitors: aggregate.monitors.map(monitor => ({ ...monitor, maintenance: !!monitor.componentId && maintenance.has(monitor.componentId) })),
 	};
 }
 
@@ -2167,7 +2204,7 @@ function toPublicStatusPageView(
  */
 async function resolveStatusPageMonitors(
 	page: UptimeStatusPageRow,
-): Promise<UptimeMonitorRow[]> {
+): Promise<PublicMonitorSource[]> {
 	const links = await db
 		.select()
 		.from(uptimeStatusPageMonitor)
@@ -2187,28 +2224,36 @@ async function resolveStatusPageMonitors(
 	});
 	const byId = new Map(monitors.map((m) => [m.uptimeMonitorId, m]));
 	// Preserve the page's order; drop links whose monitor is gone/inactive.
-	return links
-		.map((l) => byId.get(l.uptimeMonitorId))
-		.filter((m): m is UptimeMonitorRow => m !== undefined);
+	return links.flatMap(link => {
+    const monitor = byId.get(link.uptimeMonitorId);
+    return monitor ? [{ ...monitor, name: link.publicName ?? monitor.name, componentId: link.id, publicDescription: link.publicDescription, publicGroup: link.publicGroup }] : [];
+  });
+}
+
+/** Internal resolver for dedicated published HTTP projections. Never serialize the page row. */
+export async function readPublishedStatusPageByKey(publicKey: string) {
+  const page = await db.query.uptimeStatusPage.findFirst({ where: and(eq(uptimeStatusPage.statusPageId, publicKey), eq(uptimeStatusPage.isPublished, true)) });
+  if (!page) return null;
+  return { page, view: await toPublicStatusPageView(page, await buildPublicStatusAggregate(await resolveStatusPageMonitors(page))) };
 }
 
 const publicRouter = router({
 	// Legacy per-user URL (`/status/:userId`). Delegates to the user's `default`
-	// page (created by the migration backfill) only while it is published.
-	// Missing and unpublished defaults both return an empty aggregate so old
-	// links never 404 and cannot reveal private page metadata or monitor state.
+	// published default page only; missing/draft identities never expose a fallback.
 	status: publicProcedure
 		.input(z.object({ userId: z.string() }))
-		.query(async ({ input }) => {
+		.query(async ({ input, ctx }) => {
 			const page = await db.query.uptimeStatusPage.findFirst({
 				where: and(
 					eq(uptimeStatusPage.userId, input.userId),
 					eq(uptimeStatusPage.slug, "default"),
-					eq(uptimeStatusPage.isPublished, true),
 				),
 			});
-			const monitors = page ? await resolveStatusPageMonitors(page) : [];
-			return toPublicStatusPageView(page ?? null, await buildPublicStatusAggregate(monitors));
+			if (!page || !page.isPublished) {
+				throw notFound(ctx.t, "statusPage");
+			}
+			const monitors = await resolveStatusPageMonitors(page);
+			return toPublicStatusPageView(page, await buildPublicStatusAggregate(monitors));
 		}),
 
 	// Resolve a published page by its per-user (userId, slug). Unpublished or
@@ -2235,7 +2280,7 @@ const publicRouter = router({
 		.input(apiResolveStatusPageByDomain)
 		.query(async ({ input, ctx }) => {
 			const page = await db.query.uptimeStatusPage.findFirst({
-				where: eq(uptimeStatusPage.customDomain, input.host),
+				where: and(eq(uptimeStatusPage.customDomain, input.host), eq(uptimeStatusPage.domainVerified, true), eq(uptimeStatusPage.isPublished, true)),
 			});
 			if (!page || !page.domainVerified || !page.isPublished) {
 				throw notFound(ctx.t, "statusPage");
@@ -2252,18 +2297,22 @@ const publicRouter = router({
 		.input(apiResolveUptimeShareLink)
 		.query(async ({ input, ctx }) => {
 			const link = await findLiveShareLinkOrThrow(input.token, ctx.t);
-			const monitors = await findSharedMonitors(link);
+			const monitors = await findSharedMonitors(link, ctx.t);
 
-			const owner = await db.query.user.findFirst({
-				where: eq(user.id, link.userId),
-				columns: { name: true },
-			});
+			// The display name is exposed only when the owner opted in on this
+			// link; otherwise the claim page shows a generic sharer.
+			const owner = link.showSharerName
+				? await db.query.user.findFirst({
+						where: eq(user.id, link.userId),
+						columns: { name: true },
+					})
+				: undefined;
 
 			return {
 				/* v8 ignore next -- defensive: the user FK cascade deletes the link with its owner */
-				sharedBy: owner?.name ?? null,
+				sharedBy: owner?.name.trim() || null,
 				expiresAt: link.expiresAt,
-				monitors: monitors.map(toSharedMonitorConfig),
+				monitors: monitors.map(monitor => toSharedMonitorConfig(monitor, ctx.t)),
 			};
 		}),
 });
@@ -2445,8 +2494,14 @@ const slaReportRouter = router({
 // ---------------------------------------------------------------------------
 
 export const uptimeRouter = router({
+  portability: monitorPortabilityRouter,
+  view: monitorViewsRouter,
+  template: monitorTemplatesRouter,
   server: serverHealthRouter,
   heartbeat: heartbeatRouter,
+	maintenance: maintenanceRouter,
+	incidentWorkspace: incidentWorkspaceRouter,
+	reliability: reliabilityRouter,
   network: networkRouter,
   egress: egressRouter,
 	monitor: monitorRouter,

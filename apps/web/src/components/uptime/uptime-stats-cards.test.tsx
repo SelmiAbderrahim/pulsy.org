@@ -15,7 +15,7 @@ describe("UptimeStatsCards", () => {
 						monitorsUp: 6,
 						monitorsDown: 2,
 						monitorsDegraded: 1,
-						avgUptime: 99.123,
+						avgUptimePercentage: 99.123,
 					} as never
 				}
 			/>,
@@ -25,10 +25,10 @@ describe("UptimeStatsCards", () => {
 		expect(screen.getByText("2")).toBeInTheDocument();
 		expect(screen.getByText("1")).toBeInTheDocument();
 		expect(screen.getByText("99.12%")).toBeInTheDocument();
-		expect(screen.getByText("Total Monitors")).toBeInTheDocument();
+		expect(screen.getByText("Total")).toBeInTheDocument();
 	});
 
-	it("defaults avgUptime to 0.00% when missing", () => {
+	it("shows unknown uptime when there are no measurements", () => {
 		render(
 			<UptimeStatsCards
 				summary={
@@ -37,11 +37,11 @@ describe("UptimeStatsCards", () => {
 						monitorsUp: 0,
 						monitorsDown: 0,
 						monitorsDegraded: 0,
-						avgUptime: null,
+						avgUptimePercentage: null,
 					} as never
 				}
 			/>,
 		);
-		expect(screen.getByText("0.00%")).toBeInTheDocument();
+		expect(screen.getByText("No data")).toBeInTheDocument();
 	});
 });

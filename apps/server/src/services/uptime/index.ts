@@ -99,6 +99,7 @@ export {
 
 export {
 	buildSlaReportModel,
+	accountReportTimezone,
 	renderSlaReportPdf,
 	renderSlaReportEmailHtml,
 	slaReportPdfUrl,

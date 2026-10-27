@@ -15,6 +15,7 @@
 
 import { createTRPCClient, httpBatchLink } from "@trpc/client";
 import superjson from "superjson";
+import i18n from "i18next";
 // The server exports `AppRouter` from its `/trpc` subpath (`src/trpc/router.ts`).
 // The package root (`src/index.ts`) is the Express bootstrap and does not
 // re-export the type, so we import the subpath directly.
@@ -37,14 +38,28 @@ export const client = createTRPCClient<AppRouter>({
 		httpBatchLink({
 			url: API_URL,
 			transformer: superjson,
-			fetch: (url, options) =>
-				fetch(url, { ...options, credentials: "include" }),
+			fetch: async (url, options) => {
+				try {
+					const headers = new Headers(options?.headers);
+					headers.set("Accept-Language", i18n.language ?? i18n.resolvedLanguage ?? "en");
+					const response = await fetch(url, { ...options, headers, credentials: "include" });
+					// Proxy errors often contain HTML rather than a tRPC envelope.
+					// A received response is never a connectivity failure.
+					if (response.status >= 500 && !response.headers.get("content-type")?.includes("application/json")) throw new Error(i18n.t("common:states.serverProblem"));
+					return response;
+				} catch (error) {
+					// The browser reports an unreachable server as a bare TypeError ("Failed to fetch").
+					// Aborts (stale search, navigation) are DOMExceptions and pass through untouched.
+					if (error instanceof TypeError) throw new Error(i18n.t("common:states.unreachable"));
+					throw error;
+				}
+			},
 		}),
 	],
 });
 
 type DynamicProcedure = {
-	query?: (input?: unknown) => Promise<unknown>;
+	query?: (input?: unknown, options?: { signal?: AbortSignal }) => Promise<unknown>;
 	mutate?: (input?: unknown) => Promise<unknown>;
 };
 
@@ -81,12 +96,13 @@ export async function trpcQuery<T>(
 	router: string,
 	procedure: string,
 	input?: unknown,
+	options?: { signal?: AbortSignal },
 ): Promise<T> {
 	const resolved = resolveProcedure(router, procedure);
 	if (typeof resolved.query !== "function") {
 		throw new Error(`tRPC procedure is not a query: ${router}.${procedure}`);
 	}
-	return resolved.query(input) as Promise<T>;
+	return (options?.signal ? resolved.query(input, { signal: options.signal }) : resolved.query(input)) as Promise<T>;
 }
 
 /**

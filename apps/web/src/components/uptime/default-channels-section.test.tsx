@@ -1,6 +1,7 @@
+import * as confirmations from "@/lib/confirmation";
+import { renderWithQueryClient as render } from "@/test/query-wrapper";
 import {
 	fireEvent,
-	render,
 	screen,
 	waitFor,
 	within,
@@ -27,6 +28,7 @@ const testMutateAsync = vi.fn();
 const pending = { create: false, update: false, delete: false, test: false };
 
 vi.mock("@/hooks/uptime", () => ({
+ useUptimeChannelHealth: () => ({ data: [] }),
 	useUptimeDefaultChannels: () => ({ data: defaultsData.value }),
 	useUptimeEmailProviders: () => ({ data: providersData.value }),
 	useCreateUptimeDefaultChannel: () => ({
@@ -49,7 +51,7 @@ vi.mock("@/hooks/uptime", () => ({
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
-vi.mock("sonner", () => ({
+vi.mock("@/lib/toast", () => ({
 	toast: {
 		success: (m: unknown) => toastSuccess(m),
 		error: (m: unknown) => toastError(m),
@@ -99,6 +101,7 @@ function provider(): UptimeEmailProvider {
 const addButtonName = "Add default channel";
 
 beforeEach(() => {
+ vi.spyOn(confirmations, "requestConfirmation").mockResolvedValue(true);
 	vi.clearAllMocks();
 	defaultsData.value = undefined;
 	providersData.value = [];
@@ -109,7 +112,7 @@ describe("DefaultChannelsSection empty state", () => {
 	it("renders the empty state when no defaults exist", () => {
 		defaultsData.value = [];
 		render(<DefaultChannelsSection />);
-		expect(screen.getByText("Default Channels")).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Default channels" })).toBeInTheDocument();
 		expect(
 			screen.getByText(
 				"No default channels yet. Add one to alert every monitor without per-monitor setup.",
@@ -165,7 +168,7 @@ describe("DefaultChannelsSection list", () => {
 		render(<DefaultChannelsSection />);
 		await userEvent.click(screen.getByRole("button", { name: /actions.test/ }));
 		await waitFor(() => expect(testMutateAsync).toHaveBeenCalledWith("d1"));
-		expect(toastSuccess).toHaveBeenCalledWith("notifications.test.success");
+		expect(toastSuccess).toHaveBeenCalledWith("notificationUX.testAccepted");
 
 		testMutateAsync.mockRejectedValueOnce(new Error("boom"));
 		await userEvent.click(screen.getByRole("button", { name: /actions.test/ }));
@@ -219,9 +222,8 @@ describe("DefaultChannelsSection create", () => {
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "actions.addChannel" }),
 		);
-		expect(toastError).toHaveBeenCalledWith(
-			"Select an email provider before adding an email channel",
-		);
+		expect(within(dialog).getAllByText(/notificationUX.noProviderTitle|notificationUX.chooseProvider/).length).toBeGreaterThan(0);
+ expect(toastError).not.toHaveBeenCalled();
 		expect(createMutateAsync).not.toHaveBeenCalled();
 	});
 
@@ -282,7 +284,7 @@ describe("DefaultChannelsSection create", () => {
 			"https://hooks.x.com/new",
 		);
 		fireEvent.change(
-			within(dialog).getByLabelText("Headers / Options (JSON)"),
+			within(dialog).getByLabelText("Headers / options (JSON)"),
 			{ target: { value: '{ "X-Pulsy": "1" }' } },
 		);
 		await userEvent.click(
@@ -319,15 +321,14 @@ describe("DefaultChannelsSection create", () => {
 			"https://hooks.x.com/new",
 		);
 		fireEvent.change(
-			within(dialog).getByLabelText("Headers / Options (JSON)"),
+			within(dialog).getByLabelText("Headers / options (JSON)"),
 			{ target: { value: '{ "X-Pulsy": 1 }' } },
 		);
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "actions.addChannel" }),
 		);
-		expect(toastError).toHaveBeenCalledWith(
-			"Headers must be a JSON object with string values",
-		);
+		expect(within(dialog).getByLabelText("Headers / options (JSON)")).toHaveAttribute("aria-invalid", "true");
+ expect(toastError).not.toHaveBeenCalled();
 		expect(createMutateAsync).not.toHaveBeenCalled();
 	});
 
@@ -353,7 +354,7 @@ describe("DefaultChannelsSection create", () => {
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "actions.addChannel" }),
 		);
-		await waitFor(() => expect(toastError).toHaveBeenCalled());
+		await waitFor(() => expect(within(dialog).getByRole("alert")).toHaveTextContent("nope"));
 	});
 
 	it("closes the create dialog via Cancel", async () => {
@@ -433,7 +434,7 @@ describe("DefaultChannelsSection edit", () => {
 			within(dialog).getByPlaceholderText("https://hooks.x.com/••••••••"),
 		).toHaveValue("");
 		const headersField = within(dialog).getByLabelText(
-			"Headers / Options (JSON)",
+			"Headers / options (JSON)",
 		);
 		expect(headersField).toHaveValue("");
 		expect(headersField).toHaveAttribute(
@@ -468,8 +469,10 @@ describe("DefaultChannelsSection edit", () => {
 		render(<DefaultChannelsSection />);
 		await userEvent.click(screen.getByRole("button", { name: /actions.edit/ }));
 		const dialog = screen.getByRole("dialog");
+
+ await replaceHeaders(dialog);
 		fireEvent.change(
-			within(dialog).getByLabelText("Headers / Options (JSON)"),
+			within(dialog).getByLabelText("Headers / options (JSON)"),
 			{ target: { value: "{}" } },
 		);
 		await userEvent.click(
@@ -499,9 +502,8 @@ describe("DefaultChannelsSection edit", () => {
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "actions.save" }),
 		);
-		expect(toastError).toHaveBeenCalledWith(
-			"Select an email provider before saving an email channel",
-		);
+		expect(within(dialog).getByText("notificationUX.noProviderTitle")).toBeInTheDocument();
+ expect(toastError).not.toHaveBeenCalled();
 		expect(updateMutateAsync).not.toHaveBeenCalled();
 	});
 
@@ -510,16 +512,17 @@ describe("DefaultChannelsSection edit", () => {
 		render(<DefaultChannelsSection />);
 		await userEvent.click(screen.getByRole("button", { name: /actions.edit/ }));
 		const dialog = screen.getByRole("dialog");
+
+ await replaceHeaders(dialog);
 		fireEvent.change(
-			within(dialog).getByLabelText("Headers / Options (JSON)"),
+			within(dialog).getByLabelText("Headers / options (JSON)"),
 			{ target: { value: "not json" } },
 		);
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "actions.save" }),
 		);
-		expect(toastError).toHaveBeenCalledWith(
-			"Headers must be a JSON object with string values",
-		);
+		expect(within(dialog).getByLabelText("Headers / options (JSON)")).toHaveAttribute("aria-invalid", "true");
+ expect(toastError).not.toHaveBeenCalled();
 		expect(updateMutateAsync).not.toHaveBeenCalled();
 	});
 
@@ -532,7 +535,7 @@ describe("DefaultChannelsSection edit", () => {
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "actions.save" }),
 		);
-		await waitFor(() => expect(toastError).toHaveBeenCalled());
+		await waitFor(() => expect(within(dialog).getByRole("alert")).toHaveTextContent("nope"));
 	});
 
 	it("closes the edit dialog when dismissed", async () => {
@@ -550,3 +553,12 @@ describe("DefaultChannelsSection edit", () => {
 		);
 	});
 });
+
+async function replaceHeaders(dialog: HTMLElement) {
+ const action = within(dialog).queryByRole("combobox", { name: "notificationUX.headersAction" });
+ if (action) { await userEvent.click(action); await userEvent.click(screen.getByRole("option", { name: "notificationUX.replace" })); }
+}
+async function replaceTarget(dialog: HTMLElement) {
+ await userEvent.click(within(dialog).getByRole("combobox", { name: "notificationUX.targetAction" }));
+ await userEvent.click(screen.getByRole("option", { name: "notificationUX.replace" }));
+}

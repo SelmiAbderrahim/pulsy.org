@@ -12,7 +12,7 @@ import type { Request, Response } from "express";
 import { z } from "zod";
 import { auth } from "../auth/auth";
 import { getEffectiveLanguage, getTranslator } from "../lib/i18n";
-import { buildSlaReportModel, renderSlaReportPdf } from "../services/uptime";
+import { buildSlaReportModel, renderSlaReportPdf, accountReportTimezone } from "../services/uptime";
 import { toHeaders } from "../trpc/trpc";
 
 const daysSchema = z.coerce.number().int().min(1).max(366).default(30);
@@ -77,7 +77,7 @@ export function createSlaReportPdfHandler(
 			return;
 		}
 
-		const pdf = await renderSlaReportPdf(model, t);
+		const pdf = await renderSlaReportPdf(model, t, language, await accountReportTimezone(userId));
 		res.setHeader("Content-Type", "application/pdf");
 		res.setHeader(
 			"Content-Disposition",

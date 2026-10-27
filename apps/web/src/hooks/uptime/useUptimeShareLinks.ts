@@ -10,7 +10,8 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { UptimeService } from "@/services/uptime/uptimeService";
 import { uptimeKeys } from "./queryKeys";
-import type { CreateUptimeShareLinkInput } from "@/types/uptime";
+import type { CreateUptimeShareLinkInput, UptimeShareLink } from "@/types/uptime";
+import { removeCachedRows } from "./optimistic-cache";
 
 /**
  * Hook to list the current user's share links
@@ -50,7 +51,9 @@ export function useRevokeUptimeShareLink() {
   return useMutation({
     mutationFn: ({ shareLinkId }: { shareLinkId: string }) =>
       UptimeService.revokeShareLink(shareLinkId),
-    onSuccess: () => {
+    onMutate: ({shareLinkId}) => removeCachedRows<UptimeShareLink>(queryClient, uptimeKeys.shareLinks.lists(), row => row.shareLinkId === shareLinkId),
+    onError: (_error, _input, rollback) => rollback?.(),
+    onSettled: () => {
       queryClient.invalidateQueries({
         queryKey: uptimeKeys.shareLinks.lists(),
       });

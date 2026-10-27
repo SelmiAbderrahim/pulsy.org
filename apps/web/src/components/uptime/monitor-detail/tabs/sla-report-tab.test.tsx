@@ -54,6 +54,7 @@ function report(overrides: Partial<SlaReport> = {}): SlaReport {
 		stats: {
 			totalChecks: 100,
 			successfulChecks: 99,
+      degradedChecks: 0,
 			failedChecks: 1,
 			avgResponseTime: 120,
 			minResponseTime: 80,
@@ -154,6 +155,7 @@ describe("SlaReportTab — content", () => {
 				stats: {
 					totalChecks: 0,
 					successfulChecks: 0,
+          degradedChecks: 0,
 					failedChecks: 0,
 					avgResponseTime: null,
 					minResponseTime: null,

@@ -10,7 +10,7 @@ describe("MonitorSearchInput", () => {
 	it("renders the current value and forwards typed input", async () => {
 		const onChange = vi.fn();
 		render(<MonitorSearchInput value="" onChange={onChange} />);
-		const input = screen.getByPlaceholderText("Search monitors...");
+		const input = screen.getByRole("searchbox", { name: "Search monitors" });
 		await userEvent.type(input, "a");
 		expect(onChange).toHaveBeenCalledWith("a");
 	});

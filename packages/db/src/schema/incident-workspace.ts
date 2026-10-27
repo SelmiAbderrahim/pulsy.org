@@ -1,3 +1,4 @@
+import type { DeferredAlertSnapshot } from "./maintenance";
 import { boolean, index, integer, jsonb, pgTable, text, uniqueIndex } from "drizzle-orm/pg-core";
 import { nanoid } from "nanoid";
 import { z } from "zod";
@@ -48,6 +49,7 @@ export const uptimeIncidentEvent = pgTable("uptime_incident_event", {
 export const uptimeIncidentEscalation = pgTable("uptime_incident_escalation", {
   id: text("id").primaryKey().$defaultFn(() => nanoid()), incidentId: text("incidentId").notNull().references(() => uptimeIncident.incidentId, { onDelete: "cascade" }),
   monitorId: text("monitorId").notNull().references(() => uptimeMonitor.uptimeMonitorId, { onDelete: "cascade" }), userId: text("userId").notNull().references(() => user.id, { onDelete: "cascade" }),
+  snapshot: jsonb("snapshot").$type<DeferredAlertSnapshot>(), leaseToken: text("leaseToken"),
   channelId: text("channelId").notNull(), step: integer("step").notNull(), dueAt: text("dueAt").notNull(), leaseUntil: text("leaseUntil"), attempts: integer("attempts").notNull().default(0),
   sourceOutageId: text("sourceOutageId"),
   state: text("state").$type<"pending" | "processing" | "sent" | "failed" | "cancelled">().notNull().default("pending"),

@@ -1,3 +1,5 @@
+import { db, uptimeIncident } from "@pulsy/db";
+import { isUniqueViolation } from "../../../lib/db-errors";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
 	createTestMonitor,
@@ -88,5 +90,59 @@ describe("findIncidentsByMonitor", () => {
 		expect(
 			await findIncidentsByMonitor(monitorId, other.id),
 		).toEqual([]);
+	});
+});
+
+describe("one ongoing incident per monitor is a database guarantee", () => {
+	const open = (uptimeMonitorId: string) => db.insert(uptimeIncident).values({ uptimeMonitorId, status: "ongoing", startedAt: new Date().toISOString() });
+
+	it("rejects a second ongoing incident even from a writer that skips the monitor lock", async () => {
+		await open(monitorId);
+		const error = await open(monitorId).then(() => null, (e: unknown) => e);
+		expect(isUniqueViolation(error)).toBe(true);
+	});
+
+	it("still allows any number of resolved incidents, and a new ongoing one after resolution", async () => {
+		const first = await createIncident(monitorId, "first");
+		await resolveIncident(monitorId);
+		await db.insert(uptimeIncident).values({ uptimeMonitorId: monitorId, status: "resolved", startedAt: new Date().toISOString(), resolvedAt: new Date().toISOString(), durationSeconds: 1 });
+		const second = await createIncident(monitorId, "second");
+		expect(second.incidentId).not.toBe(first.incidentId);
+		expect(second.status).toBe("ongoing");
+	});
+
+	it("is per monitor: two monitors can each be down", async () => {
+		const other = await createTestMonitor((await createTestUser()).id);
+		await open(monitorId);
+		await expect(open(other.uptimeMonitorId)).resolves.toBeDefined();
+	});
+});
+
+
+it("uses the observation timestamp for incident opening, recovery and exact duration", async () => {
+  const observedDownAt = "2026-10-09T12:00:10.000Z", observedUpAt = "2026-10-09T12:02:47.000Z";
+  const incident = await createIncident(monitorId, "HTTP 503", db, "critical", observedDownAt);
+  expect(incident.startedAt).toBe(observedDownAt);
+  const resolved = await resolveIncident(monitorId, db, observedUpAt);
+  expect(resolved?.resolvedAt).toBe(observedUpAt);
+  expect(resolved?.durationSeconds).toBe(157);
+});
+
+
+it("keeps duration nonnegative if an older internal observation is supplied", async () => {
+  await createIncident(monitorId, "HTTP 503", db, "critical", "2026-10-09T12:00:10.000Z");
+  const resolved = await resolveIncident(monitorId, db, "2026-10-09T12:00:09.000Z");
+  expect(resolved?.durationSeconds).toBe(0);
+});
+
+describe("concurrent recovery claim", () => {
+	it("allows only one state-aware recovery transition", async () => {
+		await createIncident(monitorId);
+		const results = await Promise.all([
+			resolveIncident(monitorId, db, "2026-10-15T12:00:00.000Z"),
+			resolveIncident(monitorId, db, "2026-10-15T12:00:01.000Z"),
+		]);
+		expect(results.filter(Boolean)).toHaveLength(1);
+		expect(await getOngoingIncident(monitorId)).toBeNull();
 	});
 });

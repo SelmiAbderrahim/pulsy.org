@@ -1,10 +1,12 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { renderWithQueryClient as render } from "@/test/query-wrapper";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reactI18nextMock } from "@/test/i18n-mock";
 import { MonitorQuickAdd } from "./monitor-quick-add";
 
 vi.mock("react-i18next", () => reactI18nextMock());
+vi.mock("@/hooks/uptime/useUptimeMonitors", () => ({ useUptimeMonitors: () => ({ data: [] }) }));
 
 const mutateAsync = vi.fn();
 const useCreateUptimeMonitor = vi.fn();
@@ -19,7 +21,7 @@ vi.mock("@tanstack/react-router", () => ({
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
-vi.mock("sonner", () => ({
+vi.mock("@/lib/toast", () => ({
 	toast: {
 		success: (m: unknown, opts?: unknown) => toastSuccess(m, opts),
 		error: (m: unknown) => toastError(m),
@@ -42,7 +44,7 @@ describe("MonitorQuickAdd", () => {
 			"https://api.example.com/health",
 		);
 		await userEvent.click(
-			screen.getByRole("button", { name: "Add Monitor" }),
+			screen.getByRole("button", { name: "Add monitor" }),
 		);
 
 		await waitFor(() => expect(mutateAsync).toHaveBeenCalled());
@@ -65,7 +67,7 @@ describe("MonitorQuickAdd", () => {
 		await userEvent.type(screen.getByLabelText("URL"), "https://x.com");
 		await userEvent.type(screen.getByLabelText("Name"), "My API");
 		await userEvent.click(
-			screen.getByRole("button", { name: "Add Monitor" }),
+			screen.getByRole("button", { name: "Add monitor" }),
 		);
 		await waitFor(() =>
 			expect(mutateAsync).toHaveBeenCalledWith(
@@ -79,7 +81,7 @@ describe("MonitorQuickAdd", () => {
 		render(<MonitorQuickAdd open onOpenChange={vi.fn()} />);
 		await userEvent.type(screen.getByLabelText("URL"), "https://x.com");
 		await userEvent.click(
-			screen.getByRole("button", { name: "Add Monitor" }),
+			screen.getByRole("button", { name: "Add monitor" }),
 			);
 			await waitFor(() => expect(toastSuccess).toHaveBeenCalled());
 			const successCall = toastSuccess.mock.calls[0];
@@ -91,7 +93,7 @@ describe("MonitorQuickAdd", () => {
 		expect(navigate).toHaveBeenCalledWith({
 			to: "/dashboard/uptime/$monitorId",
 			params: { monitorId: "m3" },
-			search: { tab: "notifications" },
+			search: { tab: "alerts" },
 		});
 	});
 
@@ -100,17 +102,18 @@ describe("MonitorQuickAdd", () => {
 		render(<MonitorQuickAdd open onOpenChange={vi.fn()} />);
 		await userEvent.type(screen.getByLabelText("URL"), "https://x.com");
 		await userEvent.click(
-			screen.getByRole("button", { name: "Add Monitor" }),
+			screen.getByRole("button", { name: "Add monitor" }),
 		);
 		await waitFor(() => expect(toastError).toHaveBeenCalledWith("boom"));
 	});
 
-	it("disables submit and skips mutation when no effective name is available", () => {
+	it("validates an empty submission without creating a monitor", () => {
 		render(<MonitorQuickAdd open onOpenChange={vi.fn()} />);
-		// No URL typed → autoName empty, name empty → effectiveName empty.
+		fireEvent.submit(document.querySelector("form")!);
 		expect(
-			screen.getByRole("button", { name: "Add Monitor" }),
-		).toBeDisabled();
+			screen.getByRole("button", { name: "Add monitor" }),
+		).toBeEnabled();
+ expect(screen.getByLabelText("URL")).toHaveAttribute("aria-invalid", "true");
 		expect(mutateAsync).not.toHaveBeenCalled();
 	});
 
@@ -129,7 +132,7 @@ describe("MonitorQuickAdd", () => {
 		useCreateUptimeMonitor.mockReturnValue({ mutateAsync, isPending: true });
 		render(<MonitorQuickAdd open onOpenChange={vi.fn()} />);
 		expect(
-			screen.getByRole("button", { name: "Add Monitor" }),
+			screen.getByRole("button", { name: "Add monitor" }),
 		).toBeDisabled();
 	});
 

@@ -1,0 +1,73 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+import type { ReactNode } from "react";
+import { reactI18nextMock } from "@/test/i18n-mock";
+import { Route } from "./dashboard_.uptime.$monitorId";
+const routing = vi.hoisted(() => ({ tab: "settings", navigate: vi.fn() }));
+const state = vi.hoisted(() => ({ data: undefined as { name: string } | undefined, isLoading: false, error: null as unknown, refetch: vi.fn(), dataUpdatedAt: 1 }));
+vi.mock("react-i18next", () => reactI18nextMock());
+vi.mock("@dr.pogodin/react-helmet", () => ({ Helmet: ({ children }: { children: ReactNode }) => <>{children}</> }));
+vi.mock("@tanstack/react-router", () => ({ createFileRoute: () => (options: { component: () => ReactNode }) => ({ options, useParams: () => ({ monitorId: "m1" }), useSearch: () => ({ tab: routing.tab, returnPanel: "notifications" }) }), useNavigate: () => routing.navigate, Link: ({ children }: { children: ReactNode }) => <a>{children}</a> }));
+vi.mock("@/hooks/uptime", () => ({ useUptimeMonitor: () => state }));
+vi.mock("@/components/uptime/monitor-detail/monitor-detail-header", () => ({ MonitorDetailHeaderSkeleton: () => <header data-monitor-detail-header data-monitor-detail-loading><p role="status">Loading</p></header>, MonitorDetailHeader: ({ monitor }: { monitor: { name: string } }) => <h1>{monitor.name}</h1> }));
+vi.mock("@/components/uptime/monitor-detail/tabs/settings-tab", () => ({ SettingsTab: () => <input aria-label="Private draft" defaultValue="" /> }));
+vi.mock("@/components/uptime/monitor-detail/tabs/history-tab", () => ({ HistoryTab: () => null }));
+vi.mock("@/components/uptime/monitor-detail/tabs/incidents-tab", () => ({ IncidentsTab: () => null }));
+vi.mock("@/components/uptime/monitor-detail/tabs/overview-tab", () => ({ OverviewTab: () => null, OverviewTabSkeleton: () => <p>Loading overview</p> }));
+vi.mock("@/components/uptime/monitor-detail/tabs/notifications-tab", () => ({ NotificationsTab: () => null }));
+vi.mock("@/components/uptime/monitor-detail/tabs/sla-report-tab", () => ({ SlaReportTab: () => null }));
+describe("monitor resource states", () => {
+  it("distinguishes fetch failure from absence and preserves an existing settings draft on refresh failure", () => {
+    const Page = Route.options.component!;
+    state.error = new Error("private transport details");
+    const { rerender } = render(<Page />);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("common:states.error");
+    expect(document.body).not.toHaveTextContent("private transport details");
+    fireEvent.click(screen.getByRole("button", { name: "common:actions.retry" }));
+    expect(state.refetch).toHaveBeenCalledOnce();
+    state.error = { data: { code: "NOT_FOUND" } }; rerender(<Page />);
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Page not found");
+    expect(screen.getByText("notFound.description")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Back to monitors" })).toHaveAttribute("href", "/dashboard");
+    expect(screen.queryByRole("button", { name: "common:actions.retry" })).not.toBeInTheDocument();
+    state.error = null; state.data = { name: "Retained monitor" }; rerender(<Page />);
+    fireEvent.change(screen.getByLabelText("Private draft"), { target: { value: "Unsaved owner draft" } });
+    state.error = new Error("unavailable"); rerender(<Page />);
+    expect(screen.getByLabelText("Private draft")).toHaveValue("Unsaved owner draft");
+    expect(screen.getByRole("heading", { level: 1 })).toHaveTextContent("Retained monitor");
+    expect(screen.getByRole("alert")).toHaveTextContent("common:resource.staleAt");
+  });
+});
+
+it("offers Reports and Settings through a keyboard-accessible More menu using the existing URL update", async () => {
+  state.data = { name: "Monitor" }; state.isLoading = false; state.error = null; routing.tab = "overview";
+  const Page = Route.options.component!;
+  render(<Page />);
+  const more = screen.getByRole("button", { name: "actions.moreActions" });
+  more.focus();
+  await userEvent.keyboard("{Enter}");
+  expect(screen.getByRole("menuitemradio", { name: "tabs.reports" })).toBeInTheDocument();
+  await userEvent.keyboard("{End}{Enter}");
+  const navigation = routing.navigate.mock.calls.at(-1)?.[0];
+  expect(navigation.search({ returnPanel: "notifications", tab: "overview" })).toEqual({ returnPanel: "notifications", tab: "settings" });
+  expect(navigation.replace).toBe(true);
+});
+
+it("keeps the tab controls mounted and preserves a tab chosen while monitor data loads", () => {
+  state.data = undefined; state.isLoading = true; state.error = null; routing.tab = "overview";
+  const Page = Route.options.component!;
+  const { container, rerender } = render(<Page />);
+  expect(container.querySelector("[data-monitor-detail-loading]")).toBeInTheDocument();
+  const settings = screen.getByRole("tab", { name: "Settings" });
+  fireEvent.mouseDown(settings, { button: 0, ctrlKey: false });
+  const navigation = routing.navigate.mock.calls.at(-1)?.[0];
+  expect(navigation).toEqual(expect.objectContaining({ replace: true, params: { monitorId: "m1" } }));
+  expect(navigation.search({ returnPanel: "notifications", tab: "overview" })).toEqual({ returnPanel: "notifications", tab: "settings" });
+  routing.tab = "settings"; rerender(<Page />);
+  expect(settings).toHaveAttribute("aria-selected", "true");
+  state.data = { name: "Loaded monitor" }; state.isLoading = false; rerender(<Page />);
+  expect(screen.getByRole("tab", { name: "Settings" })).toBe(settings);
+  expect(screen.getByLabelText("Private draft")).toBeVisible();
+  expect(container.querySelector("[data-monitor-detail-loading]")).toBeNull();
+});

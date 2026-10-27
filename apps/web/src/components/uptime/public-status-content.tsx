@@ -18,6 +18,7 @@ import { Helmet } from "@dr.pogodin/react-helmet";
 import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import {
   Card,
   CardContent,
@@ -119,6 +120,7 @@ export interface PublicStatusContentProps {
   error: unknown;
   /** Translation key for the error/empty state (defaults to "unavailable"). */
   errorKey?: string;
+  onRetry?: () => void;
 }
 
 export function PublicStatusContent({
@@ -126,6 +128,7 @@ export function PublicStatusContent({
   isLoading,
   error,
   errorKey = "statusPage.unavailable",
+  onRetry,
 }: PublicStatusContentProps) {
   const { t } = useTranslation(["uptimeMonitor", "common"]);
 
@@ -164,8 +167,9 @@ export function PublicStatusContent({
           </div>
         ) : error || !data ? (
           <Card>
-            <CardContent className="p-8 text-center text-muted-foreground">
-              {t(errorKey, "Status page is unavailable.")}
+            <CardContent className="grid justify-items-center gap-4 p-8 text-center text-muted-foreground">
+              <p>{t(errorKey, "Status page is unavailable.")}</p>
+              {onRetry && <Button variant="outline" onClick={onRetry}>{t("common:actions.retry")}</Button>}
             </CardContent>
           </Card>
         ) : (

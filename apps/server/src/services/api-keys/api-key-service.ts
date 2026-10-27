@@ -1,3 +1,6 @@
+import { isFutureUtcExpiry } from "@pulsy/db/api-key-expiry";
+import { assertBelowCap } from "../../lib/account-caps";
+import { getTranslator, type Translator } from "../../lib/i18n";
 // ---------------------------------------------------------------------------
 // API-key service.
 //
@@ -11,9 +14,9 @@
 // ---------------------------------------------------------------------------
 
 import { createHash, randomBytes } from "node:crypto";
-import { type ApiKey, apiKey, db as defaultDb, type Database } from "@pulsy/db";
+import { type ApiKey, apiKey, db as defaultDb, type Database, user as userTable } from "@pulsy/db";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, isNull } from "drizzle-orm";
+import { and, count, desc, eq, isNull, isNotNull, or, gt } from "drizzle-orm";
 
 /** Plaintext key prefix that identifies a Pulsy API key. */
 export const API_KEY_PREFIX = "pul_";
@@ -22,7 +25,7 @@ export const API_KEY_PREFIX = "pul_";
 const DISPLAY_PREFIX_LENGTH = 8;
 
 /** A listed key with the secret hash stripped — the only shape the UI sees. */
-export type MaskedApiKey = Omit<ApiKey, "hashedKey">;
+export type MaskedApiKey = Pick<ApiKey, "apiKeyId" | "name" | "scope" | "keyPrefix" | "lastUsedAt" | "expiresAt" | "revokedAt" | "createdAt">;
 
 export interface CreatedApiKey {
 	/** The persisted row (without exposing the plaintext beyond `plaintext`). */
@@ -37,6 +40,7 @@ export type ResolvedApiKey =
 			ok: true;
 			user: { id: string };
 			apiKeyId: string;
+      scope: "read" | "full";
 	  }
 	| { ok: false; reason: "invalid" | "revoked" };
 
@@ -51,8 +55,8 @@ export function hashApiKey(plaintext: string): string {
 }
 
 function mask(row: ApiKey): MaskedApiKey {
-	const { hashedKey: _hashedKey, ...rest } = row;
-	return rest;
+  return { apiKeyId: row.apiKeyId, name: row.name, scope: row.scope, keyPrefix: row.keyPrefix,
+    lastUsedAt: row.lastUsedAt, expiresAt: row.expiresAt, revokedAt: row.revokedAt, createdAt: row.createdAt };
 }
 
 /**
@@ -63,25 +67,35 @@ export async function createApiKey(
 	userId: string,
 	name: string,
 	db: Database = defaultDb,
+	t: Translator = getTranslator("en"),
+  options: { scope?: "read" | "full"; expiresAt?: string | null } = {},
 ): Promise<CreatedApiKey> {
+  if (options.expiresAt && !isFutureUtcExpiry(options.expiresAt)) throw new TRPCError({ code: "BAD_REQUEST", message: t("errors.apiKeyExpiry") });
+  return db.transaction(async tx => {
+    const [owner] = await tx.select({ id: userTable.id }).from(userTable).where(eq(userTable.id, userId)).for("update");
+    if (!owner) throw new TRPCError({ code: "NOT_FOUND", message: t("errors.notFound", { resource: "account" }) });
+	// Each key has its own rate-limit bucket, so unbounded keys would multiply the limit.
+	const [live] = await tx.select({ value: count() }).from(apiKey).where(and(eq(apiKey.userId, userId), isNull(apiKey.revokedAt), or(isNull(apiKey.expiresAt), gt(apiKey.expiresAt, new Date().toISOString()))));
+	assertBelowCap(live?.value ?? 0, "apiKeys", t);
 	const plaintext = generateApiKey();
 	const hashedKey = hashApiKey(plaintext);
 	const keyPrefix = plaintext.slice(0, DISPLAY_PREFIX_LENGTH);
 
-	const [row] = await db
+	const [row] = await tx
 		.insert(apiKey)
-		.values({ userId, name, keyPrefix, hashedKey })
+		.values({ userId, name: name.trim(), keyPrefix, hashedKey, scope: options.scope ?? "full", expiresAt: options.expiresAt ?? null })
 		.returning();
 
 	/* v8 ignore next 6 -- unreachable: INSERT ... RETURNING yields the row or throws */
 	if (!row) {
 		throw new TRPCError({
 			code: "INTERNAL_SERVER_ERROR",
-			message: "Failed to create API key",
+			message: t("errors.internal"),
 		});
 	}
 
 	return { row: mask(row), plaintext };
+  });
 }
 
 /** List a user's keys, newest first, with the secret hash stripped. */
@@ -89,11 +103,11 @@ export async function listApiKeys(
 	userId: string,
 	db: Database = defaultDb,
 ): Promise<MaskedApiKey[]> {
-	return db.query.apiKey.findMany({
-		where: eq(apiKey.userId, userId),
+	const rows = await db.query.apiKey.findMany({
+		where: and(eq(apiKey.userId, userId), isNull(apiKey.removedAt)),
 		orderBy: desc(apiKey.createdAt),
-		columns: { hashedKey: false },
 	});
+  return rows.map(mask);
 }
 
 /**
@@ -143,7 +157,7 @@ export async function resolveApiKey(
 	if (!row) {
 		return { ok: false, reason: "invalid" };
 	}
-	if (row.revokedAt) {
+	if (row.revokedAt || row.removedAt) {
 		return { ok: false, reason: "revoked" };
 	}
 	// A ban must invalidate every authentication mechanism. The admin ban flow
@@ -153,7 +167,7 @@ export async function resolveApiKey(
 	if (!row.user || row.user.banned) {
 		return { ok: false, reason: "invalid" };
 	}
-	if (row.expiresAt && row.expiresAt <= new Date().toISOString()) {
+	if (row.expiresAt && (!Number.isFinite(Date.parse(row.expiresAt)) || Date.parse(row.expiresAt) <= Date.now())) {
 		return { ok: false, reason: "invalid" };
 	}
 
@@ -173,5 +187,14 @@ export async function resolveApiKey(
 		ok: true,
 		user: { id: row.userId },
 		apiKeyId: row.apiKeyId,
+    scope: row.scope,
 	};
+}
+
+/** Soft-remove only an owned, revoked key; retain its credential and audit timestamps. */
+export async function removeApiKey(userId: string, apiKeyId: string, db: Database = defaultDb): Promise<boolean> {
+  const rows = await db.update(apiKey).set({ removedAt: new Date().toISOString() })
+    .where(and(eq(apiKey.apiKeyId, apiKeyId), eq(apiKey.userId, userId), isNotNull(apiKey.revokedAt), isNull(apiKey.removedAt)))
+    .returning({ apiKeyId: apiKey.apiKeyId });
+  return rows.length > 0;
 }

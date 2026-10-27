@@ -12,15 +12,10 @@ import { resolveApiKey as defaultResolveApiKey } from "../services/api-keys/api-
 import { getRequestTranslator, sendApiError } from "./http";
 import "./types";
 
-const BEARER_PREFIX = "Bearer ";
-
-/** Extract the bearer token, or null when the header is absent/malformed. */
+/** Extract the bearer token (scheme is case-insensitive per RFC 9110), or null when absent/malformed. */
 function extractBearerToken(header: string | undefined): string | null {
-	if (!header || !header.startsWith(BEARER_PREFIX)) {
-		return null;
-	}
-	const token = header.slice(BEARER_PREFIX.length).trim();
-	return token.length > 0 ? token : null;
+	const match = header ? /^bearer[ \t]+(\S+)[ \t]*$/i.exec(header) : null;
+	return match ? match[1]! : null;
 }
 
 /** Factory so tests can inject a fake resolver; prod uses the real service. */
@@ -54,6 +49,17 @@ export function apiKeyAuth(
 
 		req.apiUser = result.user;
 		req.apiKeyId = result.apiKeyId;
+    req.apiKeyScope = result.scope;
 		next();
 	};
+}
+
+/** API access depends only on the authenticating key's scope. */
+export function requireApiScope(scope: "read" | "full") {
+  return (req: Request, res: Response, next: NextFunction): void => {
+    if (req.apiKeyScope !== "full" && !(scope === "read" && req.apiKeyScope === "read")) {
+      sendApiError(res, req.apiTranslator ?? getRequestTranslator(req), "forbidden", "errors.apiKeyAccessNotAllowed"); return;
+    }
+    next();
+  };
 }

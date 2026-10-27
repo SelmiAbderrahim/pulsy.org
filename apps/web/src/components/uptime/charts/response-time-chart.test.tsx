@@ -53,7 +53,7 @@ describe("ResponseTimeChart", () => {
 				}
 			/>,
 		);
-		expect(screen.getByText("Response Time")).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Response time" })).toBeInTheDocument();
 		// With a concrete size, recharts lays out the Y axis and runs the
 		// tickFormatter, rendering "<n>ms" tick labels.
 		expect(container.querySelector(".recharts-surface")).toBeInTheDocument();
@@ -65,13 +65,13 @@ describe("ResponseTimeChart", () => {
 	// recharts 3 derives hover state from real layout geometry, which jsdom
 	// cannot simulate — so the tooltip formatting is asserted directly.
 	it("formats tooltip values as '<n>ms' with the series label", () => {
-		expect(formatResponseTimeTooltip(120, "Response Time")).toEqual([
-			"120ms",
-			"Response Time",
+		expect(formatResponseTimeTooltip(120, "Response time")).toEqual([
+			"120\u00a0ms",
+			"Response time",
 		]);
-		expect(formatResponseTimeTooltip(0, "Response Time")).toEqual([
-			"0ms",
-			"Response Time",
+		expect(formatResponseTimeTooltip(0, "Response time")).toEqual([
+			"0\u00a0ms",
+			"Response time",
 		]);
 	});
 });

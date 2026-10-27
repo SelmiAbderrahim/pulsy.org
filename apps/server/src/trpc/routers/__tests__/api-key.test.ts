@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createTestUser, useCleanDatabase } from "../../../../test/db";
 import { authedCaller } from "../../../../test/trpc-caller";
 
@@ -15,7 +15,7 @@ beforeEach(async () => {
 });
 
 afterEach(() => {
-	process.env = { ...originalEnv };
+	process.env = { ...originalEnv }; vi.useRealTimers();
 });
 
 function ownerCaller() {
@@ -73,4 +73,26 @@ describe("apiKey.revoke", () => {
 			ownerCaller().apiKey.revoke({ apiKeyId: "missing" }),
 		).rejects.toMatchObject({ code: "NOT_FOUND" });
 	});
+});
+
+it("creates the requested scope and only accepts expiry dates after today UTC", async () => {
+  vi.useFakeTimers({ toFake: ["Date"] }); vi.setSystemTime(new Date("2026-10-15T12:00:00Z"));
+  for (const expiresAt of ["2026-10-14T23:59:59.999Z", "2026-10-15T23:59:59.999Z"]) await expect(ownerCaller().apiKey.create({ name: "Expiry", expiresAt })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  const expiresAt = "2026-10-16T23:59:59.999Z";
+  expect(await ownerCaller().apiKey.create({ name: "Reader" })).toMatchObject({ scope: "read" });
+  const created = await ownerCaller().apiKey.create({ name: "Writer", scope: "full", expiresAt });
+  expect(created).toMatchObject({ scope: "full", expiresAt });
+  expect(created).not.toHaveProperty("userId"); expect(created).not.toHaveProperty("hashedKey");
+});
+it("removes only an owned revoked key from lists while retaining its audit row", async () => {
+  const { apiKey, db } = await import("@pulsy/db"); const { eq } = await import("drizzle-orm");
+  const created = await ownerCaller().apiKey.create({ name: "Audit" });
+  await expect(ownerCaller().apiKey.remove({ apiKeyId: created.apiKeyId })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  await ownerCaller().apiKey.revoke({ apiKeyId: created.apiKeyId });
+  await expect(authedCaller(other).apiKey.remove({ apiKeyId: created.apiKeyId })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  expect(await ownerCaller().apiKey.remove({ apiKeyId: created.apiKeyId })).toEqual({ success: true });
+  expect(await ownerCaller().apiKey.list()).toEqual([]);
+  const stored = await db.query.apiKey.findFirst({ where: eq(apiKey.apiKeyId, created.apiKeyId) });
+  expect(stored!.removedAt).toBeTruthy(); expect(stored!.revokedAt).toBeTruthy(); expect(stored!.hashedKey).toBeTruthy();
+  await expect(ownerCaller().apiKey.remove({ apiKeyId: created.apiKeyId })).rejects.toMatchObject({ code: "NOT_FOUND" });
 });

@@ -1,4 +1,6 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactElement } from "react";
+import { render as renderUI, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reactI18nextMock } from "@/test/i18n-mock";
@@ -6,6 +8,11 @@ import type { UptimeMonitor } from "@/types/uptime";
 import { SettingsTab } from "./settings-tab";
 
 vi.mock("react-i18next", () => reactI18nextMock());
+vi.mock("@/services/uptime/maintenanceService", () => ({ MaintenanceService: { list: async () => [] } }));
+function render(ui: ReactElement) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return renderUI(ui, { wrapper: ({ children }) => <QueryClientProvider client={client}>{children}</QueryClientProvider> });
+}
 
 const mutateAsync = vi.fn();
 const useUpdateUptimeMonitor = vi.fn();
@@ -15,7 +22,7 @@ vi.mock("@/hooks/uptime", () => ({
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
-vi.mock("sonner", () => ({
+vi.mock("@/lib/toast", () => ({
 	toast: {
 		success: (m: unknown) => toastSuccess(m),
 		error: (m: unknown) => toastError(m),
@@ -76,6 +83,7 @@ describe("SettingsTab", () => {
 	it("shows an error toast when the update fails", async () => {
 		mutateAsync.mockRejectedValue(new Error("save fail"));
 		render(<SettingsTab monitor={monitor()} />);
+    await userEvent.type(screen.getByLabelText("create.fields.name"), " changed");
 		await userEvent.click(screen.getByRole("button", { name: "Save" }));
 		await waitFor(() => expect(toastError).toHaveBeenCalledWith("save fail"));
 	});
@@ -116,8 +124,9 @@ describe("SettingsTab", () => {
 		const urlInput = screen.getByLabelText("create.fields.url");
 		await userEvent.clear(urlInput);
 		await userEvent.type(urlInput, "https://b.com");
-		const [expected, timeout, threshold] =
-			screen.getAllByRole("spinbutton");
+		const expected = screen.getByLabelText("create.fields.expectedStatus");
+    const timeout = screen.getByLabelText("create.fields.timeout");
+    const threshold = screen.getByLabelText("create.fields.failureThreshold");
 		if (!expected || !timeout || !threshold) {
 			throw new Error("Settings numeric fields not found");
 		}

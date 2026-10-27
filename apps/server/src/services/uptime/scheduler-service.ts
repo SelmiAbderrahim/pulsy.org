@@ -1,8 +1,10 @@
+import { insertObservedCheck } from "./reliability-storage";
+import { appendIncidentTransition } from "./incident-timeline";
+import { deferSuppressedAlert } from "./maintenance-service";
 import { acceptsProbeResult, probeConfigurationKey } from "./probe-configuration";
 import {
 	db,
 	uptimeMonitor,
-	uptimeCheckLog,
 	uptimeStatusChange,
 } from "@pulsy/db";
 import {
@@ -313,6 +315,7 @@ const runCheck = async (monitorId: string): Promise<void> => {
 
 	let previousStatus = monitor.status;
   let policyMonitor = monitor;
+  let notificationQueued = false;
 
 	// Persist the check atomically: check log + monitor state + status change +
 	// incident open/resolve commit or roll back together. Without this, a crash
@@ -335,8 +338,7 @@ const runCheck = async (monitorId: string): Promise<void> => {
     transition = evaluateLatencyTransition({ previousStatus, checkStatus: checkResult.status, responseTime: checkResult.responseTime,
       consecutiveFailures: current.consecutiveFailures, failureThreshold: current.failureThreshold,
       consecutiveSlow: current.consecutiveSlow, consecutiveHealthy: current.consecutiveHealthy, policy: current.latencyPolicy });
-		await tx.insert(uptimeCheckLog).values({
-      uptimeMonitorId: current.uptimeMonitorId,
+		await insertObservedCheck(tx, policyMonitor, {
 			httpStatus: checkResult.httpStatus,
 			responseTime: checkResult.responseTime,
 			status: transition.sampleStatus,
@@ -395,13 +397,14 @@ const runCheck = async (monitorId: string): Promise<void> => {
       const outageId = policyMonitor.latencyPolicy && (previousStatus === "down" || previousStatus === "degraded") && policyMonitor.notificationOutageId ? policyMonitor.notificationOutageId : record.statusChangeId;
 			await tx.update(uptimeMonitor).set({ notificationOutageId: outageId }).where(and(eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId), eq(uptimeMonitor.userId, monitor.userId)));
 			policyMonitor = { ...policyMonitor, notificationOutageId: outageId };
+      notificationQueued = await deferSuppressedAlert(policyMonitor, record, tx);
 
     } else if (record?.statusAfter === "degraded" && !policyMonitor.latencyPolicy && (previousStatus === "up" || previousStatus === "pending")) {
       // A fresh legacy degraded episode must not inherit a recovered episode's receipts.
       await tx.update(uptimeMonitor).set({ notificationOutageId: null }).where(and(eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId), eq(uptimeMonitor.userId, monitor.userId)));
       policyMonitor = { ...policyMonitor, notificationOutageId: null };
 		} else if (record?.statusAfter === "up") {
-
+      notificationQueued = await deferSuppressedAlert(policyMonitor, record, tx);
     }
 
 		if (transition.shouldCreateIncident) {
@@ -415,6 +418,7 @@ const runCheck = async (monitorId: string): Promise<void> => {
 			await resolveIncident(monitorId, tx, now);
 		}
 
+    if (record) await appendIncidentTransition(policyMonitor, record, tx);
 		return record ?? null;
 	});
 
@@ -422,7 +426,7 @@ const runCheck = async (monitorId: string): Promise<void> => {
 	// and must not hold this monitor's re-entrancy guard or a concurrency slot.
 	// In-flight retries are lost on process restart (accepted — the delivery
 	// log records the final known outcome).
-	if (statusChangeRecord) {
+	if (statusChangeRecord && !notificationQueued) {
 		void dispatchNotifications(policyMonitor, statusChangeRecord).catch((err) => {
 			console.error(
 				`[uptime] Failed to dispatch notifications for monitor ${monitorId}: ${safeErrorSummary(err)}`,

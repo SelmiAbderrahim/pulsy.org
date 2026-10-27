@@ -99,6 +99,15 @@ matching container. Contributor setup and runtime validation are Docker-first.
   response permits only outcome, interval, and filesystem exclusions. The public
   `/api/agent/releases/v1.0.0` surface serves an explicit artifact allowlist with
   immutable caching. Both are rate-limited and add no public tRPC procedures.
+- Public Express `/api/status/pages/:key/{feed.rss,feed.atom,status.json,badge.svg,history.json}`
+  returns only audited published page projections; history requires explicit enablement.
+  CORS is `*`, the shared budget is 240 requests/IP/minute, and missing/draft pages
+  return uniform unavailable 404s. Subscription POSTs at
+  `/api/status/pages/:key/{subscribe,subscription}` share the budget, require the
+  configured or verified page origin, accept at most 16 KB of uncompressed JSON,
+  and redeem capabilities only from the body. Mail links use `PUBLIC_WEB_URL`;
+  subscriber addresses/tokens stay encrypted and never public. Mount these before
+  general CORS/auth/JSON parsing. No public tRPC procedures are added.
 - Server-agent tokens may be returned only by explicit owner create/rotate actions;
   ordinary server and metric projections omit all credential fields.
 - 5 locales (en, ar, fr, de, es) + full RTL.

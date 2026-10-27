@@ -56,6 +56,8 @@ export interface IpRateLimiterOptions {
 	maxBuckets?: number;
 	/** Reject new addresses when all bounded slots are occupied. */
 	failClosed?: boolean;
+	/** Public reads may evict the oldest bucket instead of allowing uncounted traffic. */
+	evictOldest?: boolean;
 	/** Public capability surfaces may use a narrower response contract. */
 	onLimited?: (res: Response, retryAfter: number) => void;
 	/** Injectable clock for deterministic tests. */
@@ -93,12 +95,14 @@ export function createIpRateLimiter(opts: IpRateLimiterOptions = {}) {
 				}
 			}
 			if (buckets.size >= maxBuckets) {
-				if (opts.failClosed) {
+				if (opts.evictOldest) {
+					const oldest = buckets.keys().next().value;
+					if (oldest !== undefined) buckets.delete(oldest);
+				} else if (opts.failClosed) {
 					reject(res, Math.ceil(windowMs / 1000));
 					return;
 				}
-				next();
-				return;
+				else { next(); return; }
 			}
 		}
 

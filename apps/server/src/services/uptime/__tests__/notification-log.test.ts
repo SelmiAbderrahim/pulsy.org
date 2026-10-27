@@ -333,19 +333,29 @@ describe("delivery log — a logging failure never breaks dispatch", () => {
 		});
 		// Force the log insert to throw AFTER the channel exists; the send must
 		// still happen and dispatch must not reject.
-		const insertSpy = vi
-			.spyOn(db, "insert")
-			.mockImplementation(() => {
-				throw new Error("log table unavailable");
+		const transaction = db.transaction.bind(db);
+		const failedLogInsert = vi.fn();
+		const transactionSpy = vi.spyOn(db, "transaction").mockImplementation(callback => transaction(async tx => {
+			const insert = tx.insert.bind(tx);
+			vi.spyOn(tx, "insert").mockImplementation(table => {
+				if (table === uptimeNotificationLog) {
+					failedLogInsert();
+					throw new Error("log table unavailable");
+				}
+				return insert(table);
 			});
+			return callback(tx);
+		}));
 		try {
 			await expect(
 				dispatchNotifications(monitor, downChange(), NO_RETRY),
 			).resolves.toBeUndefined();
 			expect(fx.calls).toHaveLength(1);
-			expect(errSpy).toHaveBeenCalled();
+			expect(failedLogInsert).toHaveBeenCalledExactlyOnceWith();
+			expect(await rows()).toEqual([]);
+			expect(errSpy).toHaveBeenCalledWith(expect.stringContaining("Failed to write notification log"));
 		} finally {
-			insertSpy.mockRestore();
+			transactionSpy.mockRestore();
 			fx.restore();
 			errSpy.mockRestore();
 		}

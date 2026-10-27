@@ -10,6 +10,33 @@
 export const uptimeKeys = {
 	/** All uptime-related queries */
 	all: () => ["uptime"] as const,
+  reliability: {
+    all: () => [...uptimeKeys.all(), "reliability"] as const,
+    detail: (ownerId: string | undefined, id: string, window: unknown) => [...uptimeKeys.reliability.all(), ownerId, id, window] as const,
+    annotations: (ownerId: string | undefined, id: string, window: unknown, cursor: unknown) => [...uptimeKeys.reliability.all(), "annotations", ownerId, id, window, cursor] as const,
+    incidents: (ownerId: string | undefined, id: string, window: unknown, cursor: unknown) => [...uptimeKeys.reliability.all(), "causes", ownerId, id, window, cursor] as const,
+    policies: (ownerId: string | undefined, id: string, before?: number) => [...uptimeKeys.reliability.all(), "policies", ownerId, id, before] as const,
+  },
+  server: {
+    detail: (id: string, ownerId?: string) => [...uptimeKeys.all(), "server", ownerId, id] as const,
+    history: (id: string, hours: number, ownerId?: string) => [...uptimeKeys.all(), "serverHistory", ownerId, id, hours] as const,
+  },
+  heartbeat: {
+    detail: (id: string, ownerId?: string) => [...uptimeKeys.all(), "heartbeat", ownerId, id] as const,
+    runs: (id: string, ownerId?: string) => [...uptimeKeys.all(), "heartbeatRuns", ownerId, id] as const,
+  },
+  views: {
+    list: (ownerId?: string) => [...uptimeKeys.all(), "personalViews", ownerId] as const,
+    initials: (ownerId?: string) => [...uptimeKeys.all(), "initialView", ownerId] as const,
+    initial: (ownerId?: string, id?:string) => [...uptimeKeys.all(), "initialView", ownerId, id] as const,
+  },
+  templates: {
+    list: (ownerId?: string) => [...uptimeKeys.all(), "templates", ownerId] as const,
+    channels: (ownerId?: string) => [...uptimeKeys.all(), "templateChannels", ownerId] as const,
+  },
+	maintenance: {
+		all: () => [...uptimeKeys.all(), "maintenance"] as const,
+	},
 
 	/** Monitor queries */
 	monitors: {
@@ -29,10 +56,12 @@ export const uptimeKeys = {
 	/** Check log queries */
 	checkLogs: {
 		all: () => [...uptimeKeys.all(), "checkLogs"] as const,
-		list: (monitorId: string) =>
-			[...uptimeKeys.checkLogs.all(), "list", monitorId] as const,
-		stats: (monitorId: string) =>
-			[...uptimeKeys.checkLogs.all(), "stats", monitorId] as const,
+		list: (monitorId: string, pagination?: { limit?: number; offset?: number }) =>
+			[...uptimeKeys.checkLogs.all(), "list", monitorId, ...(pagination ? [pagination] : [])] as const,
+		daily: (monitorId: string, days?: number) =>
+			[...uptimeKeys.checkLogs.all(), "daily", monitorId, ...(days === undefined ? [] : [days])] as const,
+		stats: (monitorId: string, days?: number) =>
+			[...uptimeKeys.checkLogs.all(), "stats", monitorId, ...(days === undefined ? [] : [days])] as const,
 	},
 
 	/** Notification delivery-log queries */
@@ -47,9 +76,19 @@ export const uptimeKeys = {
 			] as const,
 	},
 
+	/** Per-channel delivery health (account-wide) */
+	channelHealth: {
+		all: () => [...uptimeKeys.all(), "channelHealth"] as const,
+		list: () => [...uptimeKeys.channelHealth.all(), "list"] as const,
+	},
+
 	/** Incident queries */
 	incidents: {
 		all: () => [...uptimeKeys.all(), "incidents"] as const,
+    workspace: (ownerId: string | undefined, filters: unknown, cursor: unknown) => [...uptimeKeys.incidents.all(), "workspace", ownerId, filters, cursor] as const,
+    response: (ownerId: string | undefined, incidentId: string) => [...uptimeKeys.incidents.all(), "response", ownerId, incidentId] as const,
+    responseChannels: (ownerId: string | undefined, cursor?: string) => [...uptimeKeys.incidents.all(), "responseChannels", ownerId, cursor] as const,
+    monitorChoices: (ownerId: string | undefined) => [...uptimeKeys.incidents.all(), "monitorChoices", ownerId] as const,
 		list: (monitorId: string) =>
 			[...uptimeKeys.incidents.all(), "list", monitorId] as const,
 		detail: (id: string) =>
@@ -85,6 +124,7 @@ export const uptimeKeys = {
 	/** SLA report queries */
 	slaReports: {
 		all: () => [...uptimeKeys.all(), "slaReports"] as const,
+		details: (monitorId: string) => [...uptimeKeys.slaReports.all(), "detail", monitorId] as const,
 		detail: (monitorId: string, days: number) =>
 			[...uptimeKeys.slaReports.all(), "detail", monitorId, days] as const,
 		subscriptions: () =>
@@ -105,6 +145,8 @@ export const uptimeKeys = {
 
 	/** Status page management queries */
 	statusPages: {
+    subscriptions: (ownerId: string | undefined, id: string) => [...uptimeKeys.statusPages.all(), "subscriptions", ownerId, id] as const,
+    communication: (userId: string | undefined, id: string) => [...uptimeKeys.statusPages.all(), "communication", userId, id] as const,
 		all: () => [...uptimeKeys.all(), "statusPages"] as const,
 		lists: () => [...uptimeKeys.statusPages.all(), "list"] as const,
 		detail: (id: string) =>

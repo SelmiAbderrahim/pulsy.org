@@ -9,8 +9,9 @@ import {
 import { mockFetch } from "../../../../test/fetch-mock";
 import { encrypt } from "../../../lib/crypto";
 import type { UptimeMonitor } from "../monitor-service";
-import { db, uptimeNotificationLog, uptimeMonitorChannelBinding } from "@pulsy/db";
-import { eq } from "drizzle-orm";
+import { db, uptimeNotificationLog, uptimeMonitorChannelBinding, uptimeMonitor } from "@pulsy/db";
+import { and, eq } from "drizzle-orm";
+import { resumeSuppressedNotifications } from "../maintenance-service";
 import {
 	buildEmailContent,
 	dispatchNotifications,
@@ -115,8 +116,8 @@ describe("sendWebhookNotification", () => {
 				"application/json",
 			);
 			const body = JSON.parse(fx.calls[0]?.body as string);
-			expect(body.monitorName).toBe("My <App>");
-			expect(body.statusAfter).toBe("down");
+			expect(body.monitor.name).toBe("My <App>");
+			expect(body.event).toBe("monitor.down");
 		} finally {
 			fx.restore();
 		}
@@ -158,7 +159,7 @@ describe("sendSlackNotification", () => {
 		try {
 			const channel = await createTestChannel(monitor.uptimeMonitorId, {
 				channelType: "slack",
-				webhookUrl: "https://hooks.slack/in",
+				webhookUrl: "https://hooks.slack.com/services/T/B/token",
 			});
 			await sendSlackNotification(
 				channel,
@@ -177,7 +178,7 @@ describe("sendSlackNotification", () => {
 		try {
 			const channel = await createTestChannel(monitor.uptimeMonitorId, {
 				channelType: "slack",
-				webhookUrl: "https://hooks.slack/in",
+				webhookUrl: "https://hooks.slack.com/services/T/B/token",
 			});
 			await sendSlackNotification(
 				channel,
@@ -202,7 +203,7 @@ describe("sendSlackNotification", () => {
 		try {
 			const channel = await createTestChannel(monitor.uptimeMonitorId, {
 				channelType: "slack",
-				webhookUrl: "https://hooks.slack/in",
+				webhookUrl: "https://hooks.slack.com/services/T/B/token",
 			});
 			await expect(
 				sendSlackNotification(channel, monitor, downChange()),
@@ -233,7 +234,7 @@ describe("sendDiscordNotification", () => {
 		try {
 			const channel = await createTestChannel(monitor.uptimeMonitorId, {
 				channelType: "discord",
-				webhookUrl: "https://discord/in",
+				webhookUrl: "https://discord.com/api/webhooks/123/token",
 			});
 			await sendDiscordNotification(
 				channel,
@@ -252,7 +253,7 @@ describe("sendDiscordNotification", () => {
 		try {
 			const channel = await createTestChannel(monitor.uptimeMonitorId, {
 				channelType: "discord",
-				webhookUrl: "https://discord/in",
+				webhookUrl: "https://discord.com/api/webhooks/123/token",
 			});
 			await sendDiscordNotification(
 				channel,
@@ -279,7 +280,7 @@ describe("sendDiscordNotification", () => {
 		try {
 			const channel = await createTestChannel(monitor.uptimeMonitorId, {
 				channelType: "discord",
-				webhookUrl: "https://discord/in",
+				webhookUrl: "https://discord.com/api/webhooks/123/token",
 			});
 			await expect(
 				sendDiscordNotification(channel, monitor, downChange()),
@@ -607,7 +608,7 @@ describe("dispatchNotifications", () => {
 		try {
 			await createTestChannel(monitor.uptimeMonitorId, {
 				channelType: "slack",
-				webhookUrl: "https://hooks.slack/in",
+				webhookUrl: "https://hooks.slack.com/services/T/B/token",
 				notifyOnRecovery: true,
 			});
 			await dispatchNotifications(
@@ -667,7 +668,7 @@ describe("dispatchNotifications", () => {
 		try {
 			await createTestChannel(monitor.uptimeMonitorId, {
 				channelType: "slack",
-				webhookUrl: "https://hooks.slack/in",
+				webhookUrl: "https://hooks.slack.com/services/T/B/token",
 				notifyOnDown: true,
 			});
 			await createTestChannel(monitor.uptimeMonitorId, {
@@ -693,7 +694,7 @@ describe("dispatchNotifications", () => {
 			});
 			await createTestChannel(monitor.uptimeMonitorId, {
 				channelType: "discord",
-				webhookUrl: "https://discord/in",
+				webhookUrl: "https://discord.com/api/webhooks/123/token",
 			});
 			await createTestChannel(monitor.uptimeMonitorId, {
 				channelType: "telegram",
@@ -772,6 +773,81 @@ describe("dispatchTlsExpiryNotifications", () => {
 		}
 	});
 
+	it("skips a re-alert when a tls_expiry alert was sent within 24h", async () => {
+		// The in-memory probe throttle is wiped by restarts and monitor edits;
+		// the delivery log is the durable dedup.
+		const fx = mockFetch();
+		try {
+			await createTestChannel(monitor.uptimeMonitorId, {
+				channelType: "webhook",
+				webhookUrl: "https://hooks.test/in",
+				notifyOnTlsExpiry: true,
+				tlsExpiryThresholdDays: 14,
+			});
+			await db.insert(uptimeNotificationLog).values({
+				userId,
+				uptimeMonitorId: monitor.uptimeMonitorId,
+				channelType: "webhook",
+				target: "hooks.test",
+				event: "tls_expiry",
+				outcome: "sent",
+			});
+			await dispatchTlsExpiryNotifications(monitor, tlsInfo);
+			expect(fx.calls).toHaveLength(0);
+		} finally {
+			fx.restore();
+		}
+	});
+
+	it("re-alerts when the last tls_expiry send is older than 24h", async () => {
+		const fx = mockFetch();
+		try {
+			await createTestChannel(monitor.uptimeMonitorId, {
+				channelType: "webhook",
+				webhookUrl: "https://hooks.test/in",
+				notifyOnTlsExpiry: true,
+				tlsExpiryThresholdDays: 14,
+			});
+			await db.insert(uptimeNotificationLog).values({
+				userId,
+				uptimeMonitorId: monitor.uptimeMonitorId,
+				channelType: "webhook",
+				target: "hooks.test",
+				event: "tls_expiry",
+				outcome: "sent",
+				createdAt: new Date(Date.now() - 25 * 60 * 60 * 1000).toISOString(),
+			});
+			await dispatchTlsExpiryNotifications(monitor, tlsInfo);
+			expect(fx.calls).toHaveLength(1);
+		} finally {
+			fx.restore();
+		}
+	});
+
+	it("ignores failed tls_expiry rows when deduping", async () => {
+		const fx = mockFetch();
+		try {
+			await createTestChannel(monitor.uptimeMonitorId, {
+				channelType: "webhook",
+				webhookUrl: "https://hooks.test/in",
+				notifyOnTlsExpiry: true,
+				tlsExpiryThresholdDays: 14,
+			});
+			await db.insert(uptimeNotificationLog).values({
+				userId,
+				uptimeMonitorId: monitor.uptimeMonitorId,
+				channelType: "webhook",
+				target: "hooks.test",
+				event: "tls_expiry",
+				outcome: "failed",
+			});
+			await dispatchTlsExpiryNotifications(monitor, tlsInfo);
+			expect(fx.calls).toHaveLength(1);
+		} finally {
+			fx.restore();
+		}
+	});
+
 	it("routes TLS expiry alerts across all channel types and isolates failures", async () => {
 		const fx = mockFetch((url) =>
 			url.includes("slack")
@@ -790,12 +866,12 @@ describe("dispatchTlsExpiryNotifications", () => {
 			};
 			await createTestChannel(monitor.uptimeMonitorId, {
 				channelType: "slack",
-				webhookUrl: "https://hooks.slack/in",
+				webhookUrl: "https://hooks.slack.com/services/T/B/token",
 				...common,
 			});
 			await createTestChannel(monitor.uptimeMonitorId, {
 				channelType: "discord",
-				webhookUrl: "https://discord/in",
+				webhookUrl: "https://discord.com/api/webhooks/123/token",
 				...common,
 			});
 			await createTestChannel(monitor.uptimeMonitorId, {
@@ -829,10 +905,13 @@ describe("configured latency notifications", () => {
   it("sends degraded only to opted-in channels and records the event", async () => {
     const fx = mockFetch();
     try {
-      const configured = { ...monitor, latencyPolicy: { thresholdMs: 200, slowCount: 1, recoveryThresholdMs: 150, recoveryCount: 1, importance: "critical" as const, cooldownSeconds: 0 } };
+      const configured = { ...monitor, status: "degraded" as const, notificationOutageId: "sc1", latencyPolicy: { thresholdMs: 200, slowCount: 1, recoveryThresholdMs: 150, recoveryCount: 1, importance: "critical" as const, cooldownSeconds: 0 } };
+      await db.update(uptimeMonitor).set({ status: configured.status, notificationOutageId: configured.notificationOutageId, latencyPolicy: configured.latencyPolicy }).where(and(eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId), eq(uptimeMonitor.userId, userId)));
       await createTestChannel(monitor.uptimeMonitorId, { channelType: "webhook", webhookUrl: "https://hooks.test/degraded", notifyOnDegraded: true });
       await createTestChannel(monitor.uptimeMonitorId, { channelType: "webhook", webhookUrl: "https://hooks.test/disabled", notifyOnDegraded: false });
       await dispatchNotifications(configured, downChange({ statusAfter: "degraded" }), NO_RETRY);
+      expect(fx.calls).toHaveLength(0);
+      await resumeSuppressedNotifications();
       expect(fx.calls).toHaveLength(1);
       expect(fx.calls[0]?.url).toBe("https://hooks.test/degraded");
       expect(await logRowsFor(monitor.uptimeMonitorId)).toEqual([expect.objectContaining({ event: "degraded", outcome: "sent" })]);

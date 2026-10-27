@@ -39,3 +39,24 @@ it("persists degraded notification choices for monitor and account channels", as
   expect(await caller.uptimeMonitor.channel.create({ ...config, uptimeMonitorId: monitor.uptimeMonitorId })).toHaveProperty("notifyOnDegraded", true);
   expect(await caller.uptimeMonitor.channel.createDefault(config)).toHaveProperty("notifyOnDegraded", true);
 });
+
+
+it("partitions paused health and averages only owned recorded check coverage for dashboard counters", async () => {
+  const owner = await createTestUser(), other = await createTestUser();
+  const up = await createTestMonitor(owner.id, { status: "up", active: true, uptimePercentage: 99 });
+  const down = await createTestMonitor(owner.id, { status: "down", active: true, uptimePercentage: 99 });
+  await createTestMonitor(owner.id, { status: "degraded", active: false, uptimePercentage: 100 });
+  await createTestMonitor(owner.id, { status: "pending", active: true, uptimePercentage: 100 });
+  const foreign = await createTestMonitor(other.id, { status: "up", active: true, uptimePercentage: 100 });
+  await db.insert(uptimeCheckLog).values([
+    { uptimeMonitorId: up.uptimeMonitorId, status: "up" },
+    { uptimeMonitorId: up.uptimeMonitorId, status: "degraded" },
+    { uptimeMonitorId: down.uptimeMonitorId, status: "down" },
+    { uptimeMonitorId: foreign.uptimeMonitorId, status: "up" },
+  ]);
+  expect(await authedCaller(owner).uptimeMonitor.dashboard.summary()).toMatchObject({
+    totalMonitors: 4, activeMonitors: 3, monitorsUp: 1, monitorsDown: 1,
+    monitorsDegraded: 0, monitorsPending: 1, monitorsPaused: 1,
+    avgUptimePercentage: 25, uptimeMonitorsWithData: 2,
+  });
+});

@@ -1,3 +1,6 @@
+vi.mock("@/lib/auth-client", () => ({ useSession: () => ({ data: { user: { id: "u1" } } }) }));
+import { registerConfirmationHandler } from "@/lib/confirmation";
+import { afterEach as afterConfirmationTest } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -35,7 +38,7 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("react-i18next", () => reactI18nextMock());
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("@/hooks/uptime", () => ({
   useStatusPages: () => h.pages,
   useStatusPage: () => h.detail,
@@ -50,10 +53,11 @@ vi.mock("@/hooks/uptime", () => ({
   useStatusPageDomainStatus: () => h.domainStatus,
 }));
 vi.mock("@tanstack/react-query", () => ({
+ useMutation: () => ({ mutate: vi.fn(), isPending: false }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
 
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 const toastMock = vi.mocked(toast);
 
 function makePage(overrides: Partial<StatusPage> = {}): StatusPage {
@@ -76,6 +80,14 @@ function makePage(overrides: Partial<StatusPage> = {}): StatusPage {
     ...overrides,
   };
 }
+
+const confirmationDecision = vi.fn().mockResolvedValue(true);
+let unregisterConfirmation: (() => void) | undefined;
+beforeEach(() => {
+  confirmationDecision.mockResolvedValue(true);
+  unregisterConfirmation = registerConfirmationHandler(confirmationDecision);
+});
+afterConfirmationTest(() => unregisterConfirmation?.());
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -172,7 +184,7 @@ describe("StatusPagesSheet", () => {
 
   it("deletes a page after confirmation", async () => {
     h.pages = { data: [makePage()], isLoading: false };
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+    confirmationDecision.mockResolvedValue(true);
     render(<StatusPagesSheet open onOpenChange={vi.fn()} />);
     await userEvent.click(screen.getByLabelText("Delete"));
     await waitFor(() =>
@@ -183,7 +195,7 @@ describe("StatusPagesSheet", () => {
 
   it("does nothing when delete is not confirmed", async () => {
     h.pages = { data: [makePage()], isLoading: false };
-    vi.spyOn(window, "confirm").mockReturnValue(false);
+    confirmationDecision.mockResolvedValue(false);
     render(<StatusPagesSheet open onOpenChange={vi.fn()} />);
     await userEvent.click(screen.getByLabelText("Delete"));
     expect(h.del).not.toHaveBeenCalled();
@@ -192,7 +204,7 @@ describe("StatusPagesSheet", () => {
   it("shows an error toast when delete fails", async () => {
     h.pages = { data: [makePage()], isLoading: false };
     h.del.mockRejectedValue(new Error("nope"));
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+    confirmationDecision.mockResolvedValue(true);
     render(<StatusPagesSheet open onOpenChange={vi.fn()} />);
     await userEvent.click(screen.getByLabelText("Delete"));
     await waitFor(() => expect(toastMock.error).toHaveBeenCalled());

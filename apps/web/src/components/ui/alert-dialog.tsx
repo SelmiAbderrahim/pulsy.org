@@ -7,7 +7,9 @@
  * consumers are unchanged.
  */
 
+import { isToastInteraction } from "@/lib/toast-interaction";
 import * as React from "react";
+import { useModalBackdrop } from "./modal-backdrop";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { buttonVariants } from "@/components/ui/button";
 import { cn } from "@/lib/utils";
@@ -19,16 +21,19 @@ const AlertDialogPortal = DialogPrimitive.Portal;
 const AlertDialogOverlay = React.forwardRef<
 	React.ElementRef<typeof DialogPrimitive.Overlay>,
 	React.ComponentPropsWithoutRef<typeof DialogPrimitive.Overlay>
->(({ className, ...props }, ref) => (
+>(({ className, ...props }, ref) => {
+  const backdropRef = useModalBackdrop(ref);
+  return (
 	<DialogPrimitive.Overlay
 		className={cn(
-			"fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+			"fixed inset-0 z-[60] bg-black/80 data-[dimmed=false]:bg-transparent data-[state=open]:animate-in data-[state=open]:fade-in-0",
 			className,
 		)}
 		{...props}
-		ref={ref}
+		ref={backdropRef}
+    data-modal-backdrop=""
 	/>
-));
+); });
 AlertDialogOverlay.displayName = "AlertDialogOverlay";
 
 const AlertDialogContent = React.forwardRef<
@@ -40,10 +45,11 @@ const AlertDialogContent = React.forwardRef<
 		<DialogPrimitive.Content
 			ref={ref}
 			className={cn(
-				"fixed start-[50%] top-[50%] z-50 grid max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-lg translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-lg border bg-background p-4 shadow-xs duration-200 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95 sm:p-6 rtl:translate-x-[50%]",
+				"fixed start-[50%] top-[50%] z-[60] grid max-h-[calc(100dvh-2rem)] w-[calc(100%-2rem)] max-w-[var(--dialog-simple)] translate-x-[-50%] translate-y-[-50%] gap-4 overflow-y-auto rounded-lg border bg-background p-4 shadow-xs duration-200 data-[state=open]:animate-in data-[state=open]:fade-in-0 sm:p-6 rtl:translate-x-[50%]",
 				className,
 			)}
 			{...props}
+      onPointerDownOutside={event => { if (isToastInteraction(event)) { event.preventDefault(); return; } props.onPointerDownOutside?.(event); }}
 		/>
 	</AlertDialogPortal>
 ));

@@ -226,3 +226,12 @@ function runOnce(
 	limiter(req, res, next);
 	return { res, state };
 }
+
+it("can retain bounded public-read counters by evicting the oldest live bucket", () => {
+  const limiter = createIpRateLimiter({ limit: 1, maxBuckets: 1, evictOldest: true, now: () => 0 });
+  const next = vi.fn();
+  runOnce(limiter, mockReq("198.51.100.1"), next);
+  runOnce(limiter, mockReq("198.51.100.2"), next);
+  const { state } = runOnce(limiter, mockReq("198.51.100.2"), next);
+  expect(next).toHaveBeenCalledTimes(2); expect(state.statusCode).toBe(429);
+});

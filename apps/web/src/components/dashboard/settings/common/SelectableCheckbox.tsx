@@ -61,7 +61,7 @@ export function SelectableCheckbox({
 				className={cn(
 					"peer relative shrink-0 rounded-md border border-transparent ring-offset-background",
 					"h-[44px] w-[44px]",
-					"before:absolute before:start-1/2 before:top-1/2 before:h-5 before:w-5 before:-translate-x-1/2 before:-translate-y-1/2 before:rounded-xs before:border before:border-primary before:bg-background",
+					"before:absolute before:start-1/2 before:top-1/2 before:h-5 before:w-5 before:-translate-x-1/2 rtl:before:translate-x-1/2 before:-translate-y-1/2 before:rounded-xs before:border before:border-primary before:bg-background",
 					"data-[state=checked]:text-primary-foreground data-[state=checked]:before:bg-primary",
 					"data-[state=indeterminate]:text-primary-foreground data-[state=indeterminate]:before:bg-primary",
 					"focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2",

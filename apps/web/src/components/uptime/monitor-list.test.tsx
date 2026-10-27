@@ -1,4 +1,7 @@
-import { render, screen, waitFor, within } from "@testing-library/react";
+import { renderWithQueryClient as render } from "@/test/query-wrapper";
+import { registerConfirmationHandler } from "@/lib/confirmation";
+import { afterEach as afterConfirmationTest } from "vitest";
+import { screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reactI18nextMock } from "@/test/i18n-mock";
@@ -6,6 +9,7 @@ import type { UptimeMonitor } from "@/types/uptime";
 import { MonitorList } from "./monitor-list";
 
 vi.mock("react-i18next", () => reactI18nextMock());
+vi.mock("@/lib/auth-client", () => ({ useSession: () => ({ data: { user: { id: "owner" } } }) }));
 
 const navigateMock = vi.fn();
 vi.mock("@tanstack/react-router", () => ({
@@ -58,7 +62,7 @@ vi.mock("@/hooks/uptime", () => ({
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
 const toastWarning = vi.fn();
-vi.mock("sonner", () => ({
+vi.mock("@/lib/toast", () => ({
 	toast: {
 		success: (m: unknown) => toastSuccess(m),
 		error: (m: unknown) => toastError(m),
@@ -82,10 +86,18 @@ function monitor(overrides: Partial<UptimeMonitor> = {}): UptimeMonitor {
 	} as UptimeMonitor;
 }
 
+const confirmationDecision = vi.fn().mockResolvedValue(true);
+let unregisterConfirmation: (() => void) | undefined;
+beforeEach(() => {
+  confirmationDecision.mockResolvedValue(true);
+  unregisterConfirmation = registerConfirmationHandler(confirmationDecision);
+});
+afterConfirmationTest(() => unregisterConfirmation?.());
+
 beforeEach(() => {
 	vi.clearAllMocks();
 	bulkState.isProcessing = false;
-	vi.spyOn(window, "confirm").mockReturnValue(true);
+	confirmationDecision.mockResolvedValue(true);
 });
 
 describe("MonitorList rendering", () => {
@@ -93,7 +105,7 @@ describe("MonitorList rendering", () => {
 		const onCreate = vi.fn();
 		render(<MonitorList monitors={[]} onCreateMonitor={onCreate} />);
 		expect(
-			screen.getByText("Start Monitoring Your Services"),
+			screen.getByText("Start monitoring your services"),
 		).toBeInTheDocument();
 	});
 
@@ -101,11 +113,11 @@ describe("MonitorList rendering", () => {
 		// Exercises the `onCreateMonitor ?? (() => {})` fallback.
 		render(<MonitorList monitors={[]} />);
 		await userEvent.click(
-			screen.getByRole("button", { name: "Add Your First Monitor" }),
+			screen.getByRole("button", { name: "Add your first monitor" }),
 		);
 		// No throw → the fallback handler ran.
 		expect(
-			screen.getByText("Start Monitoring Your Services"),
+			screen.getByText("Start monitoring your services"),
 		).toBeInTheDocument();
 	});
 
@@ -138,11 +150,12 @@ describe("MonitorList rendering", () => {
 		);
 		// Status badge labels (rendered inside <div> badges, distinct from the
 		// monitor name links/cells).
-		expect(screen.getByText("Up", { selector: "div" })).toBeInTheDocument();
-		expect(screen.getByText("Degraded", { selector: "div" })).toBeInTheDocument();
-		expect(screen.getByText("Pending", { selector: "div" })).toBeInTheDocument();
-		// "Down" appears both as a monitor name and a status badge.
-		expect(screen.getAllByText("Down").length).toBeGreaterThanOrEqual(2);
+		for (const badge of screen.getAllByText("Up", { selector: "div.inline-flex" })) expect(badge).toBeInTheDocument();
+		for (const badge of screen.getAllByText("Degraded", { selector: "div.inline-flex" })) expect(badge).toBeInTheDocument();
+		for (const badge of screen.getAllByText("Pending", { selector: "div.inline-flex" })) expect(badge).toBeInTheDocument();
+		// An inactive monitor displays Paused even when its last observation was Down.
+		expect(screen.getByText("Down")).toBeInTheDocument();
+ for (const badge of screen.getAllByText("status.paused")) expect(badge).toBeInTheDocument();
 		// dash fallbacks for the down monitor
 		expect(screen.getAllByText("—").length).toBeGreaterThan(0);
 	});
@@ -240,7 +253,7 @@ describe("MonitorList sorting, density, and navigation", () => {
 				onSortChange={vi.fn()}
 			/>,
 		);
-		const header = screen.getByRole("columnheader", { name: /Response Time/ });
+		const header = screen.getByRole("columnheader", { name: /Last response/ });
 		expect(header).toHaveAttribute("aria-sort", "descending");
 	});
 
@@ -288,7 +301,7 @@ describe("MonitorList sorting, density, and navigation", () => {
 
 	it("shows a collecting placeholder when uptime has no data yet", () => {
 		render(<MonitorList monitors={[monitor({ uptimePercentage: null })]} />);
-		expect(screen.getByText("collecting…")).toBeInTheDocument();
+		expect(screen.getByText("metrics.noData")).toBeInTheDocument();
 	});
 
 	it("hides the url in compact density", () => {
@@ -309,7 +322,7 @@ describe("MonitorList sorting, density, and navigation", () => {
 				monitors={[monitor({ uptimeMonitorId: "m9", name: "Zed" })]}
 			/>,
 		);
-		await userEvent.click(screen.getByText("Up", { selector: "div" }));
+		await userEvent.click(screen.getAllByText("Up", { selector: "div.inline-flex" })[0]!);
 		expect(navigateMock).toHaveBeenCalledWith({
 			to: "/dashboard/uptime/$monitorId",
 			params: { monitorId: "m9" },
@@ -319,7 +332,7 @@ describe("MonitorList sorting, density, and navigation", () => {
 	it("does not navigate when a row action button is clicked", async () => {
 		checkNowMutateAsync.mockResolvedValue(undefined);
 		render(<MonitorList monitors={[monitor()]} />);
-		await userEvent.click(screen.getByRole("button", { name: "Check Now" }));
+		await userEvent.click(screen.getByRole("button", { name: "Check now — Alpha" }));
 		expect(navigateMock).not.toHaveBeenCalled();
 	});
 });
@@ -331,32 +344,28 @@ describe("MonitorList row actions", () => {
 		checkNowMutateAsync.mockResolvedValue(undefined);
 		render(<MonitorList monitors={[monitor()]} />);
 
-		await userEvent.click(screen.getByRole("button", { name: "Check Now" }));
+		await userEvent.click(screen.getByRole("button", { name: "Check now — Alpha" }));
 		await waitFor(() => expect(checkNowMutateAsync).toHaveBeenCalled());
 
-		await userEvent.click(screen.getByRole("button", { name: "Disable" }));
+		await rowAction("Disable");
 		await waitFor(() => expect(toggleMutateAsync).toHaveBeenCalled());
 
-		await userEvent.click(
-			screen.getByRole("button", { name: "Delete Monitor" }),
-		);
+		await rowAction("Delete monitor");
 		await waitFor(() => expect(deleteMutateAsync).toHaveBeenCalled());
 		expect(toastSuccess).toHaveBeenCalled();
 	});
 
 	it("aborts delete when confirm is declined", async () => {
-		vi.spyOn(window, "confirm").mockReturnValue(false);
+		confirmationDecision.mockResolvedValue(false);
 		render(<MonitorList monitors={[monitor()]} />);
-		await userEvent.click(
-			screen.getByRole("button", { name: "Delete Monitor" }),
-		);
+		await rowAction("Delete monitor");
 		expect(deleteMutateAsync).not.toHaveBeenCalled();
 	});
 
 	it("shows the Enable label and toggles an inactive monitor", async () => {
 		toggleMutateAsync.mockResolvedValue(undefined);
 		render(<MonitorList monitors={[monitor({ active: false })]} />);
-		await userEvent.click(screen.getByRole("button", { name: "Enable" }));
+		await rowAction("Enable");
 		await waitFor(() => expect(toggleMutateAsync).toHaveBeenCalled());
 		expect(toastSuccess).toHaveBeenCalled();
 	});
@@ -366,17 +375,15 @@ describe("MonitorList row actions", () => {
 		toggleMutateAsync.mockRejectedValue(new Error("toggle fail"));
 		deleteMutateAsync.mockRejectedValue(new Error("delete fail"));
 		render(<MonitorList monitors={[monitor()]} />);
-		await userEvent.click(screen.getByRole("button", { name: "Check Now" }));
+		await userEvent.click(screen.getByRole("button", { name: "Check now — Alpha" }));
 		await waitFor(() =>
 			expect(toastError).toHaveBeenCalledWith("check fail"),
 		);
-		await userEvent.click(screen.getByRole("button", { name: "Disable" }));
+		await rowAction("Disable");
 		await waitFor(() =>
 			expect(toastError).toHaveBeenCalledWith("toggle fail"),
 		);
-		await userEvent.click(
-			screen.getByRole("button", { name: "Delete Monitor" }),
-		);
+		await rowAction("Delete monitor");
 		await waitFor(() =>
 			expect(toastError).toHaveBeenCalledWith("delete fail"),
 		);
@@ -408,9 +415,7 @@ describe("MonitorList bulk selection", () => {
 		deleteMultiple.mockResolvedValue({ successful: ["m1"], failed: [] });
 		render(<MonitorList monitors={[monitor()]} />);
 		await selectFirstRow();
-		await userEvent.click(
-			screen.getByRole("button", { name: /Delete \(1\)/ }),
-		);
+		await toolbarAction(/Delete \(1\)/);
 		// Confirm dialog: type DELETE 1
 		const input = await screen.findByPlaceholderText("DELETE 1");
 		await userEvent.type(input, "DELETE 1");
@@ -435,9 +440,7 @@ describe("MonitorList bulk selection", () => {
 			/>,
 		);
 		await userEvent.click(screen.getByRole("checkbox", { name: "Select all" }));
-		await userEvent.click(
-			screen.getByRole("button", { name: /Delete \(2\)/ }),
-		);
+		await toolbarAction(/Delete \(2\)/);
 		const input = await screen.findByPlaceholderText("DELETE 2");
 		await userEvent.type(input, "DELETE 2");
 		await userEvent.click(
@@ -453,9 +456,7 @@ describe("MonitorList bulk selection", () => {
 		});
 		render(<MonitorList monitors={[monitor({ status: "down" })]} />);
 		await selectFirstRow();
-		await userEvent.click(
-			screen.getByRole("button", { name: /Delete \(1\)/ }),
-		);
+		await toolbarAction(/Delete \(1\)/);
 		const input = await screen.findByPlaceholderText("DELETE 1");
 		await userEvent.type(input, "DELETE 1");
 		await userEvent.click(
@@ -539,15 +540,15 @@ describe("MonitorList bulk selection", () => {
 		render(<MonitorList monitors={[monitor()]} />);
 		await userEvent.click(screen.getByRole("checkbox", { name: "Alpha" }));
 		const toolbar = screen.getByRole("toolbar");
-		expect(toolbar.querySelectorAll(".animate-spin").length).toBe(2);
+		expect(toolbar.querySelectorAll(".animate-spin").length).toBe(1);
 		expect(
 			within(toolbar).getByRole("button", { name: /Pause/ }),
 		).toBeDisabled();
 		expect(
-			within(toolbar).getByRole("button", { name: /Delete \(1\)/ }),
+			within(toolbar).getByRole("button", { name: /More actions/ }),
 		).toBeDisabled();
 		expect(
-			within(toolbar).getByRole("button", { name: /Share/ }),
+			within(toolbar).getByRole("button", { name: /More actions/ }),
 		).toBeDisabled();
 	});
 
@@ -555,16 +556,14 @@ describe("MonitorList bulk selection", () => {
 		render(<MonitorList monitors={[monitor()]} />);
 		await selectFirstRow();
 		const toolbar = screen.getByRole("toolbar");
-		await userEvent.click(
-			within(toolbar).getByRole("button", { name: /Share/ }),
-		);
+		await toolbarAction(/Share/);
 		expect(
 			await screen.findByText("Share 1 monitors"),
 		).toBeInTheDocument();
 	});
 
 	it("opens the bulk edit dialog and clears the selection after a successful update", async () => {
-		bulkUpdateSettingsMutateAsync.mockResolvedValue([{}]);
+		bulkUpdateSettingsMutateAsync.mockResolvedValue({ updated: [{}], results: [] });
 		render(<MonitorList monitors={[monitor()]} />);
 		await selectFirstRow();
 		const toolbar = screen.getByRole("toolbar");
@@ -597,9 +596,7 @@ describe("MonitorList bulk selection", () => {
 		render(<MonitorList monitors={[monitor()]} />);
 		await selectFirstRow();
 		const toolbar = screen.getByRole("toolbar");
-		await userEvent.click(
-			within(toolbar).getByRole("button", { name: /Share/ }),
-		);
+		await toolbarAction(/Share/);
 		await userEvent.click(
 			screen.getByRole("button", { name: "Create link" }),
 		);
@@ -609,3 +606,6 @@ describe("MonitorList bulk selection", () => {
 		);
 	});
 });
+
+async function rowAction(name: string) { await userEvent.click(screen.getByRole("button", { name: /More actions —/ })); await userEvent.click(screen.getByRole("menuitem", { name })); }
+async function toolbarAction(name: RegExp) { await userEvent.click(within(screen.getByRole("toolbar")).getByRole("button", { name: /More actions —/ })); await userEvent.click(screen.getByRole("menuitem", { name })); }

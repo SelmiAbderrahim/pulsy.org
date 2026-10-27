@@ -1,11 +1,15 @@
+import { formattingLocale } from "@/lib/formatting-locale";
+import { STATS_WINDOW_DAYS } from "@/lib/uptime/stats-window";
+import { Unit } from "@/components/ui/unit";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+import { formatPercent } from "@/lib/uptime/number-format";
 import type { LucideIcon } from "lucide-react";
-import { AlertTriangle, Clock, Wifi, WifiOff } from "lucide-react";
+import { AlertTriangle, Wifi, WifiOff, Pause, Hourglass, CircleDot } from "lucide-react";
 import { useTranslation } from "react-i18next";
-import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import type { UptimeDashboardSummary } from "@/types/uptime";
 
-type StatusFilter = "up" | "down" | "degraded";
+import type { StatusFilter } from "@/lib/uptime/dashboard-search";
 
 interface StatCard {
   label: string;
@@ -29,13 +33,13 @@ export function UptimeStatsCards({
   selectedStatus,
   onStatusChange,
 }: UptimeStatsCardsProps) {
-  const { t } = useTranslation("uptimeMonitor");
+  const { t, i18n } = useTranslation("uptimeMonitor");
 
   const cards: StatCard[] = [
     {
-      label: t("dashboard.totalMonitors", "Total Monitors"),
+      label: t("dashboard.totalShort", "Total"),
       value: summary.totalMonitors,
-      icon: Wifi,
+      icon: CircleDot,
       // Total acts as "clear filter" when a status filter is active.
       clearsFilter: true,
     },
@@ -61,62 +65,39 @@ export function UptimeStatsCards({
       filter: "degraded",
     },
     {
-      label: t("dashboard.avgUptime", "Avg Uptime"),
-      value: `${(summary.avgUptime ?? 0).toFixed(2)}%`,
-      icon: Clock,
+      label: t("dashboard.monitorsPending", "Pending"),
+      value: summary.monitorsPending,
+      icon: Hourglass,
+      filter: "pending",
+      color: "text-muted-foreground",
+    },
+    {
+      label: t("dashboard.monitorsPaused", "Paused"),
+      value: summary.monitorsPaused,
+      icon: Pause,
+      color: "text-muted-foreground",
     },
   ];
 
   return (
-    <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-5">
-      {cards.map((card) => {
-        const isClickable =
-          onStatusChange != null && (card.filter != null || card.clearsFilter);
-        const isActive = card.filter != null && selectedStatus === card.filter;
-
-        const content = (
-          <CardContent className="flex items-center gap-3 p-4">
-            <card.icon
-              className={`h-5 w-5 shrink-0 ${card.color ?? "text-muted-foreground"}`}
-            />
-            <div className="min-w-0">
-              <p className="text-2xl font-semibold tabular-nums">{card.value}</p>
-              <p className="truncate text-xs text-muted-foreground">
-                {card.label}
-              </p>
-            </div>
-          </CardContent>
-        );
-
-        if (!isClickable) {
-          return <Card key={card.label}>{content}</Card>;
-        }
-
-        const handleClick = () => {
-          if (card.clearsFilter) {
-            onStatusChange?.(undefined);
-          } else if (card.filter != null) {
-            // Toggle: clicking the active filter clears it.
-            onStatusChange?.(isActive ? undefined : card.filter);
-          }
-        };
-
-        return (
-          <Card key={card.label} className="p-0">
-            <button
-              type="button"
-              onClick={handleClick}
-              aria-pressed={isActive}
-              className={cn(
-                "w-full rounded-lg text-start transition-colors duration-150 focus-visible:outline-hidden focus-visible:ring-2 focus-visible:ring-ring",
-                isActive ? "ring-1 ring-primary" : "hover:bg-muted/50",
-              )}
-            >
-              {content}
-            </button>
-          </Card>
-        );
-      })}
-    </div>
+    <section aria-label={t("dashboard.healthSummary")} className="min-w-0 rounded-lg border bg-card p-3 sm:p-4">
+      <div className="grid min-w-0 grid-cols-2 items-center gap-2 sm:grid-cols-3 sm:gap-4">
+        {cards.map(card => {
+          const clickable = onStatusChange != null;
+          const active = card.filter != null && selectedStatus === card.filter;
+          const content = <><card.icon aria-hidden="true" className={cn("size-4 shrink-0", card.color)} /><span className="font-semibold tabular-nums">{new Intl.NumberFormat(formattingLocale(i18n.language)).format(Number(card.value))}</span><span>{card.label}</span></>;
+          return clickable ? (
+            <button key={card.label} type="button" aria-label={`${card.label}: ${new Intl.NumberFormat(formattingLocale(i18n.language)).format(Number(card.value))}`} aria-pressed={active} className={cn("flex min-h-11 min-w-0 items-center gap-2 rounded-md px-2 text-start text-sm transition-colors duration-150", active ? "bg-accent ring-1 ring-primary" : "hover:bg-muted")}
+              onClick={() => onStatusChange(card.clearsFilter || active ? undefined : card.filter)}>{content}</button>
+          ) : <div key={card.label} className="flex min-h-11 items-center gap-2 text-sm">{content}</div>;
+        })}
+        <Collapsible className="col-span-full min-w-0 border-t pt-2">
+          <CollapsibleTrigger>
+            <span className="ms-1 inline-flex max-w-full flex-wrap items-center gap-x-1" title={t("dashboard.averageTooltip", "Equal-weight average across monitors with recorded checks in the rolling window.")}><span className="whitespace-nowrap">{t("dashboard.avgUptime", "Average check success")}</span> <Unit className="font-semibold">{formatPercent(summary.avgUptimePercentage, i18n.language) ?? t("metrics.noData", "No data")}</Unit> <span className="whitespace-nowrap text-muted-foreground">{t("dashboard.rollingWindow", { count: STATS_WINDOW_DAYS })}</span></span>
+          </CollapsibleTrigger><CollapsibleContent>
+          <p className="max-w-prose py-2 text-sm text-muted-foreground">{t("metrics.averageBasis", { count: summary.uptimeMonitorsWithData ?? 0 })}</p>
+        </CollapsibleContent></Collapsible>
+      </div>
+    </section>
   );
 }

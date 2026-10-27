@@ -3,6 +3,7 @@ import {
 	NOTIFICATION_RETRY_DELAYS_MS,
 	NotificationSendError,
 	isTransientSendError,
+	isAmbiguousDeliveryError,
 	resolveDefaultRetryDelays,
 	withRetry,
 } from "./retry";
@@ -161,5 +162,54 @@ describe("resolveDefaultRetryDelays", () => {
 	it("parses a comma-separated ms list and drops non-finite entries", () => {
 		process.env[KEY] = " 10, 20 , x, 30 ";
 		expect(resolveDefaultRetryDelays()).toEqual([10, 20, 30]);
+	});
+});
+
+describe("isAmbiguousDeliveryError", () => {
+	it("flags timeouts and aborts (request may have been processed)", () => {
+		const timeout = new Error("timed out");
+		timeout.name = "TimeoutError";
+		const abort = new Error("aborted");
+		abort.name = "AbortError";
+		expect(isAmbiguousDeliveryError(timeout)).toBe(true);
+		expect(isAmbiguousDeliveryError(abort)).toBe(true);
+	});
+
+	it("flags mid-flight socket drops by code", () => {
+		for (const code of ["ECONNRESET", "EPIPE", "ETIMEDOUT", "UND_ERR_SOCKET"]) {
+			const err = Object.assign(new Error("net"), { code });
+			expect(isAmbiguousDeliveryError(err)).toBe(true);
+		}
+	});
+
+	it("flags a fetch TypeError whose cause is a mid-flight drop", () => {
+		const cause = Object.assign(new Error("reset"), { code: "ECONNRESET" });
+		const err = new TypeError("fetch failed", { cause });
+		expect(isAmbiguousDeliveryError(err)).toBe(true);
+	});
+
+	it("does not flag errors where no request was delivered", () => {
+		for (const code of ["ECONNREFUSED", "EAI_AGAIN"]) {
+			const err = Object.assign(new Error("net"), { code });
+			expect(isAmbiguousDeliveryError(err)).toBe(false);
+		}
+		expect(isAmbiguousDeliveryError(new TypeError("fetch failed"))).toBe(false);
+		const refused = Object.assign(new Error("refused"), {
+			code: "ECONNREFUSED",
+		});
+		expect(
+			isAmbiguousDeliveryError(new TypeError("fetch failed", { cause: refused })),
+		).toBe(false);
+	});
+
+	it("never flags a provider HTTP response, a plain Error, or a non-Error", () => {
+		expect(isAmbiguousDeliveryError(new NotificationSendError("x", 500))).toBe(
+			false,
+		);
+		expect(isAmbiguousDeliveryError(new NotificationSendError("x", 429))).toBe(
+			false,
+		);
+		expect(isAmbiguousDeliveryError(new Error("nope"))).toBe(false);
+		expect(isAmbiguousDeliveryError("just a string")).toBe(false);
 	});
 });

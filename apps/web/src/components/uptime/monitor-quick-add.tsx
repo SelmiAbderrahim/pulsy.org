@@ -1,8 +1,17 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { isSessionClientActive } from "@/lib/session-query-client";
+import { FormField } from "@/components/ui/form-field";
+import { formatInterval } from "@/lib/uptime/format";
+import { layoutTokens } from "@/components/ui/layout-tokens";
+import { normalizeMonitorUrl, duplicateMonitor } from "@pulsy/db/monitor-url";
+import { useUptimeMonitors } from "@/hooks/uptime/useUptimeMonitors";
+import { DEFAULT_FAILURE_THRESHOLD } from "@pulsy/db/monitor-defaults";
 import { Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import { FormErrorSummary, useFormValidation } from "@/components/ui/form-validation";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "@tanstack/react-router";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -22,15 +31,21 @@ import { extractNameFromUrl } from "@/lib/uptime/extract-name";
 interface MonitorQuickAddProps {
 	open: boolean;
 	onOpenChange: (open: boolean) => void;
+	onAdvanced?: (draft: { url: string; name: string }) => void;
 }
 
-export function MonitorQuickAdd({ open, onOpenChange }: MonitorQuickAddProps) {
-	const { t } = useTranslation("uptimeMonitor");
+export function MonitorQuickAdd({ open, onOpenChange, onAdvanced }: MonitorQuickAddProps) {
+	const { t, i18n } = useTranslation("uptimeMonitor");
 	const createMutation = useCreateUptimeMonitor();
+ const client = useQueryClient();
+ const existing = useUptimeMonitors({ enabled: open });
 	const navigate = useNavigate();
 
 	const [url, setUrl] = useState("");
 	const [name, setName] = useState("");
+	const validation = useFormValidation(() => url.trim() && !normalizeMonitorUrl(url) ? [{ id: "quick-url", message: t("creation.invalidUrl") }] : []);
+	const [formError, setFormError] = useState("");
+	const fieldMessage = (id: string) => { const issue = validation.issues.find(issue => issue.id === id); return issue ? <p className="text-sm text-destructive">{issue.message}</p> : null; };
 
 	const defaultInterval = 300;
 
@@ -40,31 +55,44 @@ export function MonitorQuickAdd({ open, onOpenChange }: MonitorQuickAddProps) {
 	const resetForm = () => {
 		setUrl("");
 		setName("");
+		validation.clear(); setFormError("");
 	};
+
+	useEffect(() => { if (!open) resetForm(); }, [open]);
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
 
-		if (!effectiveName) return;
+		if (createMutation.isPending) return;
+    setFormError("");
+    if (!validation.validate()) return;
+		validation.clear(); setFormError("");
 
+    const normalizedUrl = normalizeMonitorUrl(url);
+    if (!normalizedUrl) { validation.show([{ id: "quick-url", message: t("creation.invalidUrl") }]); return; }
+    const duplicate = duplicateMonitor(normalizedUrl, existing.data ?? []);
+    if (duplicate) { validation.show([{ id: "quick-url", message: t("creation.duplicateUrl", { name: duplicate.name }) }]); return; }
+    setUrl(normalizedUrl);
 		try {
 			const created = await createMutation.mutateAsync({
 				name: effectiveName,
-				url,
+				url: normalizedUrl,
 				method: "GET",
 				expectedStatus: 200,
 				timeout: 10000,
 				interval: defaultInterval,
-				failureThreshold: 3,
+				failureThreshold: DEFAULT_FAILURE_THRESHOLD,
 			});
-			toast.success(t("create.success", "Monitor created successfully"), {
+ if (!isSessionClientActive(client)) return;
+			toast.success(t("create.success", "Monitor created. It stays Pending until its first check completes."), {
 				action: {
 					label: t("quickAdd.setupNotifications", "Set up notifications"),
 					onClick: () => {
+ if (!isSessionClientActive(client)) return;
 						navigate({
 							to: "/dashboard/uptime/$monitorId",
 							params: { monitorId: created.uptimeMonitorId },
-							search: { tab: "notifications" },
+							search: { tab: "alerts" },
 						});
 					},
 				},
@@ -72,17 +100,20 @@ export function MonitorQuickAdd({ open, onOpenChange }: MonitorQuickAddProps) {
 			resetForm();
 			onOpenChange(false);
 		} catch (error) {
-			toast.error(extractErrorMessage(error, t("create.error", "Failed to create monitor")));
+ if (!isSessionClientActive(client)) return;
+			if (validation.server(error, { url: "quick-url", name: "quick-name" })) return;
+			const message = extractErrorMessage(error, t("create.error", "Failed to create monitor"));
+			setFormError(message); toast.error(message);
 		}
 	};
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-[440px]">
-				<form onSubmit={handleSubmit}>
+			<DialogContent className={layoutTokens.createDialog}>
+				<form ref={validation.formRef} noValidate onSubmit={handleSubmit}>
 					<DialogHeader>
 						<DialogTitle>
-							{t("quickAdd.title", "Quick Add Monitor")}
+							{t("quickAdd.title", "Quick add monitor")}
 						</DialogTitle>
 						<DialogDescription>
 							{t(
@@ -93,71 +124,73 @@ export function MonitorQuickAdd({ open, onOpenChange }: MonitorQuickAddProps) {
 					</DialogHeader>
 
 					<div className="grid gap-4 py-4">
-						<div className="grid gap-2">
+            <FormErrorSummary issues={validation.issues} />
+						{formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
+						<FormField className="form-field">
 							<Label htmlFor="quick-url">
 								{t("create.fields.url", "URL")}
 							</Label>
 							<Input
-								id="quick-url"
-								type="url"
+								id="quick-url" validateOnBlur
+								{...validation.field("quick-url")}
+								type="text" inputMode="url" onBlur={() => { const normalized = normalizeMonitorUrl(url); if (normalized) setUrl(normalized); }}
+								dir="ltr" autoComplete="url"
 								value={url}
-								onChange={(e) => setUrl(e.target.value)}
-								placeholder={t(
-									"quickAdd.urlPlaceholder",
-									"https://example.com/health",
-								)}
+								onChange={(e) => { setUrl(e.target.value); setFormError(""); }}
+								placeholder={t("formUX.example", { defaultValue: "Example: {{value}}", value: "https://example.com/health" })}
 								required
-								autoFocus
 							/>
-						</div>
+							{url.trim() && fieldMessage("quick-url")}
+						</FormField>
 
-						<div className="grid gap-2">
+						<FormField className="form-field">
 							<Label htmlFor="quick-name">
 								{t("create.fields.name", "Name")}
 							</Label>
 							<Input
-								id="quick-name"
+								id="quick-name" maxLength={255} {...validation.field("quick-name", "quick-name-help")}
 								value={name}
-								onChange={(e) => setName(e.target.value)}
-								placeholder={
-									autoName ||
-									t("quickAdd.namePlaceholder", "Auto-generated from URL")
-								}
+								onChange={(e) => { setName(e.target.value); setFormError(""); }}
+								placeholder={autoName ? t("formUX.example", { defaultValue: "Example: {{value}}", value: autoName }) : t("quickAdd.namePlaceholder", "Example: Website")}
 							/>
-						</div>
+							<p id="quick-name-help" className="text-sm text-muted-foreground">{t("creation.nameOptional")}</p>
+							{fieldMessage("quick-name")}
+						</FormField>
 
-						<p className="text-xs text-muted-foreground">
+						<p className="text-sm text-muted-foreground">
 							{t("quickAdd.defaultsWithInterval", {
-								defaultValue: "Checks every {{interval}} | Method: GET | Expect: 200",
-								interval: t(`intervals.${defaultInterval}`, `${defaultInterval}s`),
+								defaultValue: "Checks every {{interval}} · Method: GET · Expect: 200",
+								interval: formatInterval(defaultInterval, t, i18n.language),
 							})}
 							<br />
 							{t(
-								"quickAdd.changeDefaults",
-								"Change defaults in Settings tab after adding",
+								"creation.quickPolicy",
 							)}
 						</p>
 					</div>
 
-					<DialogFooter className="border-t pt-3">
+					<DialogFooter className="flex-col items-stretch border-t pt-3 sm:flex-wrap sm:items-center sm:justify-between">
+						{onAdvanced && <Button type="button" variant="link" className="max-w-full justify-start whitespace-normal px-0 text-start sm:me-auto" disabled={createMutation.isPending} onClick={() => onAdvanced({ url, name })}>{t("creation.continueAdvanced")}</Button>}
+						<div className="flex flex-col-reverse gap-2 sm:ms-auto sm:flex-row sm:items-center">
 						<Button
 							type="button"
 							variant="outline"
-							onClick={() => onOpenChange(false)}
+							data-dialog-discard onClick={() => onOpenChange(false)}
 							className="h-[44px] w-full sm:w-auto"
 						>
 							{t("actions.cancel", "Cancel")}
 						</Button>
 						<Button
 							type="submit"
-							disabled={createMutation.isPending || !effectiveName}
+							disabled={createMutation.isPending}
 							className="h-[44px] w-full sm:w-auto"
 						>
 							{createMutation.isPending && (
 								<Loader2 className="h-4 w-4 me-2 animate-spin" />
 							)}
-							{t("quickAdd.submit", "Add Monitor")}
+							{t("quickAdd.submit", "Add monitor")}
 						</Button>
+						</div>
 					</DialogFooter>
 				</form>
 			</DialogContent>

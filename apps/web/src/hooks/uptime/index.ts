@@ -23,6 +23,7 @@ export {
 	useUpdateUptimeMonitor,
 	useUptimeMonitor,
 	useUptimeMonitors,
+  useMonitorListUpdating,
 } from "./useUptimeMonitors";
 
 export {
@@ -44,6 +45,8 @@ export {
 export {
 	useUptimeCheckLogs,
 	useUptimeDashboardSummary,
+  useUptimeDailyUptime,
+  useUptimeChannelHealth,
 	useUptimeIncident,
 	useUptimeIncidents,
 	useUptimeMonitorStats,
@@ -52,6 +55,7 @@ export {
 } from "./useUptimeStats";
 export {
 	useUptimeSlaReport,
+  useDownloadUptimeSlaReport,
 	useUptimeSlaReportSubscriptions,
 	useUpsertUptimeSlaReportSubscription,
 	useRemoveUptimeSlaReportSubscription,
@@ -71,3 +75,7 @@ export {
 	usePublicStatusPageBySlug,
 	usePublicStatusPageByDomain,
 } from "./useStatusPages";
+
+export { useMaintenance, useMaintenanceActions } from "./useMaintenance";
+export { useServerHealth, useServerHistory } from "./useServerHealth";
+export { useTagEntry } from "./useTagEntry";

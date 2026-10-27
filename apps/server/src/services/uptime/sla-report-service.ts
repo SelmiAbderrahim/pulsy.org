@@ -1,5 +1,8 @@
+import { formatPercent } from "@pulsy/db/percent-format";
+import { isValidTimezone, timezoneLabel } from "@pulsy/db/timezone";
 import {
 	db,
+	user,
 	uptimeMonitor,
 	uptimeSlaReportSubscription,
 	type UptimeSlaReportSubscriptionRow,
@@ -23,7 +26,9 @@ import {
 import {
 	type DailyUptimeEntry,
 	getMonitorDailyUptime,
-	getMonitorIncidentSummary,
+	getMonitorIncidentsForWindow,
+	summarizeWindowIncidents,
+	type WindowIncident,
 	getMonitorStatsForWindow,
 	type IncidentSummary,
 	type MonitorStats,
@@ -49,8 +54,12 @@ export interface SlaReportModel {
 	windowDays: number;
 	periodLabel: string; // "YYYY-MM" (month) or "30d" (rolling)
 	generatedAt: string; // ISO
+	/** Windows and daily buckets are computed in UTC; displays name their own zone. */
+	windowTimezone: "UTC";
 	stats: MonitorStats;
 	incidents: IncidentSummary;
+	/** Incidents overlapping the window, oldest first; totals above derive from it. */
+	incidentList: WindowIncident[];
 	dailyUptime: DailyUptimeEntry[];
 }
 
@@ -106,9 +115,9 @@ export async function buildSlaReportModel(opts: {
 		now,
 	);
 
-	const [stats, incidents, dailyUptime] = await Promise.all([
+	const [stats, incidentList, dailyUptime] = await Promise.all([
 		getMonitorStatsForWindow(opts.monitorId, opts.userId, from, to),
-		getMonitorIncidentSummary(opts.monitorId, opts.userId, from, to),
+		getMonitorIncidentsForWindow(opts.monitorId, opts.userId, from, to),
 		getMonitorDailyUptime(opts.monitorId, opts.userId, from, to),
 	]);
 
@@ -121,25 +130,63 @@ export async function buildSlaReportModel(opts: {
 		windowDays,
 		periodLabel,
 		generatedAt: now.toISOString(),
+		windowTimezone: "UTC",
 		stats,
-		incidents,
+		incidents: summarizeWindowIncidents(incidentList),
+		incidentList,
 		dailyUptime,
 	};
 }
 
-/** Render a nullable numeric metric for display. */
-function fmtNum(value: number | null): string {
-	return value === null ? "—" : String(value);
+/** The account's chosen display zone for server-rendered reports; UTC until one is chosen. */
+export async function accountReportTimezone(userId: string): Promise<string> {
+	const [account] = await db.select({ timezone: user.timezone }).from(user).where(eq(user.id, userId)).limit(1);
+	return account?.timezone && isValidTimezone(account.timezone) ? account.timezone : "UTC";
+}
+
+/** A missing timing is a dash with no unit, never "— ms". */
+function fmtMsPdf(value: number | null): string {
+	return value === null ? "—" : `${value} ms`;
 }
 
 function dateOnly(iso: string): string {
 	return iso.slice(0, 10);
 }
 
-/** Strip control characters so user text renders cleanly in the PDF. */
+/** "2026-10-17 14:05" wall time in `timezone` (Latin digits, PDF-safe). */
+function zonedDateTime(iso: string, timezone: string): string {
+	const parts = new Intl.DateTimeFormat("en-CA", { timeZone: timezone, numberingSystem: "latn", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hourCycle: "h23" }).formatToParts(new Date(iso));
+	const part = (type: Intl.DateTimeFormatPartTypes) => parts.find(item => item.type === type)?.value ?? "";
+	return `${part("year")}-${part("month")}-${part("day")} ${part("hour")}:${part("minute")}`;
+}
+
+// pdfkit's built-in fonts encode WinAnsi (cp1252) only. Any other character would be truncated to an
+// unrelated byte and print as garbage, so it is replaced with "?" instead.
+// Rendering constraint: bundling a Unicode font (with Arabic shaping + bidi) would fix this properly; deferred.
+const CP1252_EXTRA = new Set("€‚ƒ„…†‡ˆ‰Š‹ŒŽ‘’“”•–—˜™š›œžŸ");
+function pdfEncodable(char: string): boolean {
+	const code = char.codePointAt(0) ?? 0;
+	return code < 0x80 || (code >= 0xa0 && code < 0x100) || CP1252_EXTRA.has(char);
+}
+const PDF_LABEL_KEYS = [
+	"slaReport.pdfTitle", "slaReport.monitor", "slaReport.url", "slaReport.period", "slaReport.noData", "slaReport.uptime", "slaReport.basis",
+	"slaReport.totalChecks", "slaReport.successfulChecks", "slaReport.degradedChecks", "slaReport.failedChecks", "slaReport.avgResponseTime",
+	"slaReport.p95ResponseTime", "slaReport.incidents", "slaReport.noIncidents", "slaReport.incidentCount", "slaReport.totalDowntime",
+	"slaReport.longestIncident", "slaReport.dailyUptime", "slaReport.generatedAt", "slaReport.pdfCharsNote", "slaReport.timezoneBasis",
+	"slaReport.ongoing", "slaReport.dailyUptimeUtc",
+];
+/** Strip control characters and characters the PDF font cannot draw so user text renders cleanly. */
 function pdfText(value: string): string {
 	// biome-ignore lint/suspicious/noControlCharactersInRegex: deliberately stripping control chars
-	return value.replace(/[\u0000-\u001f\u007f]/g, " ");
+	return [...value.replace(/[\u0000-\u001f\u007f]/g, " ")].map(char => (pdfEncodable(char) ? char : "?")).join("");
+}
+function hasUnencodable(value: string): boolean {
+	return [...value.replace(/[\u0000-\u001f\u007f]/g, " ")].some(char => !pdfEncodable(char));
+}
+/** "2,592,000 s" is exact but unreadable: append days/hours/minutes. */
+function humanSeconds(seconds: number): string {
+	const parts = [Math.floor(seconds / 86400) && `${Math.floor(seconds / 86400)}d`, Math.floor((seconds % 86400) / 3600) && `${Math.floor((seconds % 86400) / 3600)}h`, Math.floor((seconds % 3600) / 60) && `${Math.floor((seconds % 3600) / 60)}m`].filter(Boolean);
+	return parts.length ? `${seconds}s (${parts.join(" ")})` : `${seconds}s`;
 }
 
 /** The on-demand download URL embedded in the monthly email. */
@@ -156,8 +203,17 @@ export function slaReportPdfUrl(uptimeMonitorId: string, days: number): string {
  */
 export function renderSlaReportPdf(
 	model: SlaReportModel,
-	t: Translator,
+	requested: Translator,
+	language: string = DEFAULT_LANGUAGE,
+	displayTimezone = "UTC",
 ): Promise<Buffer> {
+	const zone = isValidTimezone(displayTimezone) ? displayTimezone : "UTC";
+	const zoneLabel = timezoneLabel(zone, new Date(model.generatedAt));
+	// A locale whose labels the PDF font cannot draw (Arabic) gets English labels rather than garbled text.
+	const supportedLabels = PDF_LABEL_KEYS.every(key => !hasUnencodable(requested(key)));
+	const t = supportedLabels ? requested : getTranslator(DEFAULT_LANGUAGE);
+	// Match the existing English fallback when the built-in PDF font cannot draw the locale.
+	const locale = supportedLabels ? language : DEFAULT_LANGUAGE;
 	return new Promise((resolve, reject) => {
 		const doc = new PDFDocument({ size: "A4", margin: 50 });
 		const chunks: Buffer[] = [];
@@ -175,28 +231,31 @@ export function renderSlaReportPdf(
 		doc.text(`${t("slaReport.monitor")}: ${pdfText(model.monitorName)}`);
 		doc.text(`${t("slaReport.url")}: ${pdfText(model.url)}`);
 		doc.text(
-			`${t("slaReport.period")}: ${dateOnly(model.windowFrom)} – ${dateOnly(
-				model.windowTo,
-			)}`,
+			`${t("slaReport.period")}: ${zonedDateTime(model.windowFrom, zone)} – ${zonedDateTime(model.windowTo, zone)}`,
 		);
+		doc.fontSize(9).text(t("slaReport.timezoneBasis", { timezone: zoneLabel })).fontSize(12);
+		if (hasUnencodable(model.monitorName) || hasUnencodable(model.url)) doc.fontSize(9).fillColor("#64748b").text(t("slaReport.pdfCharsNote")).fillColor("black").fontSize(12);
 		doc.moveDown(0.5);
 
 		doc
 			.fontSize(28)
-			.text(`${model.stats.uptimePercentage}%`, { align: "left" });
+			.text(formatPercent(model.stats.uptimePercentage, locale) ?? t("slaReport.noData"), { align: "left" });
 		doc.fontSize(12).text(t("slaReport.uptime"));
+		doc.fontSize(9).text(t("slaReport.basis"));
+		doc.fontSize(12);
 		doc.moveDown(0.5);
 
 		doc.text(`${t("slaReport.totalChecks")}: ${model.stats.totalChecks}`);
 		doc.text(
 			`${t("slaReport.successfulChecks")}: ${model.stats.successfulChecks}`,
 		);
+		doc.text(`${t("slaReport.degradedChecks")}: ${model.stats.degradedChecks}`);
 		doc.text(`${t("slaReport.failedChecks")}: ${model.stats.failedChecks}`);
 		doc.text(
-			`${t("slaReport.avgResponseTime")}: ${fmtNum(model.stats.avgResponseTime)} ms`,
+			`${t("slaReport.avgResponseTime")}: ${fmtMsPdf(model.stats.avgResponseTime)}`,
 		);
 		doc.text(
-			`${t("slaReport.p95ResponseTime")}: ${fmtNum(model.stats.p95ResponseTime)} ms`,
+			`${t("slaReport.p95ResponseTime")}: ${fmtMsPdf(model.stats.p95ResponseTime)}`,
 		);
 		doc.moveDown(0.5);
 
@@ -207,21 +266,27 @@ export function renderSlaReportPdf(
 		} else {
 			doc.text(`${t("slaReport.incidentCount")}: ${model.incidents.count}`);
 			doc.text(
-				`${t("slaReport.totalDowntime")}: ${model.incidents.totalDowntimeSeconds}s`,
+				`${t("slaReport.totalDowntime")}: ${humanSeconds(model.incidents.totalDowntimeSeconds)}`,
 			);
 			doc.text(
-				`${t("slaReport.longestIncident")}: ${model.incidents.longestIncidentSeconds}s`,
+				`${t("slaReport.longestIncident")}: ${humanSeconds(model.incidents.longestIncidentSeconds)}`,
 			);
+			doc.fontSize(10);
+			for (const incident of model.incidentList) {
+				doc.text(`${zonedDateTime(incident.startedAt, zone)} – ${incident.resolvedAt ? zonedDateTime(incident.resolvedAt, zone) : t("slaReport.ongoing")}: ${humanSeconds(incident.downtimeSeconds)}`);
+			}
+			doc.fontSize(12);
 		}
 		doc.moveDown(0.5);
 
 		doc.fontSize(14).text(t("slaReport.dailyUptime"));
+		doc.fontSize(9).text(t("slaReport.dailyUptimeUtc"));
 		doc.fontSize(10);
 		if (model.dailyUptime.length === 0) {
 			doc.text(t("slaReport.noData"));
 		} else {
 			for (const day of model.dailyUptime) {
-				doc.text(`${day.date}: ${day.uptimePercentage}% (${day.totalChecks})`);
+				doc.text(`${day.date}: ${formatPercent(day.uptimePercentage, locale) ?? t("slaReport.noData")} (${day.totalChecks})`);
 			}
 		}
 		doc.moveDown(0.5);
@@ -230,7 +295,7 @@ export function renderSlaReportPdf(
 			.fontSize(9)
 			.fillColor("#64748b")
 			.text(
-				`${t("slaReport.generatedAt")}: ${model.generatedAt} · ${COMPANY_NAME}`,
+				`${t("slaReport.generatedAt")}: ${zonedDateTime(model.generatedAt, zone)} ${zoneLabel} · ${COMPANY_NAME}`,
 			);
 
 		doc.end();
@@ -245,6 +310,7 @@ export function renderSlaReportPdf(
 export function renderSlaReportEmailHtml(
 	model: SlaReportModel,
 	t: Translator,
+	language: string = DEFAULT_LANGUAGE,
 ): string {
 	const link = slaReportPdfUrl(model.uptimeMonitorId, model.windowDays);
 	const cell =
@@ -264,9 +330,11 @@ export function renderSlaReportEmailHtml(
 				<tr><td ${head}>${escapeHtml(t("slaReport.monitor"))}</td><td ${cell}>${escapeHtml(model.monitorName)}</td></tr>
 				<tr><td ${head}>${escapeHtml(t("slaReport.url"))}</td><td ${cell}>${escapeHtml(model.url)}</td></tr>
 				<tr><td ${head}>${escapeHtml(t("slaReport.period"))}</td><td ${cell}>${escapeHtml(dateOnly(model.windowFrom))} – ${escapeHtml(dateOnly(model.windowTo))}</td></tr>
-				<tr><td ${head}>${escapeHtml(t("slaReport.uptime"))}</td><td ${cell}>${model.stats.uptimePercentage}%</td></tr>
+				<tr><td ${head}>${escapeHtml(t("slaReport.uptime"))}</td><td ${cell}>${escapeHtml(formatPercent(model.stats.uptimePercentage, language) ?? t("slaReport.noData"))}</td></tr>
+				<tr><td ${head}>${escapeHtml(t("slaReport.degradedChecks"))}</td><td ${cell}>${model.stats.degradedChecks}</td></tr>
 				<tr><td ${head}>${escapeHtml(t("slaReport.incidents"))}</td><td ${cell}>${model.incidents.count}</td></tr>
 			</table>
+			<p style="color: #64748b; font-size: 12px;">${escapeHtml(t("slaReport.basis"))}</p>
 			<p><a href="${escapeHtml(link)}" style="color: #2563eb;">${escapeHtml(t("slaReport.downloadPdf"))}</a></p>
 			<p style="color: #64748b; font-size: 12px;">${escapeHtml(t("slaReport.footer"))}</p>
 		</div>
@@ -290,8 +358,7 @@ export interface ProcessSubscriptionResult {
 
 /**
  * Build and send the prior-month report(s) for a single subscription. Skips
- * (without sending) when the owner's plan no longer includes SLA reports or
- * the linked provider is gone. Per-recipient send failures are logged and
+ * (without sending) when the linked provider is unavailable. Per-recipient send failures are logged and
  * swallowed so one bad address never blocks the rest; the caller decides how
  * to treat a thrown build error.
  */
@@ -336,7 +403,7 @@ export async function processSubscription(
 			t,
 			now,
 		});
-		const pdf = await renderSlaReportPdf(model, t);
+		const pdf = await renderSlaReportPdf(model, t, DEFAULT_LANGUAGE, await accountReportTimezone(sub.userId));
 		const html = renderSlaReportEmailHtml(model, t);
 		const subject = t("slaReport.emailSubject", {
 			monitor: monitor.name,

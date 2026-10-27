@@ -1,6 +1,8 @@
+import { insertObservedCheck } from "./reliability-storage";
+import { appendIncidentTransition } from "./incident-timeline";
 import { DEFAULT_FAILURE_THRESHOLD } from "@pulsy/db/monitor-defaults";
 import { createHash, randomBytes } from "node:crypto";
-import { db, user, apiHeartbeatConfiguration, apiHeartbeatReceipt, uptimeMonitor, uptimeHeartbeat, uptimeHeartbeatRun, uptimeCheckLog, uptimeIncident, uptimeStatusChange, type DbExecutor, type DbTransaction } from "@pulsy/db";
+import { db, user, apiHeartbeatConfiguration, apiHeartbeatReceipt, uptimeMonitor, uptimeHeartbeat, uptimeHeartbeatRun, uptimeIncident, uptimeStatusChange, type DbExecutor, type DbTransaction } from "@pulsy/db";
 import { and, asc, desc, eq, inArray, isNotNull, isNull, lte, or, sql } from "drizzle-orm";
 import { TRPCError } from "@trpc/server";
 import { nanoid } from "nanoid";
@@ -8,8 +10,7 @@ import { scheduledJobs, scheduleJob } from "node-schedule";
 import type { Translator } from "../../lib/i18n";
 import { heartbeatDeadline } from "./heartbeat-clock";
 import type { z } from "zod";
-import { dispatchNotifications } from "./notification-service";
-import { safeErrorSummary } from "../../lib/safe-error";
+import { deferSuppressedAlert } from "./maintenance-service";
 import { encrypt, decrypt } from "../../lib/crypto";
 
 type Monitor = typeof uptimeMonitor.$inferSelect;
@@ -101,7 +102,7 @@ async function recordHealth(tx: DbTransaction, monitor: Monitor, configuration: 
   const sample = changed || !configuration.lastSampleAt || now.getTime() - Date.parse(configuration.lastSampleAt) >= monitor.interval * 1000;
   await tx.update(uptimeMonitor).set({ status, lastCheckedAt: stamp, nextCheckAt: monitor.active ? configuration.nextDeadline : null, responseTime: null, httpStatus: null, consecutiveFailures: status === "down" ? 1 : 0 }).where(scopeMonitor(monitor.uptimeMonitorId, monitor.userId));
   if (sample) {
-    await tx.insert(uptimeCheckLog).values({ uptimeMonitorId: monitor.uptimeMonitorId, status, errorMessage: reason, createdAt: sampleStamp, responseTime: null, httpStatus: null });
+    await insertObservedCheck(tx, monitor, { status, errorMessage: reason, createdAt: sampleStamp, responseTime: null, httpStatus: null });
     await tx.update(uptimeHeartbeat).set({ lastSampleAt: sampleStamp }).where(scopeHeartbeat(monitor.uptimeMonitorId, monitor.userId));
   }
   if (!changed) return;
@@ -114,16 +115,9 @@ async function recordHealth(tx: DbTransaction, monitor: Monitor, configuration: 
     .where(and(scopeMonitor(monitor.uptimeMonitorId, monitor.userId), eq(uptimeIncident.status, "ongoing"))).limit(1);
   if (status === "down" && !ongoing) await tx.insert(uptimeIncident).values({ uptimeMonitorId: monitor.uptimeMonitorId, cause: reason, startedAt: transitionStamp, expectedAt, severity: monitor.latencyPolicy?.importance ?? "critical" });
   if (!bad && ongoing) await tx.update(uptimeIncident).set({ status: "resolved", resolvedAt: stamp, durationSeconds: Math.max(0, Math.round((now.getTime() - Date.parse(ongoing.incident.startedAt)) / 1000)) }).where(and(eq(uptimeIncident.incidentId, ongoing.incident.incidentId), eq(uptimeIncident.uptimeMonitorId, monitor.uptimeMonitorId)));
+  await appendIncidentTransition(monitor, transition, tx);
   // A first success has no outage to recover. Pausing never emits recovery.
-  if (monitor.active && (bad || outageId)) return { monitor: { ...monitor, status, notificationOutageId: outageId }, transition };
-}
-
-/** Dispatch only committed transitions; maintenance delivery joins this path in Phase 7. */
-function dispatchHeartbeat(delivery: Awaited<ReturnType<typeof recordHealth>>): void {
-  if (!delivery) return;
-  void dispatchNotifications(delivery.monitor, delivery.transition).catch(error => {
-    console.error(`[uptime] Heartbeat notification failed: ${safeErrorSummary(error)}`);
-  });
+  if (monitor.active && (bad || outageId)) await deferSuppressedAlert({ ...monitor, status, notificationOutageId: outageId }, transition, tx);
 }
 
 /** Token capability lookup is followed by fresh owner-scoped locks and hash recheck. */
@@ -134,7 +128,6 @@ export async function receiveHeartbeat(token: string, event: "start" | "success"
   const input = parsed.data; const tokenHash = hash(token);
   const [target] = await db.select({ monitorId: uptimeHeartbeat.monitorId, userId: uptimeHeartbeat.userId }).from(uptimeHeartbeat).where(eq(uptimeHeartbeat.tokenHash, tokenHash)).limit(1);
   if (!target) return { statusCode: 404, outcome: "unavailable" };
-  let delivery: Awaited<ReturnType<typeof recordHealth>>;
   const result = await db.transaction<ReceiptResult>(async tx => {
     const [monitor] = await tx.select().from(uptimeMonitor).where(and(scopeMonitor(target.monitorId, target.userId), eq(uptimeMonitor.monitorType, "heartbeat"))).for("update");
     if (!monitor) return { statusCode: 404, outcome: "unavailable" };
@@ -179,10 +172,9 @@ export async function receiveHeartbeat(token: string, event: "start" | "success"
     const nextDeadline = event === "success" ? expectedAt : null;
     const updated = { ...configuration, currentRunId: null, expectedAt, nextDeadline, lastReceivedAt: stamp, lastRunDurationMs: duration, ...(event === "success" ? { lastSuccessAt: stamp } : { lastFailAt: stamp }) };
     await tx.update(uptimeHeartbeat).set({ currentRunId: null, expectedAt, nextDeadline, lastReceivedAt: stamp, lastRunDurationMs: duration, ...(event === "success" ? { lastSuccessAt: stamp } : { lastFailAt: stamp }) }).where(scopeHeartbeat(target.monitorId, target.userId));
-    delivery = await recordHealth(tx, monitor, updated, event === "success" ? "up" : "down", event === "fail" ? "heartbeat_failed" : null, now);
+    await recordHealth(tx, monitor, updated, event === "success" ? "up" : "down", event === "fail" ? "heartbeat_failed" : null, now);
     return { statusCode: 200, outcome: "accepted" };
   });
-  dispatchHeartbeat(delivery);
   return result;
 }
 
@@ -203,8 +195,7 @@ export async function scanHeartbeatDeadlines(now = new Date()): Promise<number> 
     .orderBy(sql`${uptimeMonitor.lastCheckedAt} ASC NULLS FIRST`, asc(uptimeHeartbeat.monitorId)).limit(50);
   let processed = 0;
   for (const target of candidates) {
-    let delivery: Awaited<ReturnType<typeof recordHealth>>;
-    const result = await db.transaction(async tx => {
+      const result = await db.transaction(async tx => {
       const [monitor] = await tx.select().from(uptimeMonitor).where(and(scopeMonitor(target.monitorId, target.userId), eq(uptimeMonitor.active, true), eq(uptimeMonitor.monitorType, "heartbeat"))).for("update", { skipLocked: true });
       if (!monitor) return false;
       const [configuration] = await tx.select().from(uptimeHeartbeat).where(scopeHeartbeat(target.monitorId, target.userId)).for("update");
@@ -230,12 +221,11 @@ export async function scanHeartbeatDeadlines(now = new Date()): Promise<number> 
       const expectedAt = Date.parse(configuration.expectedAt), graceEndsAt = expectedAt + configuration.graceSeconds * 1000;
       const deadlineTransition = due && monitor.status !== status && (status === "down" || status === "degraded");
       const transitionAt = deadlineTransition ? new Date(status === "down" ? graceEndsAt : expectedAt) : now;
-      delivery = await recordHealth(tx, monitor, { ...configuration, nextDeadline }, status, reason, now, transitionAt, deadlineTransition && status === "down" ? configuration.expectedAt : null);
+      await recordHealth(tx, monitor, { ...configuration, nextDeadline }, status, reason, now, transitionAt, deadlineTransition && status === "down" ? configuration.expectedAt : null);
       return true;
     });
     if (result) processed++;
-    dispatchHeartbeat(delivery);
-  }
+    }
   return processed;
 }
 

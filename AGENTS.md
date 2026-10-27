@@ -44,6 +44,14 @@ accept at most 48 KB of uncompressed JSON, and return only the audited outcome,
 reporting interval, and filesystem exclusions. Versioned agent releases at
 `/api/agent/releases/v1.0.0` serve an explicit file allowlist with immutable
 caching. Both surfaces are rate-limited; neither adds public tRPC access.
+Public Express `/api/status/pages/:key/{feed.rss,feed.atom,status.json,badge.svg,history.json}`
+serves published page projections only (history also requires explicit enablement),
+with CORS `*`, 240 requests per IP per minute, and uniform unavailable 404s.
+Subscription POSTs at `/api/status/pages/:key/{subscribe,subscription}` share that
+budget, validate the configured/verified page origin, accept at most 16 KB of
+uncompressed JSON, and redeem capabilities only from the body. Email links use
+`PUBLIC_WEB_URL`; subscriber addresses/tokens remain encrypted and never public.
+These routes precede general CORS/auth/JSON parsing and add no public tRPC access.
 
 ### 2.3 Zod on every tRPC input
 No raw SQL, no `as any` on input, no unvalidated payload.

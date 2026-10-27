@@ -6,7 +6,7 @@ import { uptimeEmailProvider, uptimeStatusPage } from "./uptime-monitor";
 import { uptimeStatusAnnouncement } from "./status-communication";
 const id = z.string().min(1).max(64);
 export const apiStatusSubscriptionConfig = z.object({ statusPageId: id, enabled: z.boolean(), providerId: id.nullable(), messagesPerMinute: z.number().int().min(1).max(60), confirmChange: z.boolean() }).strict();
-export const apiStatusSubscriptionRequest = z.object({ email: z.string().trim().email().max(254).transform(value => value.toLowerCase()), componentIds: z.array(id).max(100).refine(values => new Set(values).size === values.length), language: z.enum(["en", "ar", "fr", "de", "es"]).default("en") }).strict();
+export const apiStatusSubscriptionRequest = z.object({ email: z.string().trim().email().max(254).transform(value => value.toLowerCase()), componentIds: z.array(id).refine(values => new Set(values).size === values.length), language: z.enum(["en", "ar", "fr", "de", "es"]).default("en") }).strict();
 export const apiStatusSubscriptionRedeem = z.object({ action: z.enum(["confirm", "unsubscribe"]), token: z.string().regex(/^[A-Za-z0-9_-]{43}$/) }).strict();
 export const uptimeStatusSubscriptionConfig = pgTable("uptime_status_subscription_config", {
   statusPageId: text("statusPageId").primaryKey().references(() => uptimeStatusPage.statusPageId, { onDelete: "cascade" }),

@@ -51,10 +51,15 @@ typecheck: ## Typecheck server/db in containers and web during Docker build
 	$(COMPOSE) exec server sh -lc 'cd packages/db && ./node_modules/.bin/tsc --noEmit'
 	$(COMPOSE) build web
 
-lint: ## Run lint-equivalent checks in containers
+lint: eslint-check ## Run ESLint policy and typechecks in rebuilt containers
 	$(COMPOSE) exec server sh -lc 'cd apps/server && ./node_modules/.bin/tsc --noEmit'
 	$(COMPOSE) exec server sh -lc 'cd packages/db && ./node_modules/.bin/tsc --noEmit'
 	$(COMPOSE) build web
+
+.PHONY: eslint-check
+eslint-check: ## Enforce shared controls and themed-dialog policy
+	$(COMPOSE) exec server ./node_modules/.bin/eslint . --max-warnings 0
+	$(COMPOSE) exec server node --test scripts/check-eslint.test.mjs
 
 test: ## Run server/db tests against an isolated DB and web tests during Docker build
 	$(COMPOSE) exec postgres sh -lc 'dropdb --if-exists --force -U "$$POSTGRES_USER" "$${POSTGRES_DB}_test" && createdb -U "$$POSTGRES_USER" "$${POSTGRES_DB}_test"'

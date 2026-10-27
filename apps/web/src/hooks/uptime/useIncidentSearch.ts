@@ -23,7 +23,8 @@ export function useIncidentSearch(
 	const trimmed = query.trim();
 	return useQuery({
 		queryKey: uptimeKeys.incidents.search(trimmed),
-		queryFn: () => UptimeService.searchIncidents(trimmed),
+		// The signal lets the query cancel the request when the term changes or the palette closes.
+		queryFn: ({ signal }) => UptimeService.searchIncidents(trimmed, signal),
 		enabled: options?.enabled !== false && trimmed.length > 0,
 		staleTime: 1000 * 30, // 30 seconds
 	});

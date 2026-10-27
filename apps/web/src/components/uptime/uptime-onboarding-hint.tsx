@@ -48,7 +48,7 @@ export function UptimeOnboardingHint({
 				<Activity className="h-5 w-5 text-primary shrink-0 mt-0.5 sm:mt-0" />
 				<div>
 					<p className="text-sm font-medium">
-						{t("onboarding.title", "New: Uptime Monitoring")}
+						{t("onboarding.title", "New: uptime monitoring")}
 					</p>
 					<p className="text-sm text-muted-foreground">
 						{t(
@@ -64,12 +64,13 @@ export function UptimeOnboardingHint({
 					onClick={onGetStarted}
 					className="h-[44px] min-w-[44px]"
 				>
-					{t("onboarding.getStarted", "Get Started")}
+					{t("onboarding.getStarted", "Get started")}
 				</Button>
 				<Button
 					variant="ghost"
 					size="sm"
 					onClick={handleDismiss}
+ aria-label={t("onboarding.dismiss", "Dismiss")}
 					className="h-[44px] min-w-[44px]"
 				>
 					<X className="h-4 w-4 sm:me-1" />

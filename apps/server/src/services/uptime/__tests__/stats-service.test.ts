@@ -308,14 +308,14 @@ describe("getMonitorStats", () => {
 		expect(stats.uptimePercentage).toBeCloseTo(66.67, 1);
 	});
 
-	it("returns nulls and 100% when there are no checks", async () => {
+	it("keeps check success and timings unknown when there are no checks", async () => {
 		const stats = await getMonitorStats(monitorId, userId);
 		expect(stats.totalChecks).toBe(0);
 		expect(stats.avgResponseTime).toBeNull();
 		expect(stats.minResponseTime).toBeNull();
 		expect(stats.maxResponseTime).toBeNull();
 		expect(stats.p95ResponseTime).toBeNull();
-		expect(stats.uptimePercentage).toBe(100);
+		expect(stats.uptimePercentage).toBeNull();
 	});
 
 	it("distinguishes degraded checks from failures while counting both in check success", async () => {

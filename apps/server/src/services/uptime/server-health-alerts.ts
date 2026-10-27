@@ -1,8 +1,9 @@
+import { insertObservedCheck } from "./reliability-storage";
+import { appendIncidentTransition } from "./incident-timeline";
 import { and, asc, eq, lte } from "drizzle-orm";
-import { db, uptimeMonitor, uptimeServer, uptimeIncident, uptimeStatusChange, uptimeCheckLog, type DbTransaction, type ServerCondition, type ServerSample } from "@pulsy/db";
+import { db, uptimeMonitor, uptimeServer, uptimeIncident, uptimeStatusChange, type DbTransaction, type ServerCondition, type ServerSample } from "@pulsy/db";
 import { scheduledJobs, scheduleJob } from "node-schedule";
-import { dispatchNotifications } from "./notification-service";
-import { safeErrorSummary } from "../../lib/safe-error";
+import { deferSuppressedAlert } from "./maintenance-service";
 type Monitor = typeof uptimeMonitor.$inferSelect;
 type Configuration = typeof uptimeServer.$inferSelect;
 const scope = (monitor: Pick<Monitor, "uptimeMonitorId" | "userId">) => and(eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId), eq(uptimeMonitor.userId, monitor.userId));
@@ -31,7 +32,7 @@ const reasonFor = (config: Configuration, status: "up" | "down" | "degraded", co
 
 async function recordHealth(tx: DbTransaction, monitor: Monitor, config: Configuration, status: "up" | "down" | "degraded", reason: string, now: Date) {
   const stamp = now.toISOString();
-  await tx.insert(uptimeCheckLog).values({ uptimeMonitorId: monitor.uptimeMonitorId, status, errorMessage: status === "up" ? null : reason, createdAt: stamp, responseTime: null, httpStatus: null });
+  await insertObservedCheck(tx, monitor, { status, errorMessage: status === "up" ? null : reason, createdAt: stamp, responseTime: null, httpStatus: null });
   await tx.update(uptimeMonitor).set({ status, lastCheckedAt: stamp, nextCheckAt: config.nextDeadline, responseTime: null, httpStatus: null }).where(scope(monitor));
   if (monitor.status === status) return;
   const [transition] = await tx.insert(uptimeStatusChange).values({ uptimeMonitorId: monitor.uptimeMonitorId, statusBefore: monitor.status, statusAfter: status, reason, createdAt: stamp }).returning();
@@ -42,15 +43,8 @@ async function recordHealth(tx: DbTransaction, monitor: Monitor, config: Configu
   const [ongoing] = await tx.select({ incident: uptimeIncident }).from(uptimeIncident).innerJoin(uptimeMonitor, eq(uptimeMonitor.uptimeMonitorId, uptimeIncident.uptimeMonitorId)).where(and(scope(monitor), eq(uptimeIncident.status, "ongoing"))).limit(1);
   if (bad && !ongoing) await tx.insert(uptimeIncident).values({ uptimeMonitorId: monitor.uptimeMonitorId, cause: reason, startedAt: stamp, severity: "critical" });
   if (!bad && ongoing) await tx.update(uptimeIncident).set({ status: "resolved", resolvedAt: stamp, durationSeconds: Math.max(0, Math.round((now.getTime() - Date.parse(ongoing.incident.startedAt)) / 1000)) }).where(and(eq(uptimeIncident.incidentId, ongoing.incident.incidentId), eq(uptimeIncident.uptimeMonitorId, monitor.uptimeMonitorId)));
-  if (bad || outageId) return { monitor: { ...monitor, status, notificationOutageId: outageId }, transition };
-}
-
-/** Dispatch committed transitions without holding ingestion or deadline scans for retries. */
-export function dispatchServerHealth(delivery: Awaited<ReturnType<typeof recordHealth>>): void {
-  if (!delivery) return;
-  void dispatchNotifications(delivery.monitor, delivery.transition).catch(error => {
-    console.error(`[uptime] Server notification failed: ${safeErrorSummary(error)}`);
-  });
+  await appendIncidentTransition(monitor, transition, tx);
+  if (bad || outageId) await deferSuppressedAlert({ ...monitor, status, notificationOutageId: outageId }, transition, tx);
 }
 
 /** Called in the ingestion transaction, under parent/configuration locks. */
@@ -70,7 +64,6 @@ export async function scanServerDeadlines(now = new Date()): Promise<number> {
     .orderBy(asc(uptimeServer.nextDeadline), asc(uptimeServer.monitorId)).limit(50);
   let processed = 0;
   for (const target of candidates) {
-    let delivery: Awaited<ReturnType<typeof recordHealth>>;
     const changed = await db.transaction(async tx => {
       const [monitor] = await tx.select().from(uptimeMonitor).where(and(eq(uptimeMonitor.uptimeMonitorId, target.monitorId), eq(uptimeMonitor.userId, target.userId), eq(uptimeMonitor.monitorType, "server"), eq(uptimeMonitor.active, true))).for("update", { skipLocked: true });
       if (!monitor) return false;
@@ -84,11 +77,10 @@ export async function scanServerDeadlines(now = new Date()): Promise<number> {
       // Continue bounded outage observations at the reporting cadence; no duplicate transitions.
       const nextDeadline = new Date(now.getTime() + interval * 1000).toISOString();
       await tx.update(uptimeServer).set({ nextDeadline, missingHealthy: 0, conditions: config.conditions.map(condition => ({ ...condition, healthy: 0, violating: 0 })) }).where(configScope(monitor));
-      delivery = await recordHealth(tx, monitor, { ...config, nextDeadline }, "down", reasonFor(config, "down", config.conditions), now);
+      await recordHealth(tx, monitor, { ...config, nextDeadline }, "down", reasonFor(config, "down", config.conditions), now);
       return true;
     });
     if (changed) processed++;
-    dispatchServerHealth(delivery);
   }
   return processed;
 }

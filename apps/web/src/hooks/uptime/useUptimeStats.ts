@@ -7,7 +7,7 @@
  * @module hooks/uptime/useUptimeStats
  */
 
-import { useQuery } from "@tanstack/react-query";
+import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { UptimeService } from "@/services/uptime/uptimeService";
 import { uptimeKeys } from "./queryKeys";
 
@@ -20,6 +20,7 @@ export function useUptimeDashboardSummary(options?: { enabled?: boolean }) {
     queryFn: () => UptimeService.getDashboardSummary(),
     enabled: options?.enabled !== false,
     staleTime: 1000 * 30, // 30 seconds
+    retry: false,
     refetchInterval: 1000 * 60, // Refetch every minute
   });
 }
@@ -32,14 +33,27 @@ export function useUptimeDashboardSummary(options?: { enabled?: boolean }) {
  */
 export function useUptimeMonitorStats(
   monitorId: string,
-  days?: number,
-  options?: { enabled?: boolean }
+  days = 30,
+  options?: { enabled?: boolean; refetchInterval?: number }
 ) {
   return useQuery({
-    queryKey: uptimeKeys.checkLogs.stats(monitorId),
+    queryKey: uptimeKeys.checkLogs.stats(monitorId, days),
     queryFn: () => UptimeService.getCheckLogStats(monitorId, days),
     enabled: options?.enabled !== false && Boolean(monitorId),
+    retry: false,
     staleTime: 1000 * 60, // 1 minute
+    refetchInterval: options?.refetchInterval ?? 30_000,
+  });
+}
+
+/** Daily observed-check coverage, isolated by monitor and requested window. */
+export function useUptimeDailyUptime(monitorId: string, days = 90) {
+  return useQuery({
+    queryKey: uptimeKeys.checkLogs.daily(monitorId, days),
+    queryFn: () => UptimeService.getDailyUptime(monitorId, days),
+    enabled: Boolean(monitorId),
+    staleTime: 1000 * 60,
+    retry: false,
   });
 }
 
@@ -61,11 +75,12 @@ export function useUptimeCheckLogs(
   const { limit, offset, enabled, refetchInterval } = options ?? {};
 
   return useQuery({
-    queryKey: uptimeKeys.checkLogs.list(monitorId),
+    queryKey: uptimeKeys.checkLogs.list(monitorId, { limit, offset }),
+    placeholderData: keepPreviousData,
     queryFn: () => UptimeService.listCheckLogs(monitorId, { limit, offset }),
     enabled: enabled !== false && Boolean(monitorId),
     staleTime: 1000 * 15, // 15 seconds
-    refetchInterval,
+    refetchInterval: refetchInterval ?? 30_000,
   });
 }
 
@@ -93,6 +108,19 @@ export function useUptimeNotificationLogs(
     enabled: enabled !== false,
     staleTime: 1000 * 30, // 30 seconds
     placeholderData: (prev) => prev,
+  });
+}
+
+/**
+ * Hook for per-channel delivery health across the account. Powers the
+ * dashboard banner that makes a silently-failing channel visible.
+ */
+export function useUptimeChannelHealth(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: uptimeKeys.channelHealth.list(),
+    queryFn: () => UptimeService.listChannelHealth(),
+    enabled: options?.enabled !== false,
+    staleTime: 1000 * 60, // 1 minute
   });
 }
 
@@ -130,7 +158,12 @@ export function useUptimeIncidents(
     queryKey: uptimeKeys.incidents.list(monitorId),
     queryFn: () => UptimeService.listIncidents(monitorId, limit),
     enabled: options?.enabled !== false && Boolean(monitorId),
-    staleTime: 1000 * 30, // 30 seconds
+    // Checks completed by a worker or another client do not invalidate this
+    // browser's cache. Keep the mounted tab current and revalidate on return.
+    staleTime: 0,
+    refetchOnMount: "always",
+    refetchOnWindowFocus: true,
+    refetchInterval: 30_000,
   });
 }
 

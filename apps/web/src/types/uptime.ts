@@ -1,3 +1,37 @@
+import type { inferRouterOutputs } from "@trpc/server";
+import type { AppRouter } from "@pulsy/server/trpc";
+import type { NetworkConfiguration } from "@pulsy/db/validation-network";
+export interface LatencyPolicy {
+  thresholdMs: number | null;
+  slowCount: number;
+  recoveryThresholdMs: number | null;
+  recoveryCount: number;
+  importance: "critical" | "warning" | "informational";
+  cooldownSeconds: number;
+}
+
+export type HttpAssertion =
+  | { type: "body_contains" | "body_not_contains"; value: string }
+  | { type: "header_equals" | "header_contains"; name: string; value: string }
+  | { type: "json"; path: string; op: "exists" | "equals" | "not_equals" | "lt" | "lte" | "gt" | "gte"; value?: string | number | boolean | null | Array<string | number | boolean | null> };
+export interface HttpRequestConfiguration {
+  headers: Array<{ name: string; value: string }>;
+  body?: string;
+  contentType?: string;
+  auth?: { type: "basic"; username: string; password: string } | { type: "bearer"; token: string };
+}
+export interface HttpConfigurationPatch {
+  latencyPolicy?: LatencyPolicy | null;
+  httpAssertions?: HttpAssertion[];
+  redirectPolicy?: "follow" | "manual" | "error";
+  requestConfig?: HttpRequestConfiguration | null;
+}
+export interface HttpConfigurationResult {
+  latencySample?: boolean;
+  status: "up" | "down" | "degraded"; httpStatus: number | null; responseTime: number | null;
+  errorMessage?: string; assertionOutcomes?: Array<{ index: number; passed: boolean; reason: string }>;
+}
+
 /**
  * Uptime Monitor Types
  *
@@ -31,11 +65,25 @@ export type UptimeNotificationChannelType =
  * Uptime monitor entity
  */
 export interface UptimeMonitor {
+  heartbeat?: { lastReceivedAt: string | null; expectedAt: string; deadlineAt: string } | null;
+  networkConfig?: NetworkConfiguration | null;
+  referencedChannels?: Array<{ id: string; type: UptimeNotificationChannelType }>;
+  latencyPolicy?: LatencyPolicy | null;
+  httpAssertions?: HttpAssertion[];
+  redirectPolicy?: "follow" | "manual" | "error";
+  requestConfigured?: boolean;
+  alertSuppression?: { ids: string[]; until: string; maintenance: boolean } | null;
+  uptimeChecks?: number;
+  overrideChannelCount?: number;
+  statusPageCount?: number;
+  monitorType?: "http" | "heartbeat" | "dns" | "tcp" | "server";
   uptimeMonitorId: string;
   name: string;
   url: string;
   method: UptimeMonitorMethod;
   expectedStatus: number;
+  expectedStatuses?: string | null;
+  tlsMonitoringEnabled?: boolean;
   timeout: number;
   interval: number;
   active: boolean;
@@ -96,7 +144,7 @@ export interface PaginatedUptimeCheckLogs {
 /**
  * Which transition triggered a notification send.
  */
-export type UptimeNotificationEvent = "down" | "recovery" | "tls_expiry";
+export type UptimeNotificationEvent = "down" | "degraded" | "recovery" | "tls_expiry";
 
 /**
  * Outcome of a notification delivery attempt chain (after retries).
@@ -166,6 +214,7 @@ export interface UptimeNotificationChannel {
   /** Header names are safe to expose; their values never leave the server. */
   webhookHeaderNames: string[];
   notifyOnDown: boolean;
+  notifyOnDegraded?: boolean;
   notifyOnRecovery: boolean;
   notifyOnTlsExpiry: boolean;
   tlsExpiryThresholdDays: number;
@@ -173,6 +222,21 @@ export interface UptimeNotificationChannel {
   /** Populated when requested via relations */
   emailProvider?: UptimeEmailProvider;
 }
+
+export interface UptimeChannelHealth {
+  channelId: string;
+  channelType: UptimeNotificationChannelType;
+  uptimeMonitorId: string | null;
+  /** Audit target of the most recent attempt (masked; never a secret). */
+  target: string | null;
+  consecutiveFailures: number;
+  lastError: string | null;
+  lastAttemptAt: string | null;
+  lastSuccessAt: string | null;
+}
+
+/** Consecutive failures before a channel is shown as broken. */
+export const CHANNEL_UNHEALTHY_THRESHOLD = 3;
 
 /**
  * Incident created when a monitor goes down
@@ -185,6 +249,8 @@ export interface UptimeIncident {
   resolvedAt: string | null;
   durationSeconds: number | null;
   cause: string | null;
+  expectedAt?: string | null;
+  notifiedAt?: string | null;
 }
 
 /**
@@ -200,17 +266,22 @@ export interface IncidentSearchResult {
   resolvedAt: string | null;
   durationSeconds: number | null;
   cause: string | null;
+  expectedAt?: string | null;
+  notifiedAt?: string | null;
 }
 
 // ============================================
 // API Input Types
 // ============================================
 
-export interface CreateUptimeMonitorInput {
+export interface CreateUptimeMonitorInput extends HttpConfigurationPatch {
+  channelIds?: string[];
   name: string;
   url: string;
   method?: UptimeMonitorMethod;
   expectedStatus?: number;
+  expectedStatuses?: string | null;
+  tlsMonitoringEnabled?: boolean;
   timeout?: number;
   interval?: number;
   failureThreshold?: number;
@@ -218,12 +289,14 @@ export interface CreateUptimeMonitorInput {
   tags?: string[];
 }
 
-export interface UpdateUptimeMonitorInput {
+export interface UpdateUptimeMonitorInput extends HttpConfigurationPatch {
   uptimeMonitorId: string;
   name?: string;
   url?: string;
   method?: UptimeMonitorMethod;
   expectedStatus?: number;
+  expectedStatuses?: string | null;
+  tlsMonitoringEnabled?: boolean;
   timeout?: number;
   interval?: number;
   failureThreshold?: number;
@@ -241,10 +314,17 @@ export interface UpdateUptimeMonitorInput {
 export interface BulkUpdateUptimeMonitorPatch {
   method?: UptimeMonitorMethod;
   expectedStatus?: number;
+  expectedStatuses?: string | null;
+  tlsMonitoringEnabled?: boolean;
   timeout?: number;
   interval?: number;
   failureThreshold?: number;
   tags?: string[];
+}
+
+export interface BulkUpdateUptimeMonitorsResult {
+  updated: UptimeMonitor[];
+  results: Array<{ id: string; status: "updated" | "rejected"; reason?: string }>;
 }
 
 export interface BulkUpdateUptimeMonitorsInput {
@@ -257,9 +337,18 @@ export interface BulkUpdateUptimeMonitorsInput {
 // ============================================
 
 export interface PublicMonitorStatus {
+  componentId?: string | null;
+  description?: string | null;
+  group?: string | null;
+  maintenance?: boolean;
+  monitorType?: "http" | "heartbeat" | "dns" | "tcp" | "server";
+  networkConfig?: NetworkConfiguration | null;
   name: string;
   status: UptimeMonitorStatus;
+  /** Rolling 30-day availability: (up + degraded) / recorded checks. */
   uptimePercentage: number | null;
+  /** Rolling 30-day share of degraded (slow but correct) checks. */
+  slowPercentage?: number | null;
   responseTime: number | null;
   lastCheckedAt: string | null;
 }
@@ -273,13 +362,18 @@ export interface PublicIncidentSummary {
 }
 
 export interface PublicStatusPage {
+  asOf?: string;
+  publicKey?: string;
+  emailSubscriptionsEnabled?: boolean;
+  historyEnabled?: boolean;
+  announcements?: import("./status-communication").PublicAnnouncement[];
   // Page display metadata — null on the legacy per-user surface when the user
   // has no `default` page.
   title: string | null;
   description: string | null;
   logoUrl: string | null;
   monitors: PublicMonitorStatus[];
-  overallStatus: "operational" | "degraded" | "outage";
+  overallStatus: import("@pulsy/db/status-math").OverallStatus;
   recentIncidents: PublicIncidentSummary[];
 }
 
@@ -288,6 +382,7 @@ export interface PublicStatusPage {
 // ============================================
 
 export interface StatusPage {
+  componentCount?: number;
   statusPageId: string;
   userId: string;
   slug: string;
@@ -312,6 +407,8 @@ export interface StatusPageWithMonitors extends StatusPage {
 }
 
 export interface CreateStatusPageInput {
+  confirmEmptyPublication?: boolean;
+  uptimeMonitorIds?: string[];
   slug: string;
   title: string;
   description?: string | null;
@@ -320,6 +417,8 @@ export interface CreateStatusPageInput {
 }
 
 export interface UpdateStatusPageInput {
+  confirmEmptyPublication?: boolean;
+  expected?: Pick<StatusPage, "title" | "slug" | "description" | "isPublished">;
   statusPageId: string;
   slug?: string;
   title?: string;
@@ -374,6 +473,7 @@ export interface UptimeShareLink {
   token: string;
   createdAt: string;
   expiresAt: string;
+  showSharerName?: boolean;
   monitorCount: number;
   monitorNames: string[];
 }
@@ -381,6 +481,7 @@ export interface UptimeShareLink {
 export interface CreateUptimeShareLinkInput {
   uptimeMonitorIds: string[];
   expiresInDays?: 7 | 30 | 90;
+  showSharerName?: boolean;
 }
 
 /** The raw share-link row returned by share.create (owner-only). */
@@ -399,6 +500,8 @@ export interface SharedMonitorConfig {
   url: string;
   method: UptimeMonitorMethod;
   expectedStatus: number;
+  expectedStatuses?: string | null;
+  tlsMonitoringEnabled?: boolean;
   timeout: number;
   interval: number;
   failureThreshold: number;
@@ -444,6 +547,7 @@ export interface CreateUptimeNotificationChannelInput {
   webhookUrl?: string;
   webhookHeaders?: Record<string, string>;
   notifyOnDown?: boolean;
+  notifyOnDegraded?: boolean;
   notifyOnRecovery?: boolean;
   notifyOnTlsExpiry?: boolean;
   tlsExpiryThresholdDays?: number;
@@ -463,6 +567,7 @@ export interface UpdateUptimeNotificationChannelInput {
   webhookUrl?: string | null;
   webhookHeaders?: Record<string, string> | null;
   notifyOnDown?: boolean;
+  notifyOnDegraded?: boolean;
   notifyOnRecovery?: boolean;
   notifyOnTlsExpiry?: boolean;
   tlsExpiryThresholdDays?: number;
@@ -481,53 +586,53 @@ export interface UptimeDashboardSummary {
   monitorsDown: number;
   monitorsDegraded: number;
   monitorsPending: number;
-  avgUptime: number;
+  monitorsPaused: number;
+  avgUptimePercentage: number | null;
+  uptimeMonitorsWithData: number;
+  activeMonitors?: number;
+  avgResponseTime?: number | null;
 }
 
 /**
  * Statistics for a single monitor over a time period
  */
-export interface UptimeMonitorStats {
-  totalChecks: number;
-  upChecks: number;
-  downChecks: number;
-  incidentCount: number;
-  days: number;
-  avgResponseTime: number;
-  minResponseTime: number;
-  maxResponseTime: number;
-  uptimePercentage: number;
-}
+export type UptimeMonitorStats = inferRouterOutputs<AppRouter>["uptimeMonitor"]["checkLog"]["stats"];
 
 /**
  * Data point for the uptime bar chart visualization
  */
-export interface UptimeBarDataPoint {
-  date: string;
-  status: "up" | "down" | "degraded" | "partial";
-  uptimePercent: number;
-}
+export type UptimeBarDataPoint = UptimeDailyDataPoint;
 
 // ============================================
-// SLA reports (tier-gated)
+// SLA reports
 // ============================================
 
 /** Aggregate response/uptime stats inside an SLA report window. */
 export interface SlaReportStats {
   totalChecks: number;
   successfulChecks: number;
+  degradedChecks: number;
   failedChecks: number;
   avgResponseTime: number | null;
   minResponseTime: number | null;
   maxResponseTime: number | null;
   p95ResponseTime: number | null;
-  uptimePercentage: number;
+  uptimePercentage: number | null;
 }
 
 export interface SlaReportIncidentSummary {
   count: number;
   totalDowntimeSeconds: number;
   longestIncidentSeconds: number;
+}
+
+/** One incident overlapping a report window; downtime is clipped to the window. */
+export interface SlaReportIncident {
+  incidentId: string;
+  status: string;
+  startedAt: string;
+  resolvedAt: string | null;
+  downtimeSeconds: number;
 }
 
 export interface SlaReportDailyUptime {
@@ -546,6 +651,8 @@ export interface SlaReport {
   windowDays: number;
   periodLabel: string;
   generatedAt: string;
+  windowTimezone?: "UTC";
+  incidentList?: SlaReportIncident[];
   stats: SlaReportStats;
   incidents: SlaReportIncidentSummary;
   dailyUptime: SlaReportDailyUptime[];
@@ -572,3 +679,6 @@ export interface UpsertSlaReportSubscriptionInput {
   emailProviderId: string;
   active?: boolean;
 }
+
+/** The daily endpoint includes explicit unknown days and observed check counts. */
+export type UptimeDailyDataPoint = inferRouterOutputs<AppRouter>["uptimeMonitor"]["checkLog"]["daily"][number];

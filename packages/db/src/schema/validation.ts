@@ -388,7 +388,7 @@ const statusPageLogoUrlSchema = z
 
 export const apiCreateUptimeStatusPage = z.object({
 	confirmEmptyPublication: z.boolean().optional(),
-	uptimeMonitorIds: z.array(z.string().min(1)).max(100).optional(),
+	uptimeMonitorIds: z.array(z.string().min(1)).optional(),
 	slug: statusPageSlugSchema,
 	title: z.string().trim().min(1).max(255),
 	description: z.string().max(1000).nullable().optional(),
@@ -419,7 +419,7 @@ export const apiDeleteUptimeStatusPage = z.object({
 export const apiSetStatusPageMonitors = z.object({
 	statusPageId: z.string().min(1),
 	revision: z.string().length(64).optional(),
-	uptimeMonitorIds: z.array(z.string().min(1)).max(100),
+	uptimeMonitorIds: z.array(z.string().min(1)),
 }).strict();
 
 export const apiAttachCustomDomain = z.object({

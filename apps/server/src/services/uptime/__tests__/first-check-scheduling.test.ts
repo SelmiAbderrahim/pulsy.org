@@ -76,7 +76,7 @@ describe("leader first-check scheduling", () => {
 		const app = express();
 		app.use(express.json());
 		app.use("/api/v1", createV1Router({ resolve: async () => ({
-			ok: true, user: { id: owner.id }, apiKeyId: "first-check-fixture",
+			ok: true, user: { id: owner.id }, apiKeyId: "first-check-fixture", scope: "full",
 		}) }));
 		const server = app.listen(0);
 		await new Promise<void>((resolve) => server.once("listening", resolve));

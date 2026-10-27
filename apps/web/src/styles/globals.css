@@ -1,15 +1,15 @@
 @import "tailwindcss";
 @import "tw-animate-css";
-
-/* Tailwind 4 CSS-first setup (tailwind.config.ts is gone).
-   - `dark:` variant follows the `.dark` class on <html> (shadcn convention).
-   - Semantic color tokens map to the HSL custom properties below via
-     `@theme inline`, so `bg-background`, `text-muted-foreground`, … keep
-     working exactly as under Tailwind 3. */
-
 @custom-variant dark (&:is(.dark *));
 
+@font-face { font-family: Inter; font-style: normal; font-weight: 400; font-display: swap; src: url('/fonts/inter-latin-400-normal.woff2') format('woff2'); }
+@font-face { font-family: Inter; font-style: normal; font-weight: 500; font-display: swap; src: url('/fonts/inter-latin-500-normal.woff2') format('woff2'); }
+
 @theme inline {
+	--breakpoint-app: 1200px;
+	--breakpoint-collection: 900px;
+	--radius-xl: calc(var(--radius) + 4px);
+
 	--color-border: hsl(var(--border));
 	--color-input: hsl(var(--input));
 	--color-ring: hsl(var(--ring));
@@ -59,70 +59,187 @@
 	}
 }
 
-:root {
-	--background: 0 0% 100%;
-	--foreground: 222.2 84% 4.9%;
-	--card: 0 0% 100%;
-	--card-foreground: 222.2 84% 4.9%;
-	--popover: 0 0% 100%;
-	--popover-foreground: 222.2 84% 4.9%;
-	--primary: 221.2 83.2% 53.3%;
-	--primary-foreground: 210 40% 98%;
-	--secondary: 210 40% 96.1%;
-	--secondary-foreground: 222.2 47.4% 11.2%;
-	--muted: 210 40% 96.1%;
-	--muted-foreground: 215.4 16.3% 46.9%;
-	--accent: 210 40% 96.1%;
-	--accent-foreground: 222.2 47.4% 11.2%;
-	--destructive: 0 84.2% 60.2%;
-	--destructive-foreground: 210 40% 98%;
-	--success: 142.1 76.2% 36.3%;
-	--success-foreground: 210 40% 98%;
-	--warning: 38 92% 50%;
-	--warning-foreground: 222.2 47.4% 11.2%;
-	--border: 214.3 31.8% 91.4%;
-	--input: 214.3 31.8% 91.4%;
-	--ring: 221.2 83.2% 53.3%;
-	--radius: 0.5rem;
-}
+@layer base {
+	:root {
+		--background: 220.0 23.1% 97.5%;
+		--foreground: 220.9 39.3% 11.0%;
+		--card: 0.0 0.0% 100.0%;
+		--card-foreground: 220.9 39.3% 11.0%;
+		--popover: 0.0 0.0% 100.0%;
+		--popover-foreground: 220.9 39.3% 11.0%;
+		--primary: 227.2 79.5% 56.1%;
+		--primary-foreground: 0.0 0.0% 100.0%;
+		--secondary: 214.3 33.3% 95.9%;
+		--secondary-foreground: 220.9 39.3% 11.0%;
+		--muted: 214.3 33.3% 95.9%;
+		--muted-foreground: 215.3 19.3% 34.5%;
+		--accent: 216.9 39.4% 93.5%;
+		--accent-foreground: 220.9 39.3% 11.0%;
+		--destructive: 0.0 67.0% 43.9%;
+		--destructive-foreground: 0.0 0.0% 100.0%;
+		--success: 151.0 71.0% 25.7%;
+		--success-foreground: 0.0 0.0% 100.0%;
+		--warning: 33.2 100.0% 29.4%;
+		--warning-foreground: 0.0 0.0% 100.0%;
+		--border: 217.5 25.8% 87.8%;
+		--input: 215.6 14.2% 55.7%;
+		--ring: 227.2 79.5% 56.1%;
+		--radius: 0.75rem;
+		--control-radius: 0.5rem;
+		--control-height: 2.75rem;
+		--app-width: 90rem;
+		--content-width: var(--app-width);
+		--management-drawer-width: 48rem;
+		--settings-width: 52rem;
+		--status-width: 60rem;
+		--prose-width: 46rem;
+		--public-width: 75rem;
+		--auth-width: 27.5rem;
+		--sidebar-width: 14rem;
+		--header-height: 3.5rem;
+		--page-gutter: 1rem;
+		--dialog-simple: 30rem;
+		--dialog-standard: 42rem;
+		--dialog-large: 58rem;
+		--field-gap: 0.5rem;
+		--field-row-gap: 1.5rem;
+		--field-column-gap: 1rem;
+		--bulk-toolbar-height: 0px;
+	}
 
-.dark {
-	--background: 222.2 84% 4.9%;
-	--foreground: 210 40% 98%;
-	--card: 222.2 84% 4.9%;
-	--card-foreground: 210 40% 98%;
-	--popover: 222.2 84% 4.9%;
-	--popover-foreground: 210 40% 98%;
-	--primary: 217.2 91.2% 59.8%;
-	--primary-foreground: 222.2 47.4% 11.2%;
-	--secondary: 217.2 32.6% 17.5%;
-	--secondary-foreground: 210 40% 98%;
-	--muted: 217.2 32.6% 17.5%;
-	--muted-foreground: 215 20.2% 65.1%;
-	--accent: 217.2 32.6% 17.5%;
-	--accent-foreground: 210 40% 98%;
-	--destructive: 0 62.8% 30.6%;
-	--destructive-foreground: 210 40% 98%;
-	--success: 142.1 70.6% 45.3%;
-	--success-foreground: 222.2 47.4% 11.2%;
-	--warning: 47.9 95.8% 53.1%;
-	--warning-foreground: 222.2 47.4% 11.2%;
-	--border: 217.2 32.6% 17.5%;
-	--input: 217.2 32.6% 17.5%;
-	--ring: 224.3 76.3% 48%;
+	.dark {
+		--background: 216.9 37.1% 6.9%;
+		--foreground: 210.0 40.0% 96.1%;
+		--card: 216.0 35.7% 11.0%;
+		--card-foreground: 210.0 40.0% 96.1%;
+		--popover: 216.4 36.8% 14.9%;
+		--popover-foreground: 210.0 40.0% 96.1%;
+		--primary: 226.2 100.0% 77.1%;
+		--primary-foreground: 216.9 37.1% 6.9%;
+		--secondary: 216.4 36.8% 14.9%;
+		--secondary-foreground: 210.0 40.0% 96.1%;
+		--muted: 216.4 36.8% 14.9%;
+		--muted-foreground: 214.8 22.0% 72.4%;
+		--accent: 215.0 34.0% 20.8%;
+		--accent-foreground: 210.0 40.0% 96.1%;
+		--destructive: 0.0 100.0% 78.6%;
+		--destructive-foreground: 0.0 71.9% 11.2%;
+		--success: 149.4 57.4% 63.1%;
+		--success-foreground: 148.8 53.2% 9.2%;
+		--warning: 39.4 88.8% 68.4%;
+		--warning-foreground: 40.0 100.0% 9.4%;
+		--border: 215.3 25.0% 26.7%;
+		--input: 212.7 17.5% 49.4%;
+		--ring: 226.2 100.0% 77.1%;
+	}
 }
 
 @layer base {
-	/* Tailwind 4 defaults borders to currentColor; restore the v3-era
-	   semantic default so every border stays `border-border`. */
 	* {
 		@apply border-border;
 	}
 
 	body {
 		@apply bg-background text-foreground;
-		font-feature-settings:
-			"rlig" 1,
-			"calt" 1;
+		font-family: Inter, ui-sans-serif, system-ui, sans-serif;
+		font-feature-settings: "rlig" 1, "calt" 1;
 	}
+}
+
+@layer base {
+  @media (min-width: 768px) { :root { --page-gutter: 1.5rem; } }
+  @media (min-width: 1200px) { :root { --page-gutter: 2rem; } }
+  :focus-visible { outline: 2px solid hsl(var(--ring)); outline-offset: 2px; }
+  input, select, textarea { min-width: 0; }
+  input[aria-invalid="true"], select[aria-invalid="true"], textarea[aria-invalid="true"] { border-color: hsl(var(--destructive)); }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; scroll-behavior: auto !important; }
+  }
+}
+@layer components {
+  .app-content { width: 100%; min-width: 0; max-width: var(--content-width); margin-inline: auto; padding: 1.5rem var(--page-gutter); }
+  .app-page, .app-page-wide { width: 100%; min-width: 0; max-width: var(--content-width); }
+  .app-title { font-size: 1.5rem; line-height: 2rem; font-weight: 600; overflow-wrap: anywhere; }
+  .form-field { display: grid; min-width: 0; align-content: start; gap: var(--field-gap); }
+  .form-grid { display: grid; min-width: 0; align-items: start; gap: var(--field-row-gap) var(--field-column-gap); }
+  form:has([data-sticky-form-footer]) { padding-block-end: calc(var(--sticky-footer-height, 6rem) + 1rem); }
+  form:has([data-sticky-form-footer]) :is(input, textarea, select, button, [tabindex]) { scroll-margin-block-end: calc(var(--sticky-footer-height, 6rem) + 1rem); }
+  @media (min-width: 768px) { .app-title { font-size: 1.75rem; line-height: 2.25rem; } }
+}
+@layer utilities {
+  @media (max-width: 767px) { input:not([type=checkbox]):not([type=radio]), select[class], textarea[class], [role=combobox] { font-size: 1rem; } }
+}
+
+@layer components {
+  /* Only the body scrolls. Hidden overflow also allows focus/scrollIntoView to
+     scroll this outer panel and move its close control above the viewport. */
+  .dialog-panel { max-height: calc(100dvh - max(2rem, 10dvh)) !important; overflow: clip !important; padding: 0 !important; }
+  .dialog-scroll { --dialog-padding: 1rem; display: grid; min-height: 0; gap: 1rem; overflow-y: auto; overscroll-behavior: contain; padding: var(--dialog-padding); scroll-padding-block: 7rem; }
+  .dialog-scroll > * { min-width: 0; }
+  .dialog-header { position: sticky; top: calc(-1 * var(--dialog-padding)); z-index: 2; margin: calc(-1 * var(--dialog-padding)) calc(-1 * var(--dialog-padding)) 0; padding: var(--dialog-padding); padding-inline-end: 3.5rem; border-bottom: 1px solid hsl(var(--border)); background: hsl(var(--card)); }
+  .dialog-panel .dialog-footer { position: sticky; bottom: calc(-1 * var(--dialog-padding)); z-index: 2; margin: 0 calc(-1 * var(--dialog-padding)) calc(-1 * var(--dialog-padding)); padding: var(--dialog-padding); padding-bottom: max(var(--dialog-padding), env(safe-area-inset-bottom)); background: hsl(var(--card)); border-top: 1px solid hsl(var(--border)); }
+  .dialog-scroll input, .dialog-scroll select, .dialog-scroll textarea { scroll-margin-block: 7rem; }
+  .dialog-scroll:has(> .dialog-form) { overflow: hidden; padding: 0; display: flex; flex-direction: column; }
+  .dialog-form { display: flex; flex-direction: column; min-height: 0; overflow: hidden; }
+  .dialog-form > .dialog-body { min-height: 0; overflow-y: auto; isolation: isolate; padding: var(--dialog-padding); }
+  .dialog-form > .dialog-header, .dialog-form > .dialog-footer { position: relative; inset: auto; flex-shrink: 0; margin: 0; z-index: 20; }
+  @media (min-width: 640px) { .dialog-scroll { --dialog-padding: 1.5rem; } }
+  @media (max-width: 639px) { .dialog-panel:has(form) { top: 0; width: 100%; height: 100dvh; max-height: 100dvh !important; transform: translateX(-50%); border-radius: 0; } [dir=rtl] .dialog-panel:has(form) { transform: translateX(50%); } }
+  .app-navigation [aria-current=page] { background-color: hsl(var(--accent)); color: hsl(var(--foreground)); font-weight: 600; }
+}
+
+@layer components {
+  .help-prose { min-width: 0; font-size: 1rem; line-height: 1.625; overflow-wrap: anywhere; }
+  .help-prose > * + *, .help-body > * + * { margin-block-start: 1.25rem; }
+  .help-prose h1 { font-size: 1.75rem; line-height: 2.25rem; font-weight: 600; }
+  .help-prose h2 { font-size: 1.25rem; line-height: 1.75rem; font-weight: 600; margin-block-start: 2rem; }
+  .help-prose h3 { font-size: 1.125rem; line-height: 1.75rem; font-weight: 600; }
+  .help-prose :is(h1,h2,h3,h4) { scroll-margin-top: 5rem; }
+  .help-prose :is(ul,ol) { padding-inline-start: 1.5rem; }
+  .help-prose ul { list-style: disc; } .help-prose ol { list-style: decimal; }
+  .help-prose li + li { margin-block-start: .5rem; }
+  .help-prose a { color: hsl(var(--primary)); text-decoration: underline; text-underline-offset: 3px; }
+  .help-prose code { font-size: .8125rem; line-height: 1.25rem; direction: ltr; unicode-bidi: isolate; }
+  .help-prose pre { max-width: 100%; overflow-x: auto; padding: 1rem; border: 1px solid hsl(var(--border)); border-radius: var(--control-radius); background: hsl(var(--muted)); direction: ltr; }
+  .help-table { max-width: 100%; overflow-x: auto; border: 1px solid hsl(var(--border)); border-radius: var(--control-radius); }
+  .help-prose table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+  .help-prose :is(th,td) { padding: .75rem 1rem; border-bottom: 1px solid hsl(var(--border)); text-align: start; }
+  .help-prose th { background: hsl(var(--muted)); font-weight: 600; }
+  .help-prose blockquote { border-inline-start: 3px solid hsl(var(--input)); padding-inline-start: 1rem; color: hsl(var(--muted-foreground)); }
+}
+
+/* Invalid fields use the same semantic border across native and Radix controls. */
+[aria-invalid="true"] { border-color: hsl(var(--destructive)); }
+
+/* Keep toast dismissal inside the padded logical end in either direction. */
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] { padding-inline-end: 3rem; }
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] [data-close-button] {
+  inset-inline-start: auto; inset-inline-end: .5rem; top: .5rem;
+  transform: none; width: 1.75rem; height: 1.75rem;
+}
+
+/* Numeric fields share a quiet text-field appearance; native keyboard stepping remains. */
+input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+input[type="number"]::-webkit-inner-spin-button,
+input[type="number"]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+
+/* Feedback sits within the current focus scope. Modal feedback reserves space,
+   so it cannot intercept form footers; page feedback clears the bulk toolbar. */
+:root { --z-toast: 80; --toast-bottom-offset: 96px; }
+/* The floating bulk toolbar (monitor list) publishes --bulk-toolbar-height while a
+   selection exists: the list reserves that space and keyboard scrolling keeps the
+   focused row and its checkbox above the toolbar. */
+[data-monitor-list][data-bulk-active] { padding-bottom: calc(var(--bulk-toolbar-height, 0px) + 1rem); }
+html:has([data-bulk-toolbar]) { scroll-padding-bottom: calc(var(--bulk-toolbar-height, 0px) + 1rem); }
+[data-toast-host] { pointer-events: auto; z-index: var(--z-toast); }
+[data-sonner-toaster] { pointer-events: auto !important; z-index: var(--z-toast) !important; }
+[data-toast-host][data-modal="true"] { flex-shrink: 0; max-height: 30dvh; overflow: auto; padding-inline-end: 44px; }
+[data-toast-host][data-modal="true"] [data-sonner-toaster] { position: relative; inset: auto; transform: none; width: auto; margin: .5rem; }
+[data-toast-host][data-modal="true"] [data-sonner-toast] { position: relative; inset: auto; transform: none !important; width: 100%; max-width: none; height: auto !important; margin-block: .5rem; }
+[data-sonner-toast][data-styled="true"] [data-button] { min-height: 44px; }
+[data-sonner-toaster] [data-sonner-toast][data-styled="true"] [data-close-button] { width: 44px; height: 44px; inset-inline-end: 0; top: 0; }
+@media (max-width: 639px) {
+  [data-toast-host][data-modal="false"] { max-height: 30dvh; overflow: auto; }
+  [data-toast-host][data-modal="false"] [data-sonner-toaster] { position: relative; inset: auto; transform: none; width: auto; }
+  [data-toast-host][data-modal="false"] [data-sonner-toast] { position: relative; inset: auto; transform: none !important; width: 100%; height: auto !important; margin-block-end: .5rem; }
 }

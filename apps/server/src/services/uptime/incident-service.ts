@@ -53,9 +53,9 @@ export const resolveIncident = async (
 
 	const now = observedAt ? new Date(observedAt) : new Date();
 	const startedAt = new Date(ongoing.startedAt);
-	const durationSeconds = Math.round(
+	const durationSeconds = Math.max(0, Math.round(
 		(now.getTime() - startedAt.getTime()) / 1000,
-	);
+	));
 
 	const [resolved] = await dbc
 		.update(uptimeIncident)
@@ -64,7 +64,7 @@ export const resolveIncident = async (
 			resolvedAt: now.toISOString(),
 			durationSeconds,
 		})
-		.where(eq(uptimeIncident.incidentId, ongoing.incidentId))
+		.where(and(eq(uptimeIncident.incidentId, ongoing.incidentId), eq(uptimeIncident.uptimeMonitorId, monitorId), eq(uptimeIncident.status, "ongoing")))
 		.returning();
 
 	/* v8 ignore next -- UPDATE ... RETURNING on the found row always yields it */

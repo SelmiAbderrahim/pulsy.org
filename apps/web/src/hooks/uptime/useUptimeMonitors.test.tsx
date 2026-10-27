@@ -130,7 +130,7 @@ describe("useCreateUptimeMonitorsBulk", () => {
 
 describe("useBulkUpdateUptimeSettings", () => {
 	it("calls the service and invalidates list, details, and dashboard", async () => {
-		svc.updateMonitorsBulk.mockResolvedValue([] as never);
+		svc.updateMonitorsBulk.mockResolvedValue({ updated: [], results: [] });
 		const { Wrapper, client } = createWrapper();
 		const spy = vi.spyOn(client, "invalidateQueries");
 		const { result } = renderHook(() => useBulkUpdateUptimeSettings(), {
@@ -143,7 +143,7 @@ describe("useBulkUpdateUptimeSettings", () => {
 		expect(svc.updateMonitorsBulk).toHaveBeenCalledWith(input);
 		expect(spy).toHaveBeenCalledWith({ queryKey: uptimeKeys.monitors.lists() });
 		expect(spy).toHaveBeenCalledWith({
-			queryKey: uptimeKeys.monitors.details(),
+			queryKey: uptimeKeys.monitors.detail("m1"),
 		});
 		expect(spy).toHaveBeenCalledWith({
 			queryKey: uptimeKeys.dashboard.summary(),
@@ -152,6 +152,25 @@ describe("useBulkUpdateUptimeSettings", () => {
 });
 
 describe("useUpdateUptimeMonitor", () => {
+  it("keeps replacement request credentials out of the shared optimistic cache", async () => {
+    let reject!: (error: Error) => void;
+    svc.updateMonitor.mockImplementation(() => new Promise((_done, fail) => { reject = fail; }));
+    const { Wrapper, client } = createWrapper();
+    const previous = { uptimeMonitorId: "m1", name: "old", requestConfigured: true };
+    client.setQueryData(uptimeKeys.monitors.detail("m1"), previous);
+    const { result } = renderHook(() => useUpdateUptimeMonitor(), { wrapper: Wrapper });
+    const requestConfig = { headers: [{ name: "Authorization", value: "private-header" }], auth: { type: "bearer" as const, token: "private-token" } };
+    let pending!: Promise<unknown>;
+    await act(async () => {
+      pending = result.current.mutateAsync({ uptimeMonitorId: "m1", name: "new", requestConfig }).catch(() => undefined);
+    });
+    await waitFor(() => expect(svc.updateMonitor).toHaveBeenCalledOnce());
+    expect(client.getQueryData(uptimeKeys.monitors.detail("m1"))).toEqual({ ...previous, name: "new" });
+    expect(JSON.stringify(client.getQueryData(uptimeKeys.monitors.detail("m1")))).not.toContain("private-");
+    await act(async () => { reject(new Error("Rejected replacement")); await pending; });
+    expect(client.getQueryData(uptimeKeys.monitors.detail("m1"))).toEqual(previous);
+  });
+
 	it("optimistically updates cached detail and settles invalidation", async () => {
 		svc.updateMonitor.mockResolvedValue({ uptimeMonitorId: "m1" } as never);
 		const { Wrapper, client } = createWrapper();

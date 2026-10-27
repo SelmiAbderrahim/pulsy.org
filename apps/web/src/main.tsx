@@ -1,13 +1,20 @@
-import { StrictMode } from "react";
+import { initializeTheme } from "./components/theme-toggle";
+import { SessionQueryBoundary } from "./components/auth/session-query-boundary";
+import { StrictMode, Suspense } from "react";
 import { createRoot } from "react-dom/client";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { createRouter, RouterProvider } from "@tanstack/react-router";
 import { HelmetProvider } from "@dr.pogodin/react-helmet";
 
-import "./i18n";
+import i18n, { i18nReady, NAMESPACES } from "./i18n";
 import "./styles/globals.css";
 import { routeTree } from "./routeTree.gen";
-import { initAnalytics, trackPageView } from "./lib/analytics/gtag";
+
+import { captureSubscriptionCapability } from "./lib/uptime/public-subscription-capability";
+
+initializeTheme();
+captureSubscriptionCapability();
+window.addEventListener("hashchange", captureSubscriptionCapability);
 
 const queryClient = new QueryClient({
 	defaultOptions: {
@@ -34,22 +41,32 @@ if (!rootElement) {
 	throw new Error("Root element #root not found");
 }
 
-// Load Google Analytics 4 (no-ops when VITE_GA_MEASUREMENT_ID is unset).
-initAnalytics();
+router.subscribe("onResolved", captureSubscriptionCapability);
 
-// Send a page_view for the initial load and every SPA navigation. gtag is
-// configured with `send_page_view: false`, so this is the only source of
-// page views — fires once per resolved navigation.
-router.subscribe("onResolved", ({ toLocation }) => {
-	trackPageView(toLocation.href);
-});
-
-createRoot(rootElement).render(
+void i18nReady.then(() => {
+	const language = document.documentElement.dataset.initialLocale ?? i18n.language;
+	if (!NAMESPACES.every(namespace => i18n.hasResourceBundle(language, namespace))) {
+		const loading = document.getElementById("locale-loading");
+		if (loading) {
+			loading.textContent = ({
+				en: "Pulsy could not load. Reload to try again.",
+				ar: "تعذّر تحميل Pulsy. أعد تحميل الصفحة للمحاولة مجددًا.",
+				fr: "Impossible de charger Pulsy. Rechargez la page pour réessayer.",
+				de: "Pulsy konnte nicht geladen werden. Laden Sie die Seite erneut.",
+				es: "No se pudo cargar Pulsy. Recarga la página para intentarlo de nuevo.",
+			} as Record<string, string>)[language] ?? "Pulsy";
+		}
+		return;
+	}
+	createRoot(rootElement).render(
 	<StrictMode>
+		<Suspense fallback={<div role="status" className="grid min-h-dvh place-content-center p-4">Pulsy</div>}>
 		<HelmetProvider>
 			<QueryClientProvider client={queryClient}>
-				<RouterProvider router={router} />
+				<SessionQueryBoundary><RouterProvider router={router} /></SessionQueryBoundary>
 			</QueryClientProvider>
 		</HelmetProvider>
+		</Suspense>
 	</StrictMode>,
-);
+	);
+});

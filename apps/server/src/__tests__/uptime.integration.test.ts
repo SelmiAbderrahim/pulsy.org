@@ -693,8 +693,8 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 			expect(calls[0]?.init?.method).toBe("POST");
 
 			const body = JSON.parse(String(calls[0]?.init?.body ?? "{}"));
-			expect(body.statusAfter).toBe("down");
-			expect(body.url).toBe("https://example.com/webhook-notify");
+			expect(body.event).toBe("monitor.down");
+			expect(body.monitor.url).toBe("https://example.com/webhook-notify");
 		});
 
 		it("formats Slack, Discord, and Telegram alert payloads", async () => {
@@ -719,7 +719,7 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 					uptimeMonitorId: monitor.uptimeMonitorId,
 					userId: testUserId,
 					channelType: "slack",
-					webhookUrl: "https://hooks.slack.test/incoming",
+					webhookUrl: "https://hooks.slack.com/services/T/B/token",
 					notifyOnDown: true,
 					notifyOnRecovery: true,
 				},
@@ -727,7 +727,7 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 					uptimeMonitorId: monitor.uptimeMonitorId,
 					userId: testUserId,
 					channelType: "discord",
-					webhookUrl: "https://discord.test/incoming",
+					webhookUrl: "https://discord.com/api/webhooks/123/token",
 					notifyOnDown: true,
 					notifyOnRecovery: true,
 				},
@@ -769,8 +769,8 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 
 			expect(calls.map((call) => call.url).sort()).toEqual([
 				"https://api.telegram.org/bot123456:abcDEF/sendMessage",
-				"https://discord.test/incoming",
-				"https://hooks.slack.test/incoming",
+				"https://discord.com/api/webhooks/123/token",
+				"https://hooks.slack.com/services/T/B/token",
 			]);
 
 			const slack = calls.find((call) => call.url.includes("slack"));

@@ -10,9 +10,11 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { UptimeService } from "@/services/uptime/uptimeService";
 import { uptimeKeys } from "./queryKeys";
+import { removeCachedRows } from "./optimistic-cache";
 import type {
   CreateStatusPageInput,
   UpdateStatusPageInput,
+  StatusPage,
 } from "@/types/uptime";
 
 /** List the current user's status pages. */
@@ -57,10 +59,7 @@ export function useUpdateStatusPage() {
     mutationFn: (input: UpdateStatusPageInput) =>
       UptimeService.updateStatusPage(input),
     onSuccess: (page) => {
-      queryClient.invalidateQueries({ queryKey: uptimeKeys.statusPages.lists() });
-      queryClient.invalidateQueries({
-        queryKey: uptimeKeys.statusPages.detail(page.statusPageId),
-      });
+      return queryClient.invalidateQueries({ queryKey: uptimeKeys.statusPages.all() });
     },
   });
 }
@@ -71,7 +70,13 @@ export function useDeleteStatusPage() {
   return useMutation({
     mutationFn: ({ statusPageId }: { statusPageId: string }) =>
       UptimeService.deleteStatusPage(statusPageId),
-    onSuccess: () => {
+    onMutate: ({statusPageId}) => removeCachedRows<StatusPage>(queryClient, uptimeKeys.statusPages.lists(), row => row.statusPageId === statusPageId),
+    onError: (_error, _input, rollback) => rollback?.(),
+    onSuccess: (_data, { statusPageId }) => {
+      queryClient.removeQueries({ queryKey: uptimeKeys.statusPages.detail(statusPageId) });
+      queryClient.removeQueries({ queryKey: uptimeKeys.statusPages.domainStatus(statusPageId) });
+    },
+    onSettled: () => {
       queryClient.invalidateQueries({ queryKey: uptimeKeys.statusPages.lists() });
     },
   });

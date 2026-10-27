@@ -1,3 +1,6 @@
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+import { useAccountTimezone } from "@/components/account-timezone";
+import { formatDate } from "@/lib/date-format";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Bell, ChevronLeft, ChevronRight } from "lucide-react";
@@ -12,12 +15,6 @@ import {
 	TableHeader,
 	TableRow,
 } from "@/components/ui/table";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipProvider,
-	TooltipTrigger,
-} from "@/components/ui/tooltip";
 import { useUptimeNotificationLogs } from "@/hooks/uptime";
 import type { UptimeNotificationLog } from "@/types/uptime";
 
@@ -26,6 +23,7 @@ const PAGE_SIZE = 25;
 interface NotificationLogTableProps {
 	/** Scope to one monitor's deliveries; omit for the account-wide history. */
 	monitorId?: string;
+  effectiveChannelCount?: number;
 }
 
 function OutcomeBadge({ outcome }: { outcome: UptimeNotificationLog["outcome"] }) {
@@ -34,7 +32,7 @@ function OutcomeBadge({ outcome }: { outcome: UptimeNotificationLog["outcome"] }
 		return (
 			<Badge
 				variant="outline"
-				className="gap-1.5 bg-green-50 text-green-900 border-green-200 dark:bg-green-900/20 dark:text-green-300"
+				className="gap-1.5 bg-success/10 text-success border-success/40"
 			>
 				{t("notifications.history.outcome.sent")}
 			</Badge>
@@ -42,17 +40,18 @@ function OutcomeBadge({ outcome }: { outcome: UptimeNotificationLog["outcome"] }
 	}
 	return (
 		<Badge variant="outline" className="gap-1.5 text-destructive border-destructive/40">
-			{t("notifications.history.outcome.failed")}
+			{t(outcome === "failed" ? "notifications.history.outcome.failed" : "status.unknown")}
 		</Badge>
 	);
 }
 
-export function NotificationLogTable({ monitorId }: NotificationLogTableProps) {
-	const { t } = useTranslation("uptimeMonitor");
+export function NotificationLogTable({ monitorId, effectiveChannelCount }: NotificationLogTableProps) {
+	const { t, i18n } = useTranslation("uptimeMonitor");
+  const accountTimezone = useAccountTimezone();
 	const [page, setPage] = useState(0);
 	const offset = page * PAGE_SIZE;
 
-	const { data, isFetching } = useUptimeNotificationLogs(monitorId, {
+	const { data, isFetching, isPending, error, refetch } = useUptimeNotificationLogs(monitorId, {
 		limit: PAGE_SIZE,
 		offset,
 	});
@@ -61,13 +60,15 @@ export function NotificationLogTable({ monitorId }: NotificationLogTableProps) {
 	const total = data?.total ?? 0;
 	const hasNext = offset + PAGE_SIZE < total;
 
+ if (isPending) return <p role="status">{t("notificationUX.loadingLog")}</p>;
+ if (error && !data) return <div role="alert"><p>{t("notificationUX.errorLog")}</p><Button variant="outline" onClick={() => void refetch()}>{t("workspace.retry")}</Button></div>;
 	if (total === 0 && !isFetching) {
 		return (
-			<div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-12 text-center">
-				<Bell className="h-10 w-10 text-muted-foreground mb-3" />
+			<div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-6 text-center">
+				<Bell className="h-6 w-6 text-muted-foreground mb-2" />
 				<p className="font-medium">{t("notifications.history.empty")}</p>
 				<p className="text-sm text-muted-foreground mt-1">
-					{t("notifications.history.emptyDescription")}
+					{t(effectiveChannelCount === 0 ? "notificationUX.noEffectiveChannels" : effectiveChannelCount ? "notificationUX.noAttempts" : "notifications.history.emptyDescription")}
 				</p>
 			</div>
 		);
@@ -75,7 +76,8 @@ export function NotificationLogTable({ monitorId }: NotificationLogTableProps) {
 
 	return (
 		<div className="flex flex-col gap-3">
-			<div className="w-full min-w-0 overflow-x-auto rounded-lg border">
+			<p className="text-sm text-muted-foreground">{t("notificationUX.historyScope")}</p>
+ <div role="region" tabIndex={0} aria-label={t("notifications.history.title")} className="w-full min-w-0 overflow-x-auto rounded-lg border">
 				<Table className="min-w-[720px]">
 					<TableHeader>
 						<TableRow>
@@ -103,7 +105,7 @@ export function NotificationLogTable({ monitorId }: NotificationLogTableProps) {
 						{rows.map((row) => (
 							<TableRow key={row.notificationLogId}>
 								<TableCell className="text-xs text-muted-foreground whitespace-nowrap">
-									{new Date(row.createdAt).toLocaleString()}
+									{formatDate(row.createdAt, i18n.language, accountTimezone)}
 								</TableCell>
 								<TableCell>
 									<Badge variant="outline">
@@ -113,7 +115,7 @@ export function NotificationLogTable({ monitorId }: NotificationLogTableProps) {
 										)}
 									</Badge>
 								</TableCell>
-								<TableCell className="text-sm text-muted-foreground max-w-[220px] truncate">
+								<TableCell className="text-sm text-muted-foreground max-w-[220px] break-words">
 									{row.target}
 								</TableCell>
 								<TableCell className="text-sm">
@@ -121,18 +123,7 @@ export function NotificationLogTable({ monitorId }: NotificationLogTableProps) {
 								</TableCell>
 								<TableCell>
 									{row.outcome === "failed" && row.error ? (
-										<TooltipProvider>
-											<Tooltip>
-												<TooltipTrigger asChild>
-													<span className="inline-flex cursor-help">
-														<OutcomeBadge outcome={row.outcome} />
-													</span>
-												</TooltipTrigger>
-												<TooltipContent className="max-w-[320px] break-words">
-													{row.error}
-												</TooltipContent>
-											</Tooltip>
-										</TooltipProvider>
+										<><OutcomeBadge outcome={row.outcome} /><p className="max-w-80 whitespace-pre-wrap break-words text-sm">{row.error}</p></>
 									) : (
 										<OutcomeBadge outcome={row.outcome} />
 									)}
@@ -140,11 +131,11 @@ export function NotificationLogTable({ monitorId }: NotificationLogTableProps) {
 								<TableCell className="tabular-nums text-sm">
 									{row.attempts}
 									{row.providerMessageId ? (
-										<span className="ms-2 text-xs text-muted-foreground">
+										<Collapsible><CollapsibleTrigger className="min-h-11 text-xs underline">{t("notificationUX.technicalDetails")}</CollapsibleTrigger><CollapsibleContent className="max-w-64 break-all text-xs text-muted-foreground">
 											{t("notifications.history.messageId", {
 												id: row.providerMessageId,
 											})}
-										</span>
+										</CollapsibleContent></Collapsible>
 									) : null}
 								</TableCell>
 							</TableRow>
@@ -166,7 +157,7 @@ export function NotificationLogTable({ monitorId }: NotificationLogTableProps) {
 						<Button
 							variant="outline"
 							size="sm"
-							onClick={() => setPage((p) => Math.max(0, p - 1))}
+							aria-label={t("actions.previous")} onClick={() => setPage((p) => Math.max(0, p - 1))}
 							disabled={page === 0}
 							className="h-[44px]"
 						>
@@ -175,7 +166,7 @@ export function NotificationLogTable({ monitorId }: NotificationLogTableProps) {
 						<Button
 							variant="outline"
 							size="sm"
-							onClick={() => setPage((p) => p + 1)}
+							aria-label={t("actions.next")} onClick={() => setPage((p) => p + 1)}
 							disabled={!hasNext}
 							className="h-[44px]"
 						>

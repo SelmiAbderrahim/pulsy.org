@@ -10,7 +10,40 @@
     "language": "Sprache",
     "search": "Suchen",
     "apiKeys": "API-Schlüssel",
-    "apiDocs": "API-Doku"
+    "apiDocs": "API-Doku",
+    "monitorGroup": "Überwachen",
+    "configureGroup": "Konfigurieren",
+    "developGroup": "Entwickeln",
+    "accountGroup": "Konto",
+    "monitors": "Monitore",
+    "incidents": "Vorfälle",
+    "statusPages": "Statusseiten",
+    "notifications": "Benachrichtigungen",
+    "templates": "Vorlagen",
+    "portability": "Importieren und exportieren",
+    "help": "Hilfe",
+    "preferences": "Einstellungen",
+    "navigation": "Navigation",
+    "skip": "Zum Inhalt springen",
+    "home": "Startseite",
+    "addMonitor": "Monitor hinzufügen",
+    "filters": "Filter",
+    "searchViews": "Gespeicherte Ansichten suchen",
+    "leaveWithoutSaving": "Ohne Speichern verlassen?",
+    "discard": "Es gibt ungespeicherte Änderungen. Ohne Speichern schließen? Abbrechen, um weiterzubearbeiten.",
+    "dataTable": "Datentabelle",
+    "formErrors": "Prüfen Sie die folgenden Felder.",
+    "requiredField": "Dieses Feld ist erforderlich.",
+    "invalidField": "Geben Sie einen gültigen Wert ein.",
+    "fieldRange": "Geben Sie einen Wert zwischen {{min}} und {{max}} ein.",
+    "admin": "Verwaltung",
+    "timezone": "Zeitzone des Kontos",
+    "timezoneHint": "Suchen Sie nach einer IANA-Zeitzone. Die Kontozeitzone wird geräteübergreifend gespeichert.",
+    "timezoneInvalid": "Gültige IANA-Zeitzone wählen, zum Beispiel Africa/Tunis.",
+    "shareLinks": "Freigabelinks",
+    "savedViews": "Gespeicherte Ansichten",
+    "scrollTable": "Scrollen Sie horizontal, um alle Spalten zu sehen.",
+    "leaveDescription": "Änderungen auf dieser Seite sind noch nicht gespeichert. Verlassen verwirft sie, Abbrechen führt zurück zur Bearbeitung."
   },
   "languages": {
     "en": "English",
@@ -31,12 +64,19 @@
     "save": "Speichern",
     "delete": "Löschen",
     "close": "Schließen",
-    "retry": "Erneut versuchen"
+    "retry": "Erneut versuchen",
+    "confirm": "Bestätigen",
+    "discard": "Änderungen verwerfen",
+    "confirmName": "Zur Bestätigung {{name}} eingeben",
+    "details": "Details"
   },
   "states": {
     "loading": "Wird geladen...",
     "error": "Etwas ist schiefgelaufen",
-    "notFound": "Nicht gefunden"
+    "notFound": "Nicht gefunden",
+    "unreachable": "Pulsy ist nicht erreichbar. Prüfen Sie Ihre Verbindung und versuchen Sie es erneut.",
+    "serverProblem": "Pulsy konnte diese Anfrage nicht verarbeiten. Es wurde nichts geändert. Versuchen Sie es erneut.",
+    "serverProblemReference": "Pulsy konnte diese Anfrage nicht verarbeiten. Referenz: {{requestId}}."
   },
   "bulkSelection": {
     "toolbar": "Auswahlleiste",
@@ -55,19 +95,106 @@
       "channel": "Kanal",
       "channels": "Kanäle",
       "account": "Konto",
-      "accounts": "Konten"
+      "accounts": "Konten",
+      "monitor_one": "Monitor",
+      "monitor_other": "Monitore",
+      "server_one": "Server",
+      "server_other": "Server",
+      "user_one": "Benutzer",
+      "user_other": "Benutzer",
+      "channel_one": "Kanal",
+      "channel_other": "Kanäle",
+      "account_one": "Konto",
+      "account_other": "Konten"
     },
     "confirmDelete": {
       "title": "{{count}} {{type}} löschen?",
       "warning": "Diese Aktion kann nicht rückgängig gemacht werden.",
       "itemsLabel": "Sie sind dabei zu löschen:",
       "moreItems": "+{{count}} weitere",
-      "inputLabel": "Geben Sie „DELETE {{count}}“ ein, um zu bestätigen:",
+      "inputLabel": "Geben Sie „{{confirmation}}“ zur Bestätigung ein:",
       "cancel": "Abbrechen",
-      "confirm": "{{count}} {{type}} löschen"
+      "confirm": "{{count}} {{type}} löschen",
+      "moreItems_one": "+{{count}} weitere",
+      "moreItems_other": "+{{count}} weitere",
+      "title_one": "{{count}} {{type}} löschen?",
+      "title_other": "{{count}} {{type}} löschen?",
+      "confirm_one": "{{count}} {{type}} löschen",
+      "confirm_other": "{{count}} {{type}} löschen",
+      "listLabel": "Zu löschende Elemente ({{count}})"
     },
     "warnings": {
-      "someItemsHaveConstraints": "{{count}} {{type}} haben Einschränkungen, die eine manuelle Bereinigung erfordern können."
-    }
+      "someItemsHaveConstraints": "{{count}} {{type}} haben Einschränkungen, die eine manuelle Bereinigung erfordern können.",
+      "someItemsHaveConstraints_one": "{{count}} {{type}} hat Einschränkungen, die möglicherweise eine manuelle Bereinigung erfordern.",
+      "someItemsHaveConstraints_other": "{{count}} {{type}} haben Einschränkungen, die eine manuelle Bereinigung erfordern können."
+    },
+    "selected_one": "{{count}} ausgewähltes Element",
+    "selected_other": "{{count}} ausgewählte Elemente"
+  },
+  "session": {
+    "unavailable": "Ihre Sitzung konnte nicht geprüft werden",
+    "retryDescription": "Die Sitzungsanfrage ist fehlgeschlagen. Versuchen Sie es erneut, um an dieser Adresse fortzufahren. Es wurde keine Abmeldung angefordert.",
+    "signInAgain": "Melden Sie sich an, um zur gewünschten Seite zurückzukehren. Ihre vorige Sitzung ist möglicherweise abgelaufen oder beendet.",
+    "signOutFailed": "Abmeldung fehlgeschlagen. Ihre Sitzung ist noch offen; versuchen Sie es erneut."
+  },
+  "notFound": {
+    "title": "Seite nicht gefunden",
+    "home": "Zur Startseite",
+    "retry": "Diese Seite konnte nicht geladen werden. Versuchen Sie es erneut oder kehren Sie zur Startseite zurück.",
+    "dashboard": "Zurück zu den Monitoren",
+    "description": "Diese Seite wurde möglicherweise verschoben oder die Adresse ist falsch.",
+    "help": "Zur Hilfe"
+  },
+  "resource": {
+    "loadError": "Diese Informationen konnten nicht geladen werden. Versuchen Sie es erneut.",
+    "staleAt": "Aktualisierung fehlgeschlagen. Angezeigt werden die um {{time}} geladenen Informationen."
+  },
+  "formValidation": {
+    "required": "Dieses Feld ist erforderlich.",
+    "email": "Geben Sie eine gültige E-Mail-Adresse ein, zum Beispiel alerts@example.com.",
+    "url": "Geben Sie eine vollständige URL ein, zum Beispiel https://example.com/webhook.",
+    "summary": "Prüfen Sie alle folgenden Felder.",
+    "filterDescription": "Passen Sie die Filter an und zeigen Sie die Ergebnisse an."
+  },
+  "controls": {
+    "choose": "Option auswählen",
+    "search": "Optionen suchen",
+    "noResults": "Keine passenden Optionen",
+    "chooseDate": "Datum auswählen",
+    "clearDate": "Datum löschen",
+    "chooseFile": "Datei auswählen oder hier ablegen",
+    "removeFile": "Datei entfernen",
+    "fileType": "Wählen Sie einen unterstützten Dateityp ({{types}}).",
+    "nextMonth": "Nächster Monat",
+    "previousMonth": "Vorheriger Monat"
+  },
+  "format": {
+    "monitor_one": "{{formattedCount}} Monitor",
+    "monitor_other": "{{formattedCount}} Monitore",
+    "component_one": "{{formattedCount}} Komponente",
+    "component_other": "{{formattedCount}} Komponenten",
+    "check_one": "{{formattedCount}} aufgezeichnete Prüfung",
+    "check_other": "{{formattedCount}} aufgezeichnete Prüfungen",
+    "assertionRule_one": "{{formattedCount}} Prüfregel",
+    "assertionRule_other": "{{formattedCount}} Prüfregeln",
+    "overrideChannel_one": "{{formattedCount}} Überschreibungskanal",
+    "overrideChannel_other": "{{formattedCount}} Überschreibungskanäle",
+    "selectedItem_one": "{{formattedCount}} ausgewähltes Element",
+    "selectedItem_other": "{{formattedCount}} ausgewählte Elemente",
+    "second_one": "{{formattedCount}} Sekunde",
+    "second_other": "{{formattedCount}} Sekunden",
+    "minute_one": "{{formattedCount}} Minute",
+    "minute_other": "{{formattedCount}} Minuten",
+    "hour_one": "{{formattedCount}} Stunde",
+    "hour_other": "{{formattedCount}} Stunden",
+    "day_one": "{{formattedCount}} Tag",
+    "day_other": "{{formattedCount}} Tage"
+  },
+  "preferences": {
+    "accountMenu": "Kontomenü",
+    "description": "Wählen Sie Ihre Sprache und die Zeitzone für Datums- und Zeitangaben.",
+    "languageHint": "Die Sprache wird in diesem Browser gespeichert.",
+    "useBrowserTimezone": "Zeitzone des Browsers verwenden",
+    "saveError": "Die Einstellungen konnten nicht gespeichert werden. Ihre Änderungen bleiben erhalten."
   }
 }

@@ -1,10 +1,12 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { renderWithQueryClient as render } from "@/test/query-wrapper";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reactI18nextMock } from "@/test/i18n-mock";
 import { MonitorBulkAddDialog } from "./monitor-bulk-add-dialog";
 
 vi.mock("react-i18next", () => reactI18nextMock());
+vi.mock("@/hooks/uptime/useUptimeMonitors", () => ({ useUptimeMonitors: () => ({ data: [] }) }));
 
 const mutateAsync = vi.fn();
 const useCreateUptimeMonitorsBulk = vi.fn();
@@ -14,7 +16,7 @@ vi.mock("@/hooks/uptime", () => ({
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
-vi.mock("sonner", () => ({
+vi.mock("@/lib/toast", () => ({
 	toast: {
 		success: (m: unknown) => toastSuccess(m),
 		error: (m: unknown) => toastError(m),
@@ -46,7 +48,7 @@ describe("MonitorBulkAddDialog URL parsing", () => {
 		);
 		// 2 valid, 2 skipped (1 dup + 1 invalid)
 		expect(screen.getByText("2 valid, 2 skipped")).toBeInTheDocument();
-		expect(screen.getByText("Skipped (not valid URLs):")).toBeInTheDocument();
+		expect(screen.getAllByText(/bulkUX.invalid/)).toHaveLength(1);
 		expect(screen.getByText("notaurl")).toBeInTheDocument();
 	});
 
@@ -56,11 +58,11 @@ describe("MonitorBulkAddDialog URL parsing", () => {
 		expect(screen.getByText("2 valid, 0 skipped")).toBeInTheDocument();
 	});
 
-	it("shows a +N badge when more than 8 invalid lines exist", () => {
+	it("keeps all invalid lines inspectable in the bounded preview", () => {
 		render(<MonitorBulkAddDialog open onOpenChange={vi.fn()} />);
 		const invalids = Array.from({ length: 10 }, (_v, i) => `bad${i}`);
 		typeUrls(invalids.join("\n"));
-		expect(screen.getByText("+2")).toBeInTheDocument();
+		for (const value of invalids) expect(screen.getByText(value)).toBeInTheDocument();
 	});
 
 	it("disables submit and shows a tooMany warning beyond the cap", () => {
@@ -72,7 +74,7 @@ describe("MonitorBulkAddDialog URL parsing", () => {
 		typeUrls(many);
 		expect(screen.getByText("Maximum 50 URLs at once")).toBeInTheDocument();
 		expect(
-			screen.getByRole("button", { name: /Add 51 Monitors/ }),
+			screen.getByRole("button", { name: /^Add(?: \d+)? monitors?$/ }),
 		).toBeDisabled();
 	});
 });
@@ -84,7 +86,7 @@ describe("MonitorBulkAddDialog submit", () => {
 		render(<MonitorBulkAddDialog open onOpenChange={onOpenChange} />);
 		typeUrls("https://a.com\nhttps://b.com");
 		await userEvent.click(
-			screen.getByRole("button", { name: /Add 2 Monitors/ }),
+			screen.getByRole("button", { name: /^Add(?: \d+)? monitors?$/ }),
 		);
 		await waitFor(() => expect(mutateAsync).toHaveBeenCalled());
 		expect(mutateAsync).toHaveBeenCalledWith([
@@ -101,7 +103,7 @@ describe("MonitorBulkAddDialog submit", () => {
 		typeUrls("https://a.com");
 		await userEvent.type(screen.getByLabelText("Tags"), "prod{Enter}");
 		await userEvent.click(
-			screen.getByRole("button", { name: /Add 1 Monitors/ }),
+			screen.getByRole("button", { name: /^Add(?: \d+)? monitors?$/ }),
 		);
 		await waitFor(() =>
 			expect(mutateAsync).toHaveBeenCalledWith([
@@ -115,7 +117,7 @@ describe("MonitorBulkAddDialog submit", () => {
 		render(<MonitorBulkAddDialog open onOpenChange={vi.fn()} />);
 		typeUrls("https://a.com");
 		await userEvent.click(
-			screen.getByRole("button", { name: /Add 1 Monitors/ }),
+			screen.getByRole("button", { name: /^Add(?: \d+)? monitors?$/ }),
 		);
 		await waitFor(() => expect(toastError).toHaveBeenCalledWith("bulk fail"));
 	});
@@ -123,10 +125,10 @@ describe("MonitorBulkAddDialog submit", () => {
 	it("does not submit when there are zero valid URLs", () => {
 		render(<MonitorBulkAddDialog open onOpenChange={vi.fn()} />);
 		expect(
-			screen.getByRole("button", { name: /Add 0 Monitors/ }),
+			screen.getByRole("button", { name: /^Add(?: \d+)? monitors?$/ }),
 		).toBeDisabled();
 		// Submitting directly hits the `validCount === 0` early return.
-		const submitButton = screen.getByRole("button", { name: /Add 0 Monitors/ });
+		const submitButton = screen.getByRole("button", { name: /^Add(?: \d+)? monitors?$/ });
 		const form = submitButton.closest("form");
 		if (!form) throw new Error("Bulk add form not found");
 		fireEvent.submit(form);
@@ -139,7 +141,7 @@ describe("MonitorBulkAddDialog submit", () => {
 			Array.from({ length: 51 }, (_v, i) => `https://host${i}.com`).join("\n"),
 		);
 		// Submitting directly hits the `tooMany` early return.
-		const submitButton = screen.getByRole("button", { name: /Add 51 Monitors/ });
+		const submitButton = screen.getByRole("button", { name: /^Add(?: \d+)? monitors?$/ });
 		const form = submitButton.closest("form");
 		if (!form) throw new Error("Bulk add form not found");
 		fireEvent.submit(form);
@@ -166,7 +168,7 @@ describe("MonitorBulkAddDialog tags & controls", () => {
 			await userEvent.click(intervalSelect);
 		await userEvent.click(screen.getByRole("option", { name: "1 minute" }));
 		await userEvent.click(
-			screen.getByRole("button", { name: /Add 1 Monitors/ }),
+			screen.getByRole("button", { name: /^Add(?: \d+)? monitors?$/ }),
 		);
 		await waitFor(() =>
 			expect(mutateAsync).toHaveBeenCalledWith([
@@ -184,7 +186,7 @@ describe("MonitorBulkAddDialog tags & controls", () => {
 		await userEvent.click(methodSelect);
 		await userEvent.click(screen.getByRole("option", { name: "HEAD" }));
 		await userEvent.click(
-			screen.getByRole("button", { name: /Add 1 Monitors/ }),
+			screen.getByRole("button", { name: /^Add(?: \d+)? monitors?$/ }),
 		);
 		await waitFor(() =>
 			expect(mutateAsync).toHaveBeenCalledWith([
@@ -197,8 +199,9 @@ describe("MonitorBulkAddDialog tags & controls", () => {
 		mutateAsync.mockResolvedValue([]);
 		render(<MonitorBulkAddDialog open onOpenChange={vi.fn()} />);
 		typeUrls("https://a.com");
-		const [expected, timeout, threshold] =
-			screen.getAllByRole("spinbutton");
+		const expected = screen.getByLabelText("Expected Status");
+    const timeout = screen.getByLabelText("Timeout");
+    const threshold = screen.getByLabelText("Threshold");
 		if (!expected || !timeout || !threshold) {
 			throw new Error("Bulk add numeric fields not found");
 		}
@@ -209,7 +212,7 @@ describe("MonitorBulkAddDialog tags & controls", () => {
 		await userEvent.clear(threshold);
 		await userEvent.type(threshold, "4");
 		await userEvent.click(
-			screen.getByRole("button", { name: /Add 1 Monitors/ }),
+			screen.getByRole("button", { name: /^Add(?: \d+)? monitors?$/ }),
 		);
 		await waitFor(() =>
 			expect(mutateAsync).toHaveBeenCalledWith([
@@ -222,7 +225,7 @@ describe("MonitorBulkAddDialog tags & controls", () => {
 		);
 	});
 
-	it("closes via Cancel and disables submit while pending", () => {
+	it("closes via Cancel and disables submit while pending", async () => {
 		useCreateUptimeMonitorsBulk.mockReturnValue({
 			mutateAsync,
 			isPending: true,
@@ -231,9 +234,10 @@ describe("MonitorBulkAddDialog tags & controls", () => {
 		render(<MonitorBulkAddDialog open onOpenChange={onOpenChange} />);
 		typeUrls("https://a.com");
 		fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-		expect(onOpenChange).toHaveBeenCalledWith(false);
+    await userEvent.click(screen.getByRole("button", { name: "actions.discard" }));
+    await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
 		expect(
-			screen.getByRole("button", { name: /Add 1 Monitors/ }),
+			screen.getByRole("button", { name: /^Add(?: \d+)? monitors?$/ }),
 		).toBeDisabled();
 	});
 });

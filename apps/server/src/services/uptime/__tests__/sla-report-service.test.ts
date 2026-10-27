@@ -1,6 +1,6 @@
 import { db, uptimeCheckLog, uptimeIncident, uptimeSlaReportSubscription } from "@pulsy/db";
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	createTestEmailProvider,
 	createTestMonitor,
@@ -28,7 +28,7 @@ const NOW = new Date("2026-06-15T12:00:00.000Z");
 beforeEach(() => {
 });
 
-afterEach(() => {
+afterEach(() => { vi.restoreAllMocks();
 });
 
 async function seedLog(
@@ -56,6 +56,8 @@ function baseModel(overrides: Partial<SlaReportModel> = {}): SlaReportModel {
 		windowDays: 31,
 		periodLabel: "2026-05",
 		generatedAt: "2026-06-01T06:00:00.000Z",
+    windowTimezone: "UTC",
+    incidentList: [],
 		stats: {
 			totalChecks: 100,
 			successfulChecks: 99,
@@ -428,4 +430,33 @@ describe("buildSlaReportModel + incidents", () => {
 		expect(model.incidents.count).toBe(1);
 		expect(model.incidents.totalDowntimeSeconds).toBe(600);
 	});
+});
+
+it("names the sample ratio check success and includes degraded checks separately from availability", () => {
+  const html = renderSlaReportEmailHtml(baseModel(), t);
+  expect(html).toContain(">Check success<"); expect(html).not.toContain(">Uptime<");
+  expect(html).toContain("Degraded checks"); expect(html).toContain("not duration-weighted availability");
+});
+
+it("uses only the report owner's validated account timezone, with UTC fallback", async () => {
+  const { user } = await import("@pulsy/db");
+  const { accountReportTimezone } = await import("../sla-report-service");
+  const owner = await createTestUser(), other = await createTestUser();
+  expect(await accountReportTimezone(owner.id)).toBe("UTC");
+  await db.update(user).set({ timezone: "Europe/Berlin" }).where(eq(user.id, owner.id));
+  expect(await accountReportTimezone(owner.id)).toBe("Europe/Berlin");
+  expect(await accountReportTimezone(other.id)).toBe("UTC");
+  await db.update(user).set({ timezone: "invalid/timezone" }).where(eq(user.id, owner.id));
+  expect(await accountReportTimezone(owner.id)).toBe("UTC");
+});
+
+it("renders report instants in the selected timezone while identifying UTC daily buckets", async () => {
+  const { default: PDFDocument } = await import("pdfkit");
+  const text = vi.spyOn(PDFDocument.prototype, "text");
+  const pdf = await renderSlaReportPdf(baseModel(), t, "en", "Europe/Berlin");
+  expect(pdf.subarray(0, 4).toString("ascii")).toBe("%PDF");
+  const drawn = text.mock.calls.map(call => typeof call[0] === "string" ? call[0] : "").join("\n");
+  expect(drawn).toContain("2026-06-01 08:00");
+  expect(drawn).toContain("Europe/Berlin");
+  expect(drawn).toContain(t("slaReport.dailyUptimeUtc"));
 });

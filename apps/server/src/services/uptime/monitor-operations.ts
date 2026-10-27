@@ -1,3 +1,6 @@
+import { insertObservedCheck } from "./reliability-storage";
+import { appendIncidentTransition } from "./incident-timeline";
+import { deferSuppressedAlert } from "./maintenance-service";
 import { acceptsProbeResult } from "./probe-configuration";
 import { canonicalMonitorUrl, normalizeMonitorUrl } from "@pulsy/db/monitor-url";
 // Shared owned monitor writes and manual checks. Callers schedule after commit.
@@ -5,7 +8,6 @@ import { canonicalMonitorUrl, normalizeMonitorUrl } from "@pulsy/db/monitor-url"
 import {
 	type apiCreateUptimeMonitor,
 	db, user, uptimeNotificationChannel, type DbExecutor,
-	uptimeCheckLog,
 	uptimeMonitor,
   uptimeMonitorChannelBinding,
 	uptimeStatusChange,
@@ -34,12 +36,8 @@ import { assertMonitorUrlAllowed } from "./egress-input";
 import { firstCheckAt } from "./first-check";
 
 /** Validate referenced channels inside the same owned write transaction. */
-export async function assertOwnedMonitorChannels(tx: DbExecutor, userId: string, ids: string[], t: Translator) {
-  if (!ids.length) return;
-  const owned = await tx.select({ id: uptimeNotificationChannel.channelId }).from(uptimeNotificationChannel)
-    .where(and(eq(uptimeNotificationChannel.userId, userId), inArray(uptimeNotificationChannel.channelId, ids))).for("share");
-  if (owned.length !== new Set(ids).size) throw new TRPCError({ code: "NOT_FOUND", message: t("errors.templateChannelMissing") });
-}
+export { assertOwnedChannelReferences as assertOwnedMonitorChannels } from "./channel-bindings";
+import { assertOwnedChannelReferences as assertOwnedMonitorChannels } from "./channel-bindings";
 
 /** Owner lock serializes creation without imposing a monitor count limit. */
 export async function createMonitorForUser(
@@ -138,6 +136,7 @@ export async function runManualCheck(
 
 	let previousStatus = monitor.status;
   let policyMonitor = monitor;
+  let notificationQueued = false;
 
 	// Same atomicity contract as the scheduler's runCheck: all state writes for
 	// this check commit or roll back together; dispatch happens after commit.
@@ -158,8 +157,7 @@ export async function runManualCheck(
     transition = evaluateLatencyTransition({ previousStatus, checkStatus: checkResult.status, responseTime: checkResult.responseTime,
       consecutiveFailures: current.consecutiveFailures, failureThreshold: current.failureThreshold,
       consecutiveSlow: current.consecutiveSlow, consecutiveHealthy: current.consecutiveHealthy, policy: current.latencyPolicy });
-		await tx.insert(uptimeCheckLog).values({
-      uptimeMonitorId: current.uptimeMonitorId,
+		await insertObservedCheck(tx, policyMonitor, {
 			httpStatus: checkResult.httpStatus,
 			responseTime: checkResult.responseTime,
 			status: transition.sampleStatus,
@@ -227,13 +225,14 @@ export async function runManualCheck(
       const outageId = policyMonitor.latencyPolicy && (previousStatus === "down" || previousStatus === "degraded") && policyMonitor.notificationOutageId ? policyMonitor.notificationOutageId : record.statusChangeId;
 			await tx.update(uptimeMonitor).set({ notificationOutageId: outageId }).where(and(eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId), eq(uptimeMonitor.userId, monitor.userId)));
 			policyMonitor = { ...policyMonitor, notificationOutageId: outageId };
+      notificationQueued = await deferSuppressedAlert(policyMonitor, record, tx);
 
     } else if (record?.statusAfter === "degraded" && !policyMonitor.latencyPolicy && (previousStatus === "up" || previousStatus === "pending")) {
       // A fresh legacy degraded episode must not inherit a recovered episode's receipts.
       await tx.update(uptimeMonitor).set({ notificationOutageId: null }).where(and(eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId), eq(uptimeMonitor.userId, monitor.userId)));
       policyMonitor = { ...policyMonitor, notificationOutageId: null };
 		} else if (record?.statusAfter === "up") {
-
+      notificationQueued = await deferSuppressedAlert(policyMonitor, record, tx);
     }
 
 		if (transition.shouldCreateIncident) {
@@ -253,12 +252,13 @@ export async function runManualCheck(
 			await resolveIncident(monitor.uptimeMonitorId, tx, now);
 		}
 
+    if (record) await appendIncidentTransition(policyMonitor, record, tx);
 		return { updated: updatedRow, statusChangeRecord: record ?? null };
 	});
 
 	// Detached: retry backoff (up to ~12.5 min) must not block the checkNow
 	// tRPC request. In-flight retries are lost on restart (accepted).
-	if (statusChangeRecord) {
+	if (statusChangeRecord && !notificationQueued) {
 		void dispatchNotifications(policyMonitor, statusChangeRecord).catch((err) => {
 			console.error(
 				`[uptime] Failed to dispatch notifications for monitor ${monitor.uptimeMonitorId}: ${safeErrorSummary(err)}`,

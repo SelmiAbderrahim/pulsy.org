@@ -17,7 +17,7 @@ export interface MonitorStats {
 	minResponseTime: number | null;
 	maxResponseTime: number | null;
 	p95ResponseTime: number | null;
-	uptimePercentage: number;
+	uptimePercentage: number | null;
 	availabilityPercentage: number | null;
 	slowPercentage: number | null;
 }
@@ -192,8 +192,8 @@ function computeStats(
 		p95ResponseTime = sorted[index]!;
 	}
 
-	// Keep the existing owner stats contract until its callers adopt unknown uptime.
-	const uptimePercentage = checkSuccessPercent(successfulChecks, totalChecks) ?? 100;
+	// No observations are unknown; a measured zero remains a real zero.
+	const uptimePercentage = checkSuccessPercent(successfulChecks, totalChecks);
 
 	return {
 		totalChecks,

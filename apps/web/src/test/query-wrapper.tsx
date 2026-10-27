@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import type { ReactNode } from "react";
+import { render, type RenderResult } from "@testing-library/react";
+import type { ReactElement, ReactNode } from "react";
 
 /**
  * Build a QueryClient with retries disabled so error paths resolve immediately
@@ -23,4 +24,10 @@ export function createWrapper(client = createTestQueryClient()) {
 		<QueryClientProvider client={client}>{children}</QueryClientProvider>
 	);
 	return { Wrapper, client };
+}
+
+/** Isolated form tests still use the same session-client context as the app. */
+export function renderWithQueryClient(ui: ReactElement): Pick<RenderResult, "container" | "baseElement" | "rerender" | "unmount" | "asFragment"> & { client: QueryClient } {
+  const { Wrapper, client } = createWrapper();
+  return { client, ...render(ui, { wrapper: Wrapper }) };
 }

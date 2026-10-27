@@ -33,6 +33,7 @@ const resolveOk: ResolvedApiKey = {
 	ok: true,
 	user: { id: "user_1" },
 	apiKeyId: "key_1",
+  scope: "full",
 };
 
 describe("apiKeyAuth", () => {

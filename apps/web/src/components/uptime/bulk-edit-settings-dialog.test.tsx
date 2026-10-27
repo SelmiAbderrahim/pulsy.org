@@ -1,4 +1,5 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { renderWithQueryClient as render } from "@/test/query-wrapper";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reactI18nextMock } from "@/test/i18n-mock";
@@ -19,7 +20,7 @@ vi.mock("@/hooks/uptime", () => ({
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
-vi.mock("sonner", () => ({
+vi.mock("@/lib/toast", () => ({
 	toast: {
 		success: (m: unknown) => toastSuccess(m),
 		error: (m: unknown) => toastError(m),
@@ -43,7 +44,7 @@ const FIELD = {
 beforeEach(() => {
 	vi.clearAllMocks();
 	mutationState.isPending = false;
-	mutateAsync.mockResolvedValue([{}, {}]);
+	mutateAsync.mockResolvedValue({ updated: [{}, {}], results: [] });
 });
 
 function renderDialog(props?: Partial<React.ComponentProps<typeof BulkEditSettingsDialog>>) {
@@ -142,7 +143,7 @@ describe("BulkEditSettingsDialog submission", () => {
 		await userEvent.click(screen.getByRole("option", { name: "HEAD" }));
 		// Interval select (second combobox).
 		await userEvent.click(screen.getAllByRole("combobox")[1]!);
-		await userEvent.click(screen.getByRole("option", { name: "60 seconds" }));
+		await userEvent.click(screen.getByRole("option", { name: "1 minute" }));
 
 		// Numeric inputs (exercise their onChange handlers).
 		const expected = screen.getByLabelText("Expected status");
@@ -156,7 +157,7 @@ describe("BulkEditSettingsDialog submission", () => {
 		await userEvent.type(threshold, "5");
 
 		// Tag.
-		const tagInput = screen.getByPlaceholderText("Add a tag...");
+		const tagInput = screen.getByPlaceholderText("Example: production");
 		await userEvent.type(tagInput, "prod{Enter}");
 
 		await userEvent.click(
@@ -168,7 +169,7 @@ describe("BulkEditSettingsDialog submission", () => {
 			patch: {
 				method: "HEAD",
 				interval: 60,
-				expectedStatus: 301,
+				expectedStatus: 301, expectedStatuses: null,
 				timeout: 20000,
 				failureThreshold: 5,
 				tags: ["prod"],
@@ -204,15 +205,15 @@ describe("BulkEditSettingsDialog tags", () => {
 			screen.getByText(/Replaces existing tags on every selected monitor/),
 		).toBeInTheDocument();
 
-		const tagInput = screen.getByPlaceholderText("Add a tag...");
+		const tagInput = screen.getByPlaceholderText("Example: production");
 		await userEvent.type(tagInput, "api{Enter}");
-		expect(screen.getByText("api")).toBeInTheDocument();
+		expect(screen.getByLabelText("Remove api").parentElement).toHaveTextContent("api");
 
 		// Duplicate is ignored (no second badge); a blank blur is a no-op.
 		await userEvent.type(tagInput, "api{Enter}");
 		await userEvent.clear(tagInput);
 		fireEvent.blur(tagInput);
-		expect(screen.getAllByText("api")).toHaveLength(1);
+		expect(screen.getAllByLabelText("Remove api")).toHaveLength(1);
 
 		await userEvent.click(screen.getByLabelText("Remove api"));
 		expect(screen.queryByText("api")).not.toBeInTheDocument();

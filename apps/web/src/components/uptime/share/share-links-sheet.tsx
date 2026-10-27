@@ -1,3 +1,4 @@
+import { requestConfirmation } from "@/lib/confirmation";
 /**
  * Share links management sheet.
  *
@@ -50,15 +51,9 @@ export function ShareLinksSheet({ open, onOpenChange }: ShareLinksSheetProps) {
 	};
 
 	const handleRevoke = async (link: UptimeShareLink) => {
-		if (
-			!confirm(
-				t(
-					"share.manage.revokeConfirm",
-					"Revoke this share link? Anyone holding it will lose access.",
-				),
-			)
-		)
-			return;
+		if (!await requestConfirmation(t("share.manage.revokeConfirm", "Revoke this share link? Anyone holding it will lose access."), {
+      title: t("share.manage.revoke", "Revoke"), action: t("share.manage.revoke", "Revoke"),
+    })) return;
 		try {
 			await revokeMutation.mutateAsync({ shareLinkId: link.shareLinkId });
 			toast.success(t("share.manage.revokeSuccess", "Share link revoked"));

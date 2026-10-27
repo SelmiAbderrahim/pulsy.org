@@ -1,6 +1,6 @@
 import { apiKey, db } from "@pulsy/db";
 import { eq } from "drizzle-orm";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
 	createTestApiKey,
 	createTestUser,
@@ -20,7 +20,7 @@ useCleanDatabase();
 const originalEnv = { ...process.env };
 
 afterEach(() => {
-	process.env = { ...originalEnv };
+	process.env = { ...originalEnv }; vi.useRealTimers();
 });
 
 describe("generateApiKey / hashApiKey", () => {
@@ -171,6 +171,7 @@ describe("resolveApiKey", () => {
 			ok: true,
 			user: { id: u.id },
 			apiKeyId: row.apiKeyId,
+      scope: "full",
 		});
 
 		const stored = await db.query.apiKey.findFirst({
@@ -178,4 +179,24 @@ describe("resolveApiKey", () => {
 		});
 		expect(stored?.lastUsedAt).not.toBeNull();
 	});
+});
+
+it("counts only live keys against the uniform active-key safety ceiling", async () => {
+  const owner = await createTestUser();
+  for (let index = 0; index < 20; index++) await createTestApiKey(owner.id, { expiresAt: new Date(Date.now() - 1000).toISOString() });
+  expect((await createApiKey(owner.id, "New key")).row.name).toBe("New key");
+  for (let index = 0; index < 18; index++) await createTestApiKey(owner.id);
+  const results = await Promise.allSettled([createApiKey(owner.id, "Final key"), createApiKey(owner.id, "Overflow")]);
+  expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
+});
+it("resolves the stored key scope while legacy keys retain full access and invalid expiry fails closed", async () => {
+  const owner = await createTestUser();
+  for (const scope of ["read", "full"] as const) {
+    const key = await createTestApiKey(owner.id, { scope });
+    expect(await resolveApiKey(key.plaintext)).toMatchObject({ ok: true, scope });
+  }
+  const legacy = await createTestApiKey(owner.id);
+  expect(await resolveApiKey(legacy.plaintext)).toMatchObject({ ok: true, scope: "full" });
+  const corrupt = await createTestApiKey(owner.id, { expiresAt: "invalid-date" });
+  expect(await resolveApiKey(corrupt.plaintext)).toEqual({ ok: false, reason: "invalid" });
 });

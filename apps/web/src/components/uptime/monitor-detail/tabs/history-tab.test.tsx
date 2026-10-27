@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reactI18nextMock } from "@/test/i18n-mock";
 import { HistoryTab } from "./history-tab";
@@ -20,13 +20,13 @@ describe("HistoryTab", () => {
 		useUptimeCheckLogs.mockReturnValue({ data: { data: [] } });
 		render(<HistoryTab monitorId="m1" />);
 		expect(screen.getByText("history.empty")).toBeInTheDocument();
-		expect(useUptimeCheckLogs).toHaveBeenCalledWith("m1", { limit: 100 });
+		expect(useUptimeCheckLogs).toHaveBeenCalledWith("m1", { limit: 25, offset: 0 });
 	});
 
-	it("treats undefined data as empty", () => {
+	it("announces loading while data is unavailable", () => {
 		useUptimeCheckLogs.mockReturnValue({ data: undefined });
 		render(<HistoryTab monitorId="m1" />);
-		expect(screen.getByText("history.empty")).toBeInTheDocument();
+		expect(screen.getByRole("status")).toHaveTextContent("metrics.loading");
 	});
 
 	it("renders a row per log with status dots and fallbacks", () => {
@@ -61,10 +61,12 @@ describe("HistoryTab", () => {
 			},
 		});
 		const { container } = render(<HistoryTab monitorId="m1" />);
-		expect(screen.getByText("up")).toBeInTheDocument();
-		expect(screen.getByText("down")).toBeInTheDocument();
-		expect(screen.getByText("degraded")).toBeInTheDocument();
-		expect(screen.getByText("timeout")).toBeInTheDocument();
+		expect(screen.getByText("status.up")).toBeInTheDocument();
+		expect(screen.getByText("status.down")).toBeInTheDocument();
+		expect(screen.getByText("status.degraded")).toBeInTheDocument();
+		expect(screen.getByText("timeout")).not.toBeVisible();
+ fireEvent.click(screen.getByRole("button", { name: "historyUX.errorDetail" }));
+ expect(screen.getByText("timeout")).toBeVisible();
 		expect(container.querySelector(".bg-success")).toBeInTheDocument();
 		expect(container.querySelector(".bg-destructive")).toBeInTheDocument();
 		expect(container.querySelector(".bg-warning")).toBeInTheDocument();

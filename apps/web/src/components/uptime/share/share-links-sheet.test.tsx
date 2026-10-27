@@ -1,3 +1,5 @@
+import { registerConfirmationHandler } from "@/lib/confirmation";
+import { afterEach as afterConfirmationTest } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
@@ -47,6 +49,14 @@ function shareLink(overrides: Partial<UptimeShareLink> = {}): UptimeShareLink {
 
 const clipboardWriteText = vi.fn();
 
+const confirmationDecision = vi.fn().mockResolvedValue(true);
+let unregisterConfirmation: (() => void) | undefined;
+beforeEach(() => {
+  confirmationDecision.mockResolvedValue(true);
+  unregisterConfirmation = registerConfirmationHandler(confirmationDecision);
+});
+afterConfirmationTest(() => unregisterConfirmation?.());
+
 beforeEach(() => {
 	vi.clearAllMocks();
 	listState.data = undefined;
@@ -56,7 +66,7 @@ beforeEach(() => {
 		value: { writeText: clipboardWriteText },
 		configurable: true,
 	});
-	vi.spyOn(window, "confirm").mockReturnValue(true);
+	confirmationDecision.mockResolvedValue(true);
 });
 
 describe("ShareLinksSheet states", () => {
@@ -115,7 +125,7 @@ describe("ShareLinksSheet actions", () => {
 
 	it("does nothing when the confirmation is declined", async () => {
 		listState.data = [shareLink()];
-		vi.spyOn(window, "confirm").mockReturnValue(false);
+		confirmationDecision.mockResolvedValue(false);
 		render(<ShareLinksSheet open onOpenChange={vi.fn()} />);
 		await userEvent.click(screen.getByRole("button", { name: "Revoke" }));
 		expect(revokeMutateAsync).not.toHaveBeenCalled();

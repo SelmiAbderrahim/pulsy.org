@@ -1,5 +1,5 @@
 import { DEFAULT_FAILURE_THRESHOLD } from "@pulsy/db/monitor-defaults";
-import { recordServerReport, dispatchServerHealth } from "./server-health-alerts";
+import { recordServerReport } from "./server-health-alerts";
 import { createHash, randomBytes, timingSafeEqual } from "node:crypto";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, gte, inArray, lt, lte } from "drizzle-orm";
@@ -114,7 +114,6 @@ export async function receiveServerSample(token: string, payload: unknown, now =
   // Capability lookup is the only unscoped read; all subsequent reads/writes use its owner.
   const [target] = await db.select({ monitorId: uptimeServer.monitorId, userId: uptimeServer.userId }).from(uptimeServer).where(eq(uptimeServer.tokenHash, tokenHash)).limit(1);
   if (!target) return { statusCode: 401, outcome: "unavailable" };
-  let delivery: Awaited<ReturnType<typeof recordServerReport>>;
   const result = await db.transaction<Receipt>(async tx => {
     const [monitor] = await tx.select().from(uptimeMonitor).where(serverMonitorScope(target.monitorId, target.userId)).for("update");
     const [config] = await tx.select().from(uptimeServer).where(and(serverScope(target.monitorId, target.userId), eq(uptimeServer.tokenHash, tokenHash))).for("update");
@@ -137,10 +136,9 @@ export async function receiveServerSample(token: string, payload: unknown, now =
     const nextDeadline = monitor.active ? new Date(now.getTime() + interval * 3000).toISOString() : null;
     await tx.insert(uptimeServerMetric).values({ monitorId: target.monitorId, userId: target.userId, receivedAt: stamp, sample });
     await tx.update(uptimeServer).set({ lastReceivedAt: stamp, lastSampledAt: sample.sampledAt, lastBootId: sample.bootId, lastSequence: sample.sequence, agent: sample.agent, nextDeadline }).where(serverScope(target.monitorId, target.userId));
-    delivery = await recordServerReport(tx, monitor, { ...config, nextDeadline }, sample, now);
+    await recordServerReport(tx, monitor, { ...config, nextDeadline }, sample, now);
     return { statusCode: 200, outcome: "accepted", ...response };
   });
-  dispatchServerHealth(delivery);
   return result;
 }
 
