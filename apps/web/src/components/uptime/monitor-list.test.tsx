@@ -1,3 +1,4 @@
+import { UptimeService } from "@/services/uptime/uptimeService";
 import { renderWithQueryClient as render } from "@/test/query-wrapper";
 import { registerConfirmationHandler } from "@/lib/confirmation";
 import { afterEach as afterConfirmationTest } from "vitest";
@@ -96,6 +97,7 @@ afterConfirmationTest(() => unregisterConfirmation?.());
 
 beforeEach(() => {
 	vi.clearAllMocks();
+  vi.spyOn(UptimeService, "previewShareLink").mockImplementation(async ids => ids.map(id => ({ uptimeMonitorId: id, name: id, url: "https://example.invalid/", method: "GET", expectedStatus: 200, timeout: 10000, interval: 300, failureThreshold: 3, tags: [] })));
 	bulkState.isProcessing = false;
 	confirmationDecision.mockResolvedValue(true);
 });
@@ -557,6 +559,7 @@ describe("MonitorList bulk selection", () => {
 		await selectFirstRow();
 		const toolbar = screen.getByRole("toolbar");
 		await toolbarAction(/Share/);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create link" })).toBeEnabled());
 		expect(
 			await screen.findByText("Share 1 monitors"),
 		).toBeInTheDocument();
@@ -597,6 +600,7 @@ describe("MonitorList bulk selection", () => {
 		await selectFirstRow();
 		const toolbar = screen.getByRole("toolbar");
 		await toolbarAction(/Share/);
+    await waitFor(() => expect(screen.getByRole("button", { name: "Create link" })).toBeEnabled());
 		await userEvent.click(
 			screen.getByRole("button", { name: "Create link" }),
 		);

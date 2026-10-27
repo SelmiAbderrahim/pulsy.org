@@ -1,4 +1,6 @@
-import { render, screen } from "@testing-library/react";
+import { renderWithQueryClient as render } from "@/test/query-wrapper";
+vi.mock("@/components/account-timezone", () => ({ useAccountTimezone: () => "UTC" }));
+import { screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -24,6 +26,7 @@ const keysResult = {
 
 vi.mock("@/hooks/apiKeys/useApiKeys", () => ({
 	useApiKeys: () => keysResult,
+  useRemoveApiKey: () => ({ mutate: vi.fn(), isPending: false, error: null }),
 }));
 
 vi.mock("./create-api-key-dialog", () => ({
@@ -53,7 +56,7 @@ vi.mock("./revoke-api-key-dialog", () => ({
 
 const key = (id: string, overrides: Partial<ApiKey> = {}): ApiKey => ({
 	apiKeyId: id,
-	userId: "u1",
+	scope: "full",
 	name: `Key ${id}`,
 	keyPrefix: "pul_abcd",
 	lastUsedAt: null,
@@ -108,7 +111,7 @@ describe("ApiKeysManager — manager", () => {
 		const user = userEvent.setup();
 		keysResult.data = [key("k1", { name: "Prod" })];
 		render(<ApiKeysManager />);
-		await user.click(screen.getByRole("button", { name: "Revoke" }));
+		await user.click(screen.getByRole("button", { name: "Revoke Prod" }));
 		expect(screen.getByTestId("revoke-dialog")).toHaveTextContent("Prod");
 	});
 
@@ -116,7 +119,7 @@ describe("ApiKeysManager — manager", () => {
 		const user = userEvent.setup();
 		keysResult.data = [key("k1", { name: "Prod" })];
 		render(<ApiKeysManager />);
-		await user.click(screen.getByRole("button", { name: "Revoke" }));
+		await user.click(screen.getByRole("button", { name: "Revoke Prod" }));
 		await user.click(screen.getByRole("button", { name: "close-revoke" }));
 		expect(screen.queryByTestId("revoke-dialog")).not.toBeInTheDocument();
 	});

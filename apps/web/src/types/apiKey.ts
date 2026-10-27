@@ -7,8 +7,8 @@
 /** A masked API key row (never includes the secret hash or plaintext). */
 export interface ApiKey {
 	apiKeyId: string;
-	userId: string;
 	name: string;
+  scope: "read" | "full";
 	/** First ~8 chars of the plaintext, shown so the user can identify a key. */
 	keyPrefix: string;
 	lastUsedAt: string | null;
@@ -26,4 +26,6 @@ export interface CreatedApiKey extends ApiKey {
 /** Input for `apiKey.create`. */
 export interface CreateApiKeyInput {
 	name: string;
+  scope?: "read" | "full";
+  expiresAt?: string | null;
 }

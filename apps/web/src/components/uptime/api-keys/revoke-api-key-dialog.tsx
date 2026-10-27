@@ -1,3 +1,6 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { isSessionClientActive } from "@/lib/session-query-client";
+import { FormField } from "@/components/ui/form-field";
 /**
  * Revoke API key dialog — type-to-confirm danger action.
  *
@@ -10,7 +13,7 @@
 import { Loader2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +41,7 @@ export function RevokeApiKeyDialog({
 	onOpenChange,
 	apiKey,
 }: RevokeApiKeyDialogProps) {
+  const client = useQueryClient();
 	const { t } = useTranslation("uptimeMonitor");
 	const revokeMutation = useRevokeApiKey();
 	const [confirmText, setConfirmText] = useState("");
@@ -57,9 +61,9 @@ export function RevokeApiKeyDialog({
 		}
 		try {
 			await revokeMutation.mutateAsync({ apiKeyId: apiKey.apiKeyId });
-			toast.success(t("apiKeys.revoke.success", "API key revoked"));
+			if (!isSessionClientActive(client)) return; toast.success(t("apiKeys.revoke.success", "API key revoked"));
 			handleClose();
-		} catch (error) {
+		} catch (error) { if (!isSessionClientActive(client)) return;
 			toast.error(
 				extractErrorMessage(
 					error,
@@ -71,7 +75,7 @@ export function RevokeApiKeyDialog({
 
 	return (
 		<Dialog open={open} onOpenChange={handleClose}>
-			<DialogContent className="sm:max-w-md">
+			<DialogContent className="sm:max-w-[var(--dialog-simple)]">
 				<DialogHeader>
 					<DialogTitle>
 						{t("apiKeys.revoke.title", "Revoke API key")}
@@ -85,7 +89,7 @@ export function RevokeApiKeyDialog({
 					</DialogDescription>
 				</DialogHeader>
 
-				<div className="grid gap-2">
+				<FormField className="form-field">
 					<Label htmlFor="api-key-revoke-confirm">
 						{t("apiKeys.revoke.confirmLabel", "Type REVOKE to confirm")}
 					</Label>
@@ -96,7 +100,7 @@ export function RevokeApiKeyDialog({
 						placeholder={confirmWord}
 						autoComplete="off"
 					/>
-				</div>
+				</FormField>
 
 				<DialogFooter>
 					<Button

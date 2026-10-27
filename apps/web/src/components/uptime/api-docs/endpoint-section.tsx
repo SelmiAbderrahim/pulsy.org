@@ -1,3 +1,4 @@
+import { SectionCard } from "@/components/ui/section-card";
 /**
  * Renders one REST endpoint: method + path, access badge, description,
  * parameter and request-body tables, and example request/response.
@@ -11,8 +12,8 @@
 import { useTranslation } from "react-i18next";
 
 import { Badge } from "@/components/ui/badge";
+import { DocsHelpLink } from "@/components/ui/docs-help-link";
 import {
-	Table,
 	TableBody,
 	TableCell,
 	TableHead,
@@ -27,14 +28,15 @@ import {
 	type HttpMethod,
 } from "./api-endpoints";
 import { CodeBlock } from "./code-block";
+import { ApiDocsTable } from "./api-docs-table";
 
 const METHOD_STYLES: Record<HttpMethod, string> = {
-	GET: "bg-green-50 text-green-900 border-green-200 dark:bg-green-900/20 dark:text-green-300 dark:border-green-900/40",
-	POST: "bg-blue-50 text-blue-900 border-blue-200 dark:bg-blue-900/20 dark:text-blue-300 dark:border-blue-900/40",
+	GET: "bg-success/10 text-success border-success",
+	POST: "bg-primary/10 text-primary border-primary",
 	PATCH:
-		"bg-amber-50 text-amber-900 border-amber-200 dark:bg-amber-900/20 dark:text-amber-300 dark:border-amber-900/40",
+		"bg-warning/10 text-warning border-warning",
 	DELETE:
-		"bg-red-50 text-red-900 border-red-200 dark:bg-red-900/20 dark:text-red-300 dark:border-red-900/40",
+		"bg-destructive/10 text-destructive border-destructive",
 };
 
 interface EndpointSectionProps {
@@ -50,11 +52,11 @@ export function EndpointSection({ endpoint, apiBase }: EndpointSectionProps) {
 	const response = endpoint.responseSample.replaceAll("{{base}}", apiBase);
 
 	return (
-		<section
-			id={`endpoint-${endpoint.id}`}
-			className="scroll-mt-20 rounded-lg border bg-card p-4 sm:p-5"
-		>
-			<div className="flex flex-col gap-3">
+		<SectionCard id={`endpoint-${endpoint.id}`} className="scroll-mt-20" headingLevel="h3"
+      title={t(`endpointDocs.${endpoint.id}.summary`, endpoint.id)}
+      description={t(`endpointDocs.${endpoint.id}.description`, "")}
+      headerEnd={endpoint.id === "metrics" ? <DocsHelpLink docPath="prometheus" /> : undefined}>
+			<div className="flex min-w-0 flex-col gap-3">
 				<div className="flex flex-wrap items-center gap-2">
 					<Badge
 						variant="outline"
@@ -64,7 +66,7 @@ export function EndpointSection({ endpoint, apiBase }: EndpointSectionProps) {
 					</Badge>
 					<code
 						dir="ltr"
-						className="rounded bg-muted px-1.5 py-0.5 font-mono text-sm text-foreground"
+						className="min-w-0 break-all rounded bg-muted px-1.5 py-0.5 font-mono text-sm text-foreground"
 					>
 						{endpoint.path}
 					</code>
@@ -76,22 +78,13 @@ export function EndpointSection({ endpoint, apiBase }: EndpointSectionProps) {
 					</Badge>
 				</div>
 
-				<div>
-					<h3 className="text-base font-semibold">
-						{t(`endpointDocs.${endpoint.id}.summary`, endpoint.id)}
-					</h3>
-					<p className="mt-1 text-sm text-muted-foreground">
-						{t(`endpointDocs.${endpoint.id}.description`, "")}
-					</p>
-				</div>
 
 				{endpoint.params.length > 0 && (
-					<div className="flex flex-col gap-2">
+					<div className="flex min-w-0 flex-col gap-2">
 						<h4 className="text-sm font-medium">
 							{t("endpoint.paramsTitle", "Parameters")}
 						</h4>
-						<div className="overflow-x-auto rounded-md border">
-							<Table>
+				<ApiDocsTable aria-label={`${endpoint.method} ${endpoint.path}`}>
 								<TableHeader>
 									<TableRow>
 										<TableHead className="text-start">
@@ -134,13 +127,12 @@ export function EndpointSection({ endpoint, apiBase }: EndpointSectionProps) {
 										</TableRow>
 									))}
 								</TableBody>
-							</Table>
-						</div>
+							</ApiDocsTable>
 					</div>
 				)}
 
 				{endpoint.body && (
-					<div className="flex flex-col gap-2">
+					<div className="flex min-w-0 flex-col gap-2">
 						<h4 className="text-sm font-medium">
 							{t("endpoint.bodyTitle", "Request body")}
 						</h4>
@@ -155,8 +147,7 @@ export function EndpointSection({ endpoint, apiBase }: EndpointSectionProps) {
 										"All fields are optional — only the fields you send are updated.",
 									)}
 						</p>
-						<div className="overflow-x-auto rounded-md border">
-							<Table>
+				<ApiDocsTable aria-label={`${endpoint.method} ${endpoint.path}`}>
 								<TableHeader>
 									<TableRow>
 										<TableHead className="text-start">
@@ -191,20 +182,19 @@ export function EndpointSection({ endpoint, apiBase }: EndpointSectionProps) {
 										</TableRow>
 									))}
 								</TableBody>
-							</Table>
-						</div>
+							</ApiDocsTable>
 					</div>
 				)}
 
 				<CodeBlock
-					code={request}
+					code={request} language="bash"
 					label={t("endpoint.requestTitle", "Example request")}
 				/>
 				<CodeBlock
-					code={response}
-					label={t("endpoint.responseTitle", "Example response")}
+					code={response} language={endpoint.id === "metrics" ? "text" : "json"}
+					label={`${t("endpoint.responseTitle", "Example response")}${endpoint.responseStatus ? ` — ${endpoint.responseStatus}` : ""}`}
 				/>
 			</div>
-		</section>
+		</SectionCard>
 	);
 }

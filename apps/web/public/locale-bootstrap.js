@@ -21,7 +21,7 @@
     const panels = { notifications: 'notifications', 'status-pages': 'statusPages', templates: 'templates', 'share-links': 'shareLinks', 'saved-views': 'savedViews' };
     let title = labels.nav[routes[pathname]];
     if (pathname === '/dashboard' && panels[search.get('panel')]) title = labels.nav[panels[search.get('panel')]];
-    if (pathname.startsWith('/dashboard/help/')) title = labels.help;
+    if (pathname === '/dashboard/help' || pathname.startsWith('/dashboard/help/')) title = labels.help;
     if (pathname.startsWith('/dashboard/uptime/')) {
       let tab = search.get('tab');
       if (tab === 'reports') tab = 'slaReport';

@@ -2,8 +2,10 @@ import path from "node:path";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vitest/config";
 
+import { helpMarkdown } from "./help-markdown";
+
 export default defineConfig({
-	plugins: [react()],
+	plugins: [helpMarkdown(), react()],
 	resolve: {
 		alias: {
 			"@": path.resolve(__dirname, "./src"),

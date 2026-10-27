@@ -20,3 +20,9 @@ interface ImportMetaEnv {
 interface ImportMeta {
 	readonly env: ImportMetaEnv;
 }
+
+/** Repository guides compiled at build time, with raw HTML disabled. */
+declare module "*.md?help" {
+	const document: import("../help-markdown").HelpDocument;
+	export default document;
+}

@@ -1,6 +1,8 @@
+import { renderWithQueryClient as render } from "@/test/query-wrapper";
+vi.mock("@/components/account-timezone", () => ({ useAccountTimezone: () => "UTC" }));
 import { registerConfirmationHandler } from "@/lib/confirmation";
 import { afterEach as afterConfirmationTest } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reactI18nextMock } from "@/test/i18n-mock";
@@ -28,7 +30,7 @@ vi.mock("@/hooks/uptime", () => ({
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
-vi.mock("sonner", () => ({
+vi.mock("@/lib/toast", () => ({
 	toast: {
 		success: (m: unknown) => toastSuccess(m),
 		error: (m: unknown) => toastError(m),
@@ -73,7 +75,7 @@ describe("ShareLinksSheet states", () => {
 	it("shows a loader while fetching", () => {
 		listState.isLoading = true;
 		render(<ShareLinksSheet open onOpenChange={vi.fn()} />);
-		expect(screen.getByText("Share Links")).toBeInTheDocument();
+		expect(screen.getByText("Share links")).toBeInTheDocument();
 		expect(screen.queryByText("No share links yet.")).not.toBeInTheDocument();
 	});
 
@@ -105,7 +107,7 @@ describe("ShareLinksSheet actions", () => {
 	it("copies the share URL", async () => {
 		listState.data = [shareLink()];
 		render(<ShareLinksSheet open onOpenChange={vi.fn()} />);
-		await userEvent.click(screen.getByRole("button", { name: "Copy link" }));
+		await userEvent.click(screen.getByRole("button", { name: "Copy link Alpha, Beta" }));
 		expect(clipboardWriteText).toHaveBeenCalledWith(
 			`${window.location.origin}/share/tok_abc`,
 		);
@@ -116,7 +118,7 @@ describe("ShareLinksSheet actions", () => {
 		listState.data = [shareLink()];
 		revokeMutateAsync.mockResolvedValue(undefined);
 		render(<ShareLinksSheet open onOpenChange={vi.fn()} />);
-		await userEvent.click(screen.getByRole("button", { name: "Revoke" }));
+		await userEvent.click(screen.getByRole("button", { name: "Revoke Alpha, Beta" }));
 		expect(revokeMutateAsync).toHaveBeenCalledWith({ shareLinkId: "s1" });
 		await waitFor(() =>
 			expect(toastSuccess).toHaveBeenCalledWith("Share link revoked"),
@@ -127,7 +129,7 @@ describe("ShareLinksSheet actions", () => {
 		listState.data = [shareLink()];
 		confirmationDecision.mockResolvedValue(false);
 		render(<ShareLinksSheet open onOpenChange={vi.fn()} />);
-		await userEvent.click(screen.getByRole("button", { name: "Revoke" }));
+		await userEvent.click(screen.getByRole("button", { name: "Revoke Alpha, Beta" }));
 		expect(revokeMutateAsync).not.toHaveBeenCalled();
 	});
 
@@ -135,7 +137,7 @@ describe("ShareLinksSheet actions", () => {
 		listState.data = [shareLink()];
 		revokeMutateAsync.mockRejectedValue(new Error("nope"));
 		render(<ShareLinksSheet open onOpenChange={vi.fn()} />);
-		await userEvent.click(screen.getByRole("button", { name: "Revoke" }));
+		await userEvent.click(screen.getByRole("button", { name: "Revoke Alpha, Beta" }));
 		await waitFor(() => expect(toastError).toHaveBeenCalled());
 	});
 });

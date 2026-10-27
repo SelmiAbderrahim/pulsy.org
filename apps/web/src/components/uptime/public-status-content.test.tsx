@@ -28,11 +28,11 @@ function page(overrides: Partial<PublicStatusPage> = {}): PublicStatusPage {
 }
 
 describe("PublicStatusContent", () => {
-  it("renders the loading spinner", () => {
-    const { container } = render(
+  it("renders an accessible loading state", () => {
+    render(
       <PublicStatusContent data={undefined} isLoading error={null} />,
     );
-    expect(container.querySelector(".animate-spin")).toBeInTheDocument();
+    expect(screen.getByRole("status", { name: "statusPage.loading" })).toBeInTheDocument();
   });
 
   it("renders the error/unavailable state on error", () => {
@@ -59,8 +59,8 @@ describe("PublicStatusContent", () => {
     render(
       <PublicStatusContent data={page()} isLoading={false} error={null} />,
     );
-    expect(screen.getByText("Service Status")).toBeInTheDocument();
-    expect(screen.getByText("No public monitors to display.")).toBeInTheDocument();
+    expect(screen.getByText("Service status")).toBeInTheDocument();
+    expect(screen.getByText("statusPage.noComponentsPublic")).toBeInTheDocument();
   });
 
   it("renders the page title, description, and logo", () => {
@@ -99,7 +99,8 @@ describe("PublicStatusContent", () => {
     );
     expect(screen.getByText("Web")).toBeInTheDocument();
     expect(screen.getByText("Api")).toBeInTheDocument();
-    expect(screen.getByText(/99\.95% · 50ms/)).toBeInTheDocument();
+    expect(screen.getByText("99.95%")).toBeInTheDocument();
+    expect(screen.getByText("50 ms")).toBeInTheDocument();
     // The mock t() echoes the raw overall status passed as the fallback value.
     expect(screen.getByText("outage")).toBeInTheDocument();
   });
@@ -124,7 +125,7 @@ describe("PublicStatusContent", () => {
       />,
     );
     // Unknown maps to the title fallback label.
-    expect(screen.getByText("Service Status")).toBeInTheDocument();
+    expect(screen.getByText("Service status")).toBeInTheDocument();
   });
 
   it("renders ongoing and resolved incidents", () => {
@@ -142,6 +143,6 @@ describe("PublicStatusContent", () => {
     );
     expect(screen.getByText("M1")).toBeInTheDocument();
     expect(screen.getByText("M2")).toBeInTheDocument();
-    expect(screen.getByText("Recent Incidents")).toBeInTheDocument();
+    expect(screen.getByText("Recent incidents")).toBeInTheDocument();
   });
 });

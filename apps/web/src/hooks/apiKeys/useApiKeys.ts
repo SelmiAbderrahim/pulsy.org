@@ -45,3 +45,12 @@ export function useRevokeApiKey() {
 		},
 	});
 }
+
+/** Remove an already revoked key from the owner's list. */
+export function useRemoveApiKey() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (apiKeyId: string) => ApiKeyService.removeApiKey(apiKeyId),
+    onSuccess: () => client.invalidateQueries({ queryKey: uptimeKeys.apiKeys.lists() }),
+  });
+}

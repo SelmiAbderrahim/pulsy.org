@@ -11,6 +11,9 @@ import { trpcMutation, trpcQuery } from "@/lib/api/trpc";
 import type { ApiKey, CreateApiKeyInput, CreatedApiKey } from "@/types/apiKey";
 
 export const ApiKeyService = {
+  async removeApiKey(apiKeyId: string): Promise<{ success: boolean }> {
+    return trpcMutation("apiKey", "remove", { apiKeyId });
+  },
 	/** List the current user's API keys (masked). */
 	async listApiKeys(): Promise<ApiKey[]> {
 		return trpcQuery<ApiKey[]>("apiKey", "list");
