@@ -6,7 +6,7 @@ graphify-out
 dist/
 build/
 *.tsbuildinfo
-
+prompts
 # Env
 .env*
 .env.*

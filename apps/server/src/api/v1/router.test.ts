@@ -817,8 +817,20 @@ describe("documented configuration example executes against the API", () => {
 		const user = await createTestUser();
 		await createTestDefaultChannel(user.id, { channelId: "ch_ops_email" }); // the example binds this existing channel id
 		const base = await buildApp({ resolve: fakeResolve({ tok: { userId: user.id, scope: "full" } }) });
-		const text = documentedManifestText();
-		const manifest = JSON.parse(text) as { monitors: Array<{ type: string; key: string }> };
+		// Pin the shipped example before posting a local fixture, so file contents
+		// are checked for documentation drift without being sent over the network.
+		const manifest = {
+			format: "pulsy-monitor-configuration", version: 1,
+			monitors: [
+				{ key: "api-health", type: "http", name: "API health", url: "https://api.example.com/health", method: "GET", expectedStatus: 200, timeout: 10000, interval: 60, failureThreshold: 3, redirectPolicy: "follow", active: true, tags: ["api"], channelIds: ["ch_ops_email"] },
+				{ key: "dns-www", type: "dns", name: "www A record", configuration: { type: "dns", hostname: "www.example.com", recordType: "A", mode: "matches", expected: ["203.0.113.10"] }, timeout: 10000, interval: 300, failureThreshold: 2, active: true, tags: ["dns"] },
+				{ key: "tcp-postgres", type: "tcp", name: "Postgres port", configuration: { type: "tcp", hostname: "db.example.com", port: 5432 }, timeout: 5000, interval: 60, failureThreshold: 3, active: true, tags: ["db"] },
+				{ key: "nightly-backup", type: "heartbeat", name: "Nightly backup", interval: 86400, graceSeconds: 1800, active: true, tags: ["cron"] },
+				{ key: "web-01", type: "server", name: "web-01", interval: 60, active: true, tags: ["linux"], thresholds: { cpu: 90, memory: 85, disk: 80 }, excludedFilesystems: ["/snap"] },
+			],
+		};
+		expect(JSON.parse(documentedManifestText())).toEqual(manifest);
+		const text = JSON.stringify(manifest);
 		expect(manifest.monitors.map((m) => m.type)).toEqual(["http", "dns", "tcp", "heartbeat", "server"]);
 		const post = (path: string, body: unknown) => fetch(`${base}/api/v1/configuration/${path}`, { method: "POST", headers: authHeaders("tok"), body: JSON.stringify(body) });
 		const preview = await post("preview", { text });

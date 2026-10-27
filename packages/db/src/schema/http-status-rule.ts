@@ -19,7 +19,13 @@ export function parseExpectedStatuses(value: string | number): number[] | null {
   }
   return [...codes].sort((a,b) => a-b);
 }
-export const normalizeExpectedStatuses = (value: string) => value.trim().toLowerCase().replace(/[–—]/g,"-").replace(/\s*([,-])\s*/g,"$1");
+export const normalizeExpectedStatuses = (value: string) => value
+  .toLowerCase()
+  .replace(/[–—]/g, "-")
+  // Trim each delimiter-separated piece in linear time, including malformed input.
+  .split(/([,-])/)
+  .map(part => part.trim())
+  .join("");
 export const apiExpectedStatuses = z.string().max(128).refine(value => parseExpectedStatuses(value) !== null).transform(normalizeExpectedStatuses);
 export function matchesExpectedStatus(status: number, monitor: { expectedStatus: number; expectedStatuses?: string | null }): boolean {
   return (parseExpectedStatuses(monitor.expectedStatuses ?? monitor.expectedStatus) ?? []).includes(status);

@@ -45,6 +45,10 @@ function primeSocket(opts: FakeSocketOptions = {}) {
 		getPeerCertificate,
 		authorized: opts.authorized ?? false,
 		destroy,
+		prependOnceListener(event: string, cb: () => void) {
+			listeners[event] = cb;
+			return socket;
+		},
 		on(event: string, cb: () => void) {
 			listeners[event] = cb;
 			return socket;
@@ -58,7 +62,10 @@ function primeSocket(opts: FakeSocketOptions = {}) {
 				// Defer so the Promise executor finishes registering listeners.
 				queueMicrotask(() => listeners[opts.emit as string]?.());
 			} else {
-				queueMicrotask(() => cb());
+				queueMicrotask(() => {
+					listeners.secure?.();
+					cb();
+				});
 			}
 			return socket;
 		},

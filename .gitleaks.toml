@@ -14,4 +14,7 @@ regexes = [
   '''re_(abcdef123456|mine_123456|newkey_123456)''',
   # Prose describing an expected invalid-Bearer response.
   '''Auth middleware.*missing/garbage/revoked Bearer''',
+  # Historical webhook HMAC test fixture (the live test now generates its key).
+  # CI scans full history: allow only this exact assignment, never arbitrary keys.
+  '''^\s*const secret = "9e831bf0dca46a5728f5c902e31d708a6c4b2f951a63e087d9f5407c18ba263e";$''',
 ]

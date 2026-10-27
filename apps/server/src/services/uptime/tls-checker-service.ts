@@ -45,6 +45,7 @@ export const checkTlsCertificate = async (
 	const port = parsedUrl.port ? Number.parseInt(parsedUrl.port, 10) : 443;
 
 	return new Promise<TlsCertificateInfo | null>((finish) => {
+		let peerCertificate: tls.PeerCertificate | undefined;
 		const deadline = setTimeout(() => {
 			socket.destroy();
 			finish(null);
@@ -53,61 +54,73 @@ export const checkTlsCertificate = async (
 			clearTimeout(deadline);
 			finish(value);
 		};
+		const completeProbe = (authorized: boolean) => {
+			try {
+				const cert = peerCertificate;
+
+				if (!cert || !cert.valid_to) {
+					socket.destroy();
+					resolve(null);
+					return;
+				}
+
+				const expiresAt = new Date(cert.valid_to).toISOString();
+				const now = new Date();
+				const expiryDate = new Date(cert.valid_to);
+				const diffMs = expiryDate.getTime() - now.getTime();
+				const expiresInDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
+
+				const issuerParts: string[] = [];
+				if (cert.issuer) {
+					const issuerOrg = firstCertificateValue(cert.issuer.O);
+					const commonName = firstCertificateValue(cert.issuer.CN);
+					if (issuerOrg) issuerParts.push(issuerOrg);
+					if (commonName) issuerParts.push(commonName);
+				}
+				const issuer =
+					issuerParts.length > 0 ? issuerParts.join(" - ") : "Unknown";
+
+				const valid = expiresInDays > 0 && authorized;
+
+				socket.destroy();
+				resolve({
+					expiresAt,
+					expiresInDays,
+					issuer,
+					valid,
+				});
+			} catch {
+				socket.destroy();
+				resolve(null);
+			}
+		};
 		const socket = tls.connect(
 			{
 				host: hostname,
 				port,
-				rejectUnauthorized: false,
+				rejectUnauthorized: true,
 				servername: isIP(hostname) ? undefined : hostname,
 				timeout: 10000,
 				// Connect to the address that was validated, not a second DNS answer.
 				lookup: validatingLookup as never,
 			},
-			() => {
-				try {
-					const cert = socket.getPeerCertificate();
-
-					if (!cert || !cert.valid_to) {
-						socket.destroy();
-						resolve(null);
-						return;
-					}
-
-					const expiresAt = new Date(cert.valid_to).toISOString();
-					const now = new Date();
-					const expiryDate = new Date(cert.valid_to);
-					const diffMs = expiryDate.getTime() - now.getTime();
-					const expiresInDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
-
-					const issuerParts: string[] = [];
-					if (cert.issuer) {
-						const issuerOrg = firstCertificateValue(cert.issuer.O);
-						const commonName = firstCertificateValue(cert.issuer.CN);
-						if (issuerOrg) issuerParts.push(issuerOrg);
-						if (commonName) issuerParts.push(commonName);
-					}
-					const issuer =
-						issuerParts.length > 0 ? issuerParts.join(" - ") : "Unknown";
-
-					const valid = expiresInDays > 0 && socket.authorized;
-
-					socket.destroy();
-					resolve({
-						expiresAt,
-						expiresInDays,
-						issuer,
-						valid,
-					});
-				} catch {
-					socket.destroy();
-					resolve(null);
-				}
-			},
+			() => completeProbe(socket.authorized),
 		);
 
+		// Capture public certificate metadata before Node's `secure` listener
+		// validates the chain/hostname and destroys rejected sockets. Verification
+		// stays enabled; invalid certificates remain inspectable, never trusted.
+		// No application data or URL credentials are sent through this socket.
+		socket.prependOnceListener("secure", () => {
+			try {
+				peerCertificate = socket.getPeerCertificate();
+			} catch {
+				peerCertificate = undefined;
+			}
+		});
+
 		socket.on("error", () => {
-			socket.destroy();
-			resolve(null);
+			completeProbe(false);
 		});
 
 		socket.on("timeout", () => {

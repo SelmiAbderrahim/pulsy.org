@@ -1,4 +1,4 @@
-import { createHmac } from "node:crypto";
+import { createHmac, randomBytes } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import { createTestMonitor, createTestUser, useCleanDatabase } from "../../../../test/db";
 import { mockFetch } from "../../../../test/fetch-mock";
@@ -14,7 +14,7 @@ describe("webhook v1 retries keep one delivery identity", () => {
 	it("reuses the delivery id, idempotency key and a valid signature on every attempt; a later transition gets a new id", async () => {
 		const owner = await createTestUser();
 		const monitor = await createTestMonitor(owner.id, { name: "Retry API", url: "https://retry.example.com", status: "up" });
-		const secret = "9e831bf0dca46a5728f5c902e31d708a6c4b2f951a63e087d9f5407c18ba263e";
+		const secret = randomBytes(32).toString("hex");
 		const channel = await authedCaller(owner).uptimeMonitor.channel.createDefault({ channelType: "webhook", webhookUrl: "https://hooks.example.com/retry", signingSecret: secret });
 		expect(channel).not.toHaveProperty("signingSecret");
 		expect(channel).not.toHaveProperty("signingSecretCipher");

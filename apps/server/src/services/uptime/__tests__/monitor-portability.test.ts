@@ -195,7 +195,8 @@ describe("malformed manifests give a translated, non-echoing error", () => {
       const failure = await previewMonitorConfiguration(owner.id, bad, tr).then(() => null, error => error as { code: string; message: string });
       expect(failure, bad.slice(0, 40)).not.toBeNull();
       expect(failure!.code).toBe("BAD_REQUEST");
-      expect(failure!.message).not.toMatch(/^errors\.|manifestInvalid/);
+      expect(failure!.message.startsWith("errors.")).toBe(false);
+      expect(failure!.message).not.toContain("manifestInvalid");
       expect(failure!.message).not.toContain("private-secret-value");
       expect(failure!.message.length).toBeGreaterThan(10);
     }

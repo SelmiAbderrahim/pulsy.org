@@ -53,7 +53,7 @@ describe("owner projections", () => {
 		expect(keys).toEqual([
       "uptimeMonitorId", "name", "monitorType", "url", "method", "networkConfig", "expectedStatus", "expectedStatuses", "tlsMonitoringEnabled", "timeout", "interval", "active", "status", "httpStatus", "responseTime", "lastCheckedAt", "nextCheckAt", "tlsExpiresAt", "tlsExpiresInDays", "failureThreshold", "uptimePercentage", "tags", "isPublic", "statusPageTitle", "statusPageDescription", "createdAt", "latencyPolicy", "httpAssertions", "redirectPolicy", "requestConfigured", "overrideChannelCount", "statusPageCount", "alertSuppression", "heartbeat", "uptimeChecks",
     ].sort());
-		expect(keys.filter(key => /user|owner|secret|cipher|token|hash|password|key$/i.test(key) && key !== "uptimeMonitorId" && key !== "tlsMonitoringEnabled")).toEqual([]);
+		expect(keys.filter(key => (/user|owner|secret|cipher|token|hash|password/i.test(key) || key.toLowerCase().endsWith("key")) && key !== "uptimeMonitorId" && key !== "tlsMonitoringEnabled")).toEqual([]);
 	});
 
 	it("monitor.one carries no owner ids or secrets, including nested channels", async () => {

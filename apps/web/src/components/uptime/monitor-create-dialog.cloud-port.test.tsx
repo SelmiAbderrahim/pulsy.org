@@ -386,7 +386,7 @@ it.each(["", "not a url"])("keeps invalid URL %j inline and uses the shared summ
 
 it("shows safe channel destinations with identifiers only in tooltips", () => {
   render(<MonitorCreateDialog open onOpenChange={vi.fn()} templateMode channelOptions={[{ id: "private-row-id", type: "webhook", monitorId: null, destination: "hooks.example.com" }]} />);
-  const choice = screen.getByRole("checkbox", { name: /hooks.example.com/ });
+  const choice = screen.getByRole("checkbox", { name: "webhook · hooks.example.com · templates.defaultChannel" });
   expect(choice.closest("label")).not.toHaveTextContent("private-row-id");
   expect(screen.getByTitle("private-row-id")).toHaveTextContent("hooks.example.com");
 });

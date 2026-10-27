@@ -8,7 +8,7 @@ overrides:
   postcss: 8.5.23
   vite: 7.3.7
   seroval: 1.6.3
-  qs: 6.16.0
+  qs: 6.16.1
   source-map-js: 1.2.2
   proxy-addr: 2.0.8
   body-parser: 2.4.0

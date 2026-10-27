@@ -87,14 +87,22 @@ const app = express();
 // proxy): trust the first proxy hop so `req.ip` reflects X-Forwarded-For.
 app.set("trust proxy", parseTrustProxyHops(process.env.TRUST_PROXY_HOPS ?? "1"));
 
-// Baseline security headers for every API response. The SPA's headers (CSP
-// etc.) are set by nginx in docker/web.nginx.conf; this server only ever
-// returns JSON/PDF, so its own CSP would just be noise on top of nginx's.
+// Baseline security headers for every API response. The SPA's policy lives in
+// nginx; these JSON/PDF responses need no active content, even when accessed
+// directly or rendered by a browser after an error.
 // HSTS is documented at the TLS-terminating reverse proxy instead of here —
 // this container only ever speaks plain HTTP behind nginx.
 app.use(
 	helmet({
-		contentSecurityPolicy: false,
+		contentSecurityPolicy: {
+			useDefaults: false,
+			directives: {
+				defaultSrc: ["'none'"],
+				baseUri: ["'none'"],
+				frameAncestors: ["'none'"],
+				formAction: ["'none'"],
+			},
+		},
 		hsts: false,
 		frameguard: { action: "deny" },
 	}),
