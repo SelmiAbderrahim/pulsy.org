@@ -9,7 +9,8 @@ build/
 
 # Env
 .env*
-!.env.example
+.env.*
+!/.env.example
 
 # Logs
 *.log
@@ -52,3 +53,10 @@ prompts/
 prompt-executor/
 docs/internal/
 docs/PORTING-INVENTORY.md
+
+# Secrets and operator backups
+*.key
+*.pem
+/backups/
+/dumps/
+*.log.*

@@ -3,8 +3,6 @@
 interface ImportMetaEnv {
 	/** Server origin override for the auth/tRPC client (optional). */
 	readonly VITE_SERVER_URL?: string;
-	/** Google Analytics 4 measurement ID (e.g. `G-XXXXXXX`). Unset = analytics off. */
-	readonly VITE_GA_MEASUREMENT_ID?: string;
 	/** Canonical app origin used to distinguish custom status-page domains. */
 	readonly VITE_APP_URL?: string;
 	/** DNS target advertised for custom status-page CNAME records. */

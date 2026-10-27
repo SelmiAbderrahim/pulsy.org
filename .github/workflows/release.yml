@@ -7,10 +7,14 @@ on:
 permissions:
   contents: read
 
+env:
+  VITE_SOURCE_CODE_URL: https://github.com/${{ github.repository }}/tree/${{ github.sha }}
+
 jobs:
   validate:
     name: Validate release tag
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -19,7 +23,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="$(node -p "require('./package.json').version")"
+          version="$(python3 -c 'import json; print(json.load(open("package.json"))["version"])')"
           if [[ ! "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
             echo "package.json version is not a supported SemVer release: $version" >&2
             exit 1
@@ -29,31 +33,40 @@ jobs:
             exit 1
           fi
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-        # Version comes from the "packageManager" field in package.json.
-        # Setting it here too makes the action fail with ERR_PNPM_BAD_PM_VERSION.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-      - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24
-          cache: pnpm
+      - name: Configure disposable local services
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          cp .env.example .env
+          sed -i \
+            -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 24)|" \
+            -e "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(openssl rand -hex 32)|" \
+            -e "s|^BETTER_AUTH_SECRET=.*|BETTER_AUTH_SECRET=$(openssl rand -hex 32)|" \
+            -e 's|^REQUIRE_EMAIL_VERIFICATION=.*|REQUIRE_EMAIL_VERIFICATION=false|' \
+            .env
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Build and start test infrastructure
+        run: make test-infrastructure
 
       - name: Audit production dependencies
-        run: pnpm audit --prod --audit-level high
+        run: docker compose -f docker/docker-compose.yml --env-file .env exec -T server pnpm audit --prod --audit-level high
 
       - name: Typecheck
-        run: pnpm -r typecheck
+        run: make typecheck
 
       - name: Test
-        run: pnpm -r test
+        run: make test
 
-      - name: Build web
-        run: pnpm --filter @pulsy/web build
+      - name: Build images (including native web tests)
+        run: make build
+
+      - name: Remove disposable services
+        if: always()
+        run: docker compose -f docker/docker-compose.yml --env-file .env down --volumes --remove-orphans
 
   images:
     name: Publish images (GHCR, amd64+arm64)
@@ -104,6 +117,7 @@ jobs:
             type=semver,pattern={{major}}.{{minor}}
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
+      # Dockerfile.server cross-builds agent artifacts in its pinned BUILDPLATFORM Go stage.
       - name: Build & push server image (prod target)
         uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:

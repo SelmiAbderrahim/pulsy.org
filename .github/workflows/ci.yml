@@ -14,39 +14,52 @@ concurrency:
 permissions:
   contents: read
 
+env:
+  VITE_SOURCE_CODE_URL: https://github.com/${{ github.repository }}/tree/${{ github.sha }}
+
 jobs:
   build:
     name: Typecheck, test & build
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     steps:
       - name: Checkout
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Setup pnpm
-        uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
-        # Version comes from the "packageManager" field in package.json.
-        # Setting it here too makes the action fail with ERR_PNPM_BAD_PM_VERSION.
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
-      - name: Setup Node
-        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
-        with:
-          node-version: 24
-          cache: pnpm
+      - name: Configure disposable local services
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          cp .env.example .env
+          sed -i \
+            -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 24)|" \
+            -e "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(openssl rand -hex 32)|" \
+            -e "s|^BETTER_AUTH_SECRET=.*|BETTER_AUTH_SECRET=$(openssl rand -hex 32)|" \
+            -e 's|^REQUIRE_EMAIL_VERIFICATION=.*|REQUIRE_EMAIL_VERIFICATION=false|' \
+            .env
 
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+      - name: Build and start test infrastructure
+        run: make test-infrastructure
 
       - name: Audit production dependencies
-        run: pnpm audit --prod --audit-level high
+        run: docker compose -f docker/docker-compose.yml --env-file .env exec -T server pnpm audit --prod --audit-level high
 
       - name: Typecheck
-        run: pnpm -r typecheck
+        run: make typecheck
 
       - name: Test
-        run: pnpm -r test
+        run: make test
 
-      - name: Build web
-        run: pnpm --filter @pulsy/web build
+      - name: Build images (including native web tests)
+        run: make build
+
+      - name: Remove disposable services
+        if: always()
+        run: docker compose -f docker/docker-compose.yml --env-file .env down --volumes --remove-orphans
 
   docker:
     name: Build Docker images
@@ -78,5 +91,144 @@ jobs:
           file: docker/Dockerfile.web
           push: false
           tags: pulsy-web:ci
+          build-args: |
+            VITE_SOURCE_CODE_URL=https://github.com/${{ github.repository }}/tree/${{ github.sha }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  eslint:
+    name: ESLint and policy regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Configure disposable local services
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          cp .env.example .env
+          sed -i \
+            -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 24)|" \
+            -e "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(openssl rand -hex 32)|" \
+            -e "s|^BETTER_AUTH_SECRET=.*|BETTER_AUTH_SECRET=$(openssl rand -hex 32)|" \
+            -e 's|^REQUIRE_EMAIL_VERIFICATION=.*|REQUIRE_EMAIL_VERIFICATION=false|' \
+            .env
+
+      - name: Build and start test infrastructure
+        run: make test-infrastructure
+
+      - name: Run eslint-check
+        run: make eslint-check
+
+      - name: Remove disposable services
+        if: always()
+        run: docker compose -f docker/docker-compose.yml --env-file .env down --volumes --remove-orphans
+
+  translations:
+    name: Translation integrity and regressions
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Configure disposable local services
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          cp .env.example .env
+          sed -i \
+            -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 24)|" \
+            -e "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(openssl rand -hex 32)|" \
+            -e "s|^BETTER_AUTH_SECRET=.*|BETTER_AUTH_SECRET=$(openssl rand -hex 32)|" \
+            -e 's|^REQUIRE_EMAIL_VERIFICATION=.*|REQUIRE_EMAIL_VERIFICATION=false|' \
+            .env
+
+      - name: Build and start test infrastructure
+        run: make test-infrastructure
+
+      - name: Run translations-check
+        run: make translations-check
+
+      - name: Remove disposable services
+        if: always()
+        run: docker compose -f docker/docker-compose.yml --env-file .env down --volumes --remove-orphans
+
+  agent:
+    name: Agent checks and installation
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Configure disposable local services
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          cp .env.example .env
+          sed -i \
+            -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 24)|" \
+            -e "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(openssl rand -hex 32)|" \
+            -e "s|^BETTER_AUTH_SECRET=.*|BETTER_AUTH_SECRET=$(openssl rand -hex 32)|" \
+            -e 's|^REQUIRE_EMAIL_VERIFICATION=.*|REQUIRE_EMAIL_VERIFICATION=false|' \
+            .env
+
+      - name: Vet and test the agent
+        run: make agent-check
+
+      - name: Test the actual systemd installer
+        run: make agent-install-check
+
+      - name: Test the installer-generated Compose agent
+        run: make agent-compose-check
+
+  server-health-e2e:
+    name: Installed-agent server health acceptance
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+
+      - name: Configure disposable local services
+        shell: bash
+        run: |
+          set -euo pipefail
+          umask 077
+          cp .env.example .env
+          sed -i \
+            -e "s|^POSTGRES_PASSWORD=.*|POSTGRES_PASSWORD=$(openssl rand -hex 24)|" \
+            -e "s|^ENCRYPTION_KEY=.*|ENCRYPTION_KEY=$(openssl rand -hex 32)|" \
+            -e "s|^BETTER_AUTH_SECRET=.*|BETTER_AUTH_SECRET=$(openssl rand -hex 32)|" \
+            -e 's|^REQUIRE_EMAIL_VERIFICATION=.*|REQUIRE_EMAIL_VERIFICATION=false|' \
+            .env
+
+      - name: Exercise the installed-agent lifecycle
+        run: make server-health-e2e
+
+      - name: Retain redacted installed-agent evidence
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        with:
+          name: server-health-evidence-${{ github.sha }}
+          path: artifacts/server-health-e2e/
+          if-no-files-found: warn
+          retention-days: 14

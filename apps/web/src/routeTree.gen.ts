@@ -28,6 +28,8 @@ import { Route as AppDashboardApiKeysRouteImport } from './routes/_app/dashboard
 import { Route as AppDashboardApiDocsRouteImport } from './routes/_app/dashboard_.api-docs'
 import { Route as AppDashboardHelpIndexRouteImport } from './routes/_app/dashboard_.help.index'
 import { Route as AppDashboardUptimeMonitorIdRouteImport } from './routes/_app/dashboard_.uptime.$monitorId'
+import { Route as AppDashboardStatusPagesPageIdRouteImport } from './routes/_app/dashboard_.status-pages.$pageId'
+import { Route as AppDashboardHelpTopicRouteImport } from './routes/_app/dashboard_.help.$topic'
 
 const SignupRoute = SignupRouteImport.update({
   id: '/signup',
@@ -126,6 +128,17 @@ const AppDashboardUptimeMonitorIdRoute =
     path: '/dashboard/uptime/$monitorId',
     getParentRoute: () => AppRoute,
   } as any)
+const AppDashboardStatusPagesPageIdRoute =
+  AppDashboardStatusPagesPageIdRouteImport.update({
+    id: '/dashboard_/status-pages/$pageId',
+    path: '/dashboard/status-pages/$pageId',
+    getParentRoute: () => AppRoute,
+  } as any)
+const AppDashboardHelpTopicRoute = AppDashboardHelpTopicRouteImport.update({
+  id: '/$topic',
+  path: '/$topic',
+  getParentRoute: () => AppDashboardHelpRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -144,6 +157,8 @@ export interface FileRoutesByFullPath {
   '/dashboard/import-export': typeof AppDashboardImportExportRoute
   '/dashboard/incidents': typeof AppDashboardIncidentsRoute
   '/status/$userId/$slug': typeof StatusUserIdSlugRoute
+  '/dashboard/help/$topic': typeof AppDashboardHelpTopicRoute
+  '/dashboard/status-pages/$pageId': typeof AppDashboardStatusPagesPageIdRoute
   '/dashboard/uptime/$monitorId': typeof AppDashboardUptimeMonitorIdRoute
   '/dashboard/help/': typeof AppDashboardHelpIndexRoute
 }
@@ -163,6 +178,8 @@ export interface FileRoutesByTo {
   '/dashboard/import-export': typeof AppDashboardImportExportRoute
   '/dashboard/incidents': typeof AppDashboardIncidentsRoute
   '/status/$userId/$slug': typeof StatusUserIdSlugRoute
+  '/dashboard/help/$topic': typeof AppDashboardHelpTopicRoute
+  '/dashboard/status-pages/$pageId': typeof AppDashboardStatusPagesPageIdRoute
   '/dashboard/uptime/$monitorId': typeof AppDashboardUptimeMonitorIdRoute
   '/dashboard/help': typeof AppDashboardHelpIndexRoute
 }
@@ -185,6 +202,8 @@ export interface FileRoutesById {
   '/_app/dashboard_/import-export': typeof AppDashboardImportExportRoute
   '/_app/dashboard_/incidents': typeof AppDashboardIncidentsRoute
   '/status/$userId/$slug': typeof StatusUserIdSlugRoute
+  '/_app/dashboard_/help/$topic': typeof AppDashboardHelpTopicRoute
+  '/_app/dashboard_/status-pages/$pageId': typeof AppDashboardStatusPagesPageIdRoute
   '/_app/dashboard_/uptime/$monitorId': typeof AppDashboardUptimeMonitorIdRoute
   '/_app/dashboard_/help/': typeof AppDashboardHelpIndexRoute
 }
@@ -207,6 +226,8 @@ export interface FileRouteTypes {
     | '/dashboard/import-export'
     | '/dashboard/incidents'
     | '/status/$userId/$slug'
+    | '/dashboard/help/$topic'
+    | '/dashboard/status-pages/$pageId'
     | '/dashboard/uptime/$monitorId'
     | '/dashboard/help/'
   fileRoutesByTo: FileRoutesByTo
@@ -226,6 +247,8 @@ export interface FileRouteTypes {
     | '/dashboard/import-export'
     | '/dashboard/incidents'
     | '/status/$userId/$slug'
+    | '/dashboard/help/$topic'
+    | '/dashboard/status-pages/$pageId'
     | '/dashboard/uptime/$monitorId'
     | '/dashboard/help'
   id:
@@ -247,6 +270,8 @@ export interface FileRouteTypes {
     | '/_app/dashboard_/import-export'
     | '/_app/dashboard_/incidents'
     | '/status/$userId/$slug'
+    | '/_app/dashboard_/help/$topic'
+    | '/_app/dashboard_/status-pages/$pageId'
     | '/_app/dashboard_/uptime/$monitorId'
     | '/_app/dashboard_/help/'
   fileRoutesById: FileRoutesById
@@ -397,14 +422,30 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof AppDashboardUptimeMonitorIdRouteImport
       parentRoute: typeof AppRoute
     }
+    '/_app/dashboard_/status-pages/$pageId': {
+      id: '/_app/dashboard_/status-pages/$pageId'
+      path: '/dashboard/status-pages/$pageId'
+      fullPath: '/dashboard/status-pages/$pageId'
+      preLoaderRoute: typeof AppDashboardStatusPagesPageIdRouteImport
+      parentRoute: typeof AppRoute
+    }
+    '/_app/dashboard_/help/$topic': {
+      id: '/_app/dashboard_/help/$topic'
+      path: '/$topic'
+      fullPath: '/dashboard/help/$topic'
+      preLoaderRoute: typeof AppDashboardHelpTopicRouteImport
+      parentRoute: typeof AppDashboardHelpRoute
+    }
   }
 }
 
 interface AppDashboardHelpRouteChildren {
+  AppDashboardHelpTopicRoute: typeof AppDashboardHelpTopicRoute
   AppDashboardHelpIndexRoute: typeof AppDashboardHelpIndexRoute
 }
 
 const AppDashboardHelpRouteChildren: AppDashboardHelpRouteChildren = {
+  AppDashboardHelpTopicRoute: AppDashboardHelpTopicRoute,
   AppDashboardHelpIndexRoute: AppDashboardHelpIndexRoute,
 }
 
@@ -420,6 +461,7 @@ interface AppRouteChildren {
   AppDashboardHelpRoute: typeof AppDashboardHelpRouteWithChildren
   AppDashboardImportExportRoute: typeof AppDashboardImportExportRoute
   AppDashboardIncidentsRoute: typeof AppDashboardIncidentsRoute
+  AppDashboardStatusPagesPageIdRoute: typeof AppDashboardStatusPagesPageIdRoute
   AppDashboardUptimeMonitorIdRoute: typeof AppDashboardUptimeMonitorIdRoute
 }
 
@@ -432,6 +474,7 @@ const AppRouteChildren: AppRouteChildren = {
   AppDashboardHelpRoute: AppDashboardHelpRouteWithChildren,
   AppDashboardImportExportRoute: AppDashboardImportExportRoute,
   AppDashboardIncidentsRoute: AppDashboardIncidentsRoute,
+  AppDashboardStatusPagesPageIdRoute: AppDashboardStatusPagesPageIdRoute,
   AppDashboardUptimeMonitorIdRoute: AppDashboardUptimeMonitorIdRoute,
 }
 

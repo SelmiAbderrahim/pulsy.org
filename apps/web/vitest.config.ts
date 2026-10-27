@@ -4,6 +4,9 @@ import { defineConfig } from "vitest/config";
 
 import { helpMarkdown } from "./help-markdown";
 
+const maxWorkers = Number(process.env.VITEST_MAX_FORKS ?? 2);
+if (!Number.isSafeInteger(maxWorkers) || maxWorkers < 1) throw new Error("VITEST_MAX_FORKS must be a positive integer");
+
 export default defineConfig({
 	plugins: [helpMarkdown(), react()],
 	resolve: {
@@ -17,9 +20,9 @@ export default defineConfig({
 		setupFiles: ["./src/test/setup.ts"],
 		include: ["src/**/*.test.{ts,tsx}"],
 		// Interaction-heavy jsdom suites flake when many worker threads contend
-		// for CPU (Docker build stage, small CI runners). Two workers + generous
-		// per-test budget keeps runs deterministic everywhere.
-		maxWorkers: 2,
+		// for CPU (Docker build stage, small CI runners). The build pins one worker;
+		// focused container runs default to two with the same test budget.
+		maxWorkers,
 		testTimeout: 30_000,
 		coverage: {
 			provider: "v8",
@@ -49,8 +52,6 @@ export default defineConfig({
 				"src/routes/**", // router composition / route shells
 				// shadcn/ui primitives (third-party-derived)
 				"src/components/ui/**",
-				// Optional GA analytics wrapper
-				"src/lib/analytics/**",
 				// Type-only + test infra
 				"src/types/**",
 				"src/test/**",
