@@ -13,34 +13,34 @@ import {
 // `*.invalid` (deterministic offline) so no real network is required.
 // ---------------------------------------------------------------------------
 
-const ORIGINAL = process.env.BLOCK_PRIVATE_TARGETS;
+beforeEach(() => {
+	// Exercise the legacy alias without inheriting the deployment's explicit policy.
+	vi.stubEnv("MONITOR_ALLOW_PRIVATE_NETWORKS", undefined);
+	vi.stubEnv("BLOCK_PRIVATE_TARGETS", undefined);
+});
 
 function enable(): void {
-	process.env.BLOCK_PRIVATE_TARGETS = "true";
+	vi.stubEnv("BLOCK_PRIVATE_TARGETS", "true");
 }
 
 afterEach(() => {
-	if (ORIGINAL === undefined) {
-		delete process.env.BLOCK_PRIVATE_TARGETS;
-	} else {
-		process.env.BLOCK_PRIVATE_TARGETS = ORIGINAL;
-	}
+	vi.unstubAllEnvs();
 	vi.restoreAllMocks();
 });
 
 describe("isEgressFilteringEnabled", () => {
 	it("is off by default", () => {
-		delete process.env.BLOCK_PRIVATE_TARGETS;
+		vi.stubEnv("BLOCK_PRIVATE_TARGETS", undefined);
 		expect(isEgressFilteringEnabled()).toBe(false);
 	});
 
 	it("is on for 'true' (case-insensitive)", () => {
-		process.env.BLOCK_PRIVATE_TARGETS = "TRUE";
+		vi.stubEnv("BLOCK_PRIVATE_TARGETS", "TRUE");
 		expect(isEgressFilteringEnabled()).toBe(true);
 	});
 
 	it("is off for any other value", () => {
-		process.env.BLOCK_PRIVATE_TARGETS = "1";
+		vi.stubEnv("BLOCK_PRIVATE_TARGETS", "1");
 		expect(isEgressFilteringEnabled()).toBe(false);
 	});
 });
@@ -119,7 +119,7 @@ describe("isBlockedIp — malformed input is fail-closed", () => {
 
 describe("assertOutboundUrlAllowed", () => {
 	it("is a no-op when filtering is disabled", async () => {
-		delete process.env.BLOCK_PRIVATE_TARGETS;
+		vi.stubEnv("BLOCK_PRIVATE_TARGETS", undefined);
 		await expect(
 			assertOutboundUrlAllowed("http://127.0.0.1/"),
 		).resolves.toBeUndefined();
@@ -191,7 +191,7 @@ describe("safeFetch", () => {
 	}
 
 	it("delegates straight to fetch when disabled", async () => {
-		delete process.env.BLOCK_PRIVATE_TARGETS;
+		vi.stubEnv("BLOCK_PRIVATE_TARGETS", undefined);
 		const { calls } = stubFetch(() => new Response("ok", { status: 200 }));
 		const res = await safeFetch("http://127.0.0.1/", { method: "POST" });
 		expect(res.status).toBe(200);
