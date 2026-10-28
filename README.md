@@ -1,14 +1,14 @@
 # Pulsy
 
-[![CI](https://github.com/SelmiAbderrahim/pulsy.org/actions/workflows/ci.yml/badge.svg)](https://github.com/SelmiAbderrahim/pulsy.org/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/SelmiAbderrahim/pulsy.org/actions/workflows/codeql.yml/badge.svg)](https://github.com/SelmiAbderrahim/pulsy.org/actions/workflows/codeql.yml)
-[![Secret scan](https://github.com/SelmiAbderrahim/pulsy.org/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/SelmiAbderrahim/pulsy.org/actions/workflows/secret-scan.yml)
+[![CI](https://github.com/SelmiAbderrahim/pulsy/actions/workflows/ci.yml/badge.svg)](https://github.com/SelmiAbderrahim/pulsy/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/SelmiAbderrahim/pulsy/actions/workflows/codeql.yml/badge.svg)](https://github.com/SelmiAbderrahim/pulsy/actions/workflows/codeql.yml)
+[![Secret scan](https://github.com/SelmiAbderrahim/pulsy/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/SelmiAbderrahim/pulsy/actions/workflows/secret-scan.yml)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D24-339933.svg?logo=node.js&logoColor=white)](.nvmrc)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
 
-Pulsy is a self-hosted website uptime and downtime monitor. It checks HTTP
-endpoints on a schedule, records availability and response times, tracks TLS
+Pulsy is a self-hosted website uptime and downtime monitor. It checks HTTP, DNS and TCP endpoints, receives cron heartbeats and Linux
+server-health reports, records reliability and response times, tracks TLS
 certificate expiry, groups failures into incidents, sends notifications, and
 publishes opt-in status pages.
 
@@ -18,22 +18,28 @@ user on every install.
 
 ## Features
 
-- Scheduled `GET`, `HEAD`, and `POST` checks with configurable timeouts,
-  expected status codes, intervals, and failure thresholds.
-- Up, down, degraded, and pending states with response-time history, uptime
-  charts, incidents, and retention controls.
-- TLS certificate expiry monitoring for HTTPS targets.
-- Email, webhook, Slack, Discord, and Telegram notifications.
-- Resend, SendGrid, and SMTP email-provider credentials, notification targets,
-  and custom webhook-header values encrypted at rest using AES-256-GCM.
-- Named public status pages with selected monitors, recent incidents, optional
-  custom domains, and a deliberately limited public data projection.
-- Expiring monitor-configuration share links that never include history,
-  channels, or credentials.
-- Monthly SLA reports, including PDF download and optional email delivery.
-- A versioned REST API with revocable, hashed Bearer API keys.
-- English, Arabic, French, German, and Spanish interfaces, including RTL
-  support for Arabic.
+- HTTP `GET`, `HEAD` and `POST` checks with expected-status rules, request
+  credentials, header/body assertions, redirect policy and optional TLS expiry.
+- DNS and TCP checks, plus heartbeat/cron monitors with run history and deadlines.
+- Linux CPU, RAM, swap, disk, load and uptime monitoring through the dependency-free
+  [Go agent](docs/self-hosting/server-health-agent.md).
+- Degraded/latency policies, maintenance windows, snoozes and deferred alerts.
+- Incident acknowledgement, notes, runbooks, groups and two-step escalation.
+- Reliability/SLO objectives, duration-weighted history, deployment annotations,
+  daily aggregates and configurable retention.
+- Email, signed webhook v1, Slack, Discord and Telegram notifications; encrypted
+  provider credentials, destinations, custom headers and signing secrets.
+- Published status pages with selected components, announcements, optional history,
+  custom domains, double opt-in email subscriptions, RSS/Atom, JSON feeds and badges.
+- Manifest import/export with preview and reconciliation, saved views, reusable
+  monitor templates and bulk operations.
+- Expiring share links with preview and optional attribution; configuration crosses
+  accounts without private history, notification credentials or channels.
+- SLA PDF reports and monthly email, account timezone preferences and bundled Help.
+- A versioned REST API with scoped, expiring and revocable hashed keys, plus
+  authenticated Prometheus metrics.
+- English, Arabic, French, German and Spanish, including Arabic RTL, dark mode and
+  a responsive keyboard-accessible dashboard.
 
 ## Screenshots
 
@@ -122,8 +128,9 @@ The default stack contains three containers:
 
 The API and PostgreSQL host ports bind to `127.0.0.1`; the web service is the
 public entry point. Put a TLS-terminating reverse proxy in front of it for
-production. The scheduler runs in the server process, so run a single server
-replica unless you add distributed scheduling and rate limiting.
+production. One PostgreSQL advisory-lock leader owns scheduled work across
+server processes. Rate limits remain per process; keep the default single-server
+deployment unless you also account for shared request budgets and proxy trust.
 
 Useful commands:
 
@@ -152,9 +159,10 @@ installation created by an early `drizzle-kit push` release.
 - Terminate TLS at the edge and set `PUBLIC_WEB_URL` and `BETTER_AUTH_URL` to
   the browser-facing HTTPS origin; add any extra origins to `TRUSTED_ORIGINS`.
 - Registrations are open by default. Set `DISABLE_SIGNUP=true` for a private
-  instance, or set `BLOCK_PRIVATE_TARGETS=true` when untrusted users can create
-  monitors. The latter blocks loopback, private, link-local, metadata, ULA, and
-  CGNAT targets and revalidates redirects.
+  instance. Set `MONITOR_ALLOW_PRIVATE_NETWORKS=false` when accounts should
+  reach only public targets. Private/LAN destinations are allowed by default;
+  metadata and link-local addresses are always blocked. DNS is pinned at connect
+  and every redirect is checked. See [network policy](docs/self-hosting/ssrf.md).
 - Restrict access to PostgreSQL and the server port, keep images updated, and
   back up both PostgreSQL and the long-lived encryption key.
 - Configure an outbound email provider if you require verification and password
@@ -173,9 +181,14 @@ reference and the only environment-file template. Important groups include:
 | `POSTGRES_*`, `DATABASE_URL` | Database credentials and connection settings |
 | `ENCRYPTION_KEY`, `BETTER_AUTH_SECRET` | Required application secrets |
 | `PUBLIC_WEB_URL`, `BETTER_AUTH_URL`, `TRUSTED_ORIGINS` | Browser-facing auth/CORS trust |
-| `DISABLE_SIGNUP`, `BLOCK_PRIVATE_TARGETS`, `TRUSTED_ORIGINS` | Registration and network security policy |
+| `DISABLE_SIGNUP`, `REQUIRE_EMAIL_VERIFICATION` | Registration and email-verification policy |
+| `MONITOR_ALLOW_PRIVATE_NETWORKS` | Defaults to `true` for LAN targets; metadata/link-local always blocked |
+| `BLOCK_PRIVATE_TARGETS` | Deprecated alias: `true` denies private targets only when the new setting is absent |
+| `TRUST_PROXY_HOPS` | Trusted reverse-proxy depth, default `1` |
 | `RESEND_API_KEY`, `EMAIL_FROM` | Optional auth and operator email delivery |
-| `CHECK_*`, `CLEANUP_BATCH_SIZE`, `DATABASE_POOL_MAX` | Scheduler, retention, and scale tuning |
+| `CHECK_LOG_RETENTION_DAYS` | Default `30`; check logs, server metrics and reliability retention |
+| `CHECK_CONCURRENCY`, `CLEANUP_BATCH_SIZE`, `DATABASE_POOL_MAX` | Probe concurrency, cleanup batches and connection pool |
+| `AUTH_RATE_LIMIT_PER_MIN`, `TRPC_RATE_LIMIT_PER_MIN`, `NOTIFICATION_RETRY_DELAYS_MS` | Request ceilings and delivery retries |
 | `API_V1_ENABLED`, `API_RATE_LIMIT_PER_MIN` | REST API switch and per-key rate limit |
 | `VITE_APP_URL`, `CUSTOM_DOMAIN_*`, `DNS_RESOLVERS`, `CERTBOT_*` | Custom status-page domains and TLS provisioning |
 | `VITE_SOURCE_CODE_URL` | Public corresponding source linked from every app route |
@@ -192,7 +205,10 @@ default. For custom status-page domains, follow
 Status pages are explicit, publishable resources. Owners choose which monitors
 appear, and the unauthenticated response exposes only monitor names, current
 states, aggregate uptime/response time, page metadata, and recent incidents.
-Monitor URLs, TLS details, owners, channels, and credentials are not returned.
+Monitor URLs, TLS details, owners, channels and credentials are not returned.
+Owners can publish announcements and maintenance notices, enable compact history,
+and configure double opt-in email subscriptions. Feed URLs provide RSS/Atom,
+`status.json`, `badge.svg` and explicitly enabled `history.json` projections.
 
 Pages can use an app-host URL such as `/status/<userId>/<slug>` or a verified
 custom domain. Custom-domain TLS automation is optional host-side tooling under
@@ -208,7 +224,9 @@ curl https://your-pulsy.example/api/v1/monitors \
   -H 'Authorization: Bearer pul_…'
 ```
 
-Plaintext keys are shown once and only their SHA-256 hashes are stored. The
+Choose `read` for read-only clients or `full` for writes, with optional expiry.
+Plaintext keys are shown once and only their SHA-256 hashes are stored. Revocation,
+expiry, removal and banning the owner invalidate access. The
 complete reference and OpenAPI document live in [`docs/api/`](docs/api/README.md).
 
 ## Architecture
@@ -234,8 +252,12 @@ Development is Docker-first. Do not run the application directly on the host.
 ```bash
 cp .env.example .env
 make start
+make migrate
 make typecheck
+make lint
+make translations-check
 make test
+make agent-check
 ```
 
 The test suite uses Vitest. Server and database integration tests run against
@@ -243,9 +265,12 @@ an isolated PostgreSQL database; web tests run in the web Docker build. Coverage
 configuration is maintained per workspace for focused coverage runs. See
 [docs/TESTING.md](docs/TESTING.md) for details.
 
-CI typechecks, tests, audits production dependencies, builds the web app, and
-builds both Docker images. Separate workflows run CodeQL and full-history
-secret scanning.
+CI typechecks, tests, audits production dependencies, enforces ESLint and
+translations, checks agent installation and runs browser acceptance with the real
+60-second reporting interval. Separate workflows retain CodeQL and full-history
+secret scanning. Containers contain source snapshots: rebuild with `make start`
+before checks after edits. See [the agent guide](docs/self-hosting/server-health-agent.md),
+[heartbeat ingress](docs/self-hosting/heartbeat.md) and [testing](docs/TESTING.md).
 
 ## Contributing and support
 

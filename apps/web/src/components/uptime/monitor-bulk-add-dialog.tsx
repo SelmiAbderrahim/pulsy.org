@@ -1,3 +1,19 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { isSessionClientActive } from "@/lib/session-query-client";
+import { FormErrorSummary, useFormValidation } from "@/components/ui/form-validation";
+import { useDraftComparison } from "@/hooks/use-draft-comparison";
+import { formattingLocale } from "@/lib/formatting-locale";
+import { formatInterval } from "@/lib/uptime/format";
+import { layoutTokens } from "@/components/ui/layout-tokens";
+import { formatCount } from "@/lib/count-format";
+import { FormField } from "@/components/ui/form-field";
+import { Collapsible, CollapsibleTrigger, CollapsibleContent } from "@/components/ui/collapsible";
+import { expectedStatusFields } from "@pulsy/db/http-status-rule";
+import { ExpectedStatusInput } from "@/components/uptime/expected-status-input";
+import { normalizeMonitorUrl, canonicalMonitorUrl } from "@pulsy/db/monitor-url";
+import { useUptimeMonitors } from "@/hooks/uptime/useUptimeMonitors";
+import { useTagEntry } from "@/hooks/uptime/useTagEntry";
+import { DEFAULT_FAILURE_THRESHOLD, MAX_MONITOR_TIMEOUT_MS } from "@pulsy/db/monitor-defaults";
 /**
  * Bulk Add dialog — create many monitors at once from a list of URLs.
  *
@@ -8,9 +24,9 @@
  * @module components/uptime/monitor-bulk-add-dialog
  */
 
-import { useMemo, useState } from "react";
+import { useId, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 import { Loader2, X } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
@@ -57,7 +73,9 @@ const METHODS: UptimeMonitorMethod[] = ["GET", "HEAD", "POST"];
 /** Max monitors per batch — mirrors the backend `apiCreateUptimeMonitorsBulk` cap. */
 const MAX_BULK = 50;
 
-interface ParsedUrls {
+export interface ParsedUrls {
+  entries: { line: number; text: string; duplicateName?: string; duplicateLine?: number; state: "valid" | "duplicate" | "invalid" | "unsupported" }[];
+  lineCount: number;
 	/** Unique, valid URLs with an auto-derived name. */
 	valid: { url: string; name: string }[];
 	/** Lines that aren't valid URLs (kept for inline feedback). */
@@ -66,57 +84,73 @@ interface ParsedUrls {
 	duplicateCount: number;
 }
 
-function parseUrls(raw: string): ParsedUrls {
-	const seen = new Set<string>();
-	const valid: { url: string; name: string }[] = [];
-	const invalidLines: string[] = [];
-	let duplicateCount = 0;
-
-	for (const token of raw.split(/\s+/)) {
-		const trimmed = token.trim();
-		if (!trimmed) continue;
-
-		const name = extractNameFromUrl(trimmed);
-		if (!name) {
-			// extractNameFromUrl returns "" only when `new URL()` throws.
-			invalidLines.push(trimmed);
-			continue;
-		}
-
-		const normalized = new URL(trimmed).href;
-		if (seen.has(normalized)) {
-			duplicateCount += 1;
-			continue;
-		}
-		seen.add(normalized);
-		valid.push({ url: normalized, name });
-	}
-
-	return { valid, invalidLines, duplicateCount };
+export function parseUrls(raw: string, existing: ReadonlyArray<{ url: string; name: string }> = []): ParsedUrls {
+  const seen = new Map(existing.flatMap(monitor => { const url = canonicalMonitorUrl(monitor.url); return url ? [[url, { name: monitor.name }] as const] : []; }));
+  const seenLines = new Map<string, number>();
+  const valid: ParsedUrls["valid"] = [], invalidLines: string[] = [], entries: ParsedUrls["entries"] = [];
+  let duplicateCount = 0;
+  const lines = raw.split(/\r?\n/);
+  lines.forEach((line, index) => line.trim().split(/\s+/).filter(Boolean).forEach(text => {
+    const entry: ParsedUrls["entries"][number] = { line: index + 1, text, state: "invalid" };
+    try {
+      const normalized = normalizeMonitorUrl(text);
+      const url = new URL(normalized ?? text);
+      if (!["http:", "https:"].includes(url.protocol)) entry.state = "unsupported";
+      else if (url.hostname && !url.username && !url.password && text.length <= 2048) {
+        const key = canonicalMonitorUrl(url.href)!;
+        entry.text = url.href;
+        const previous = seen.get(key);
+        if (previous) {
+          entry.state = "duplicate";
+          entry.duplicateName = previous.name;
+          entry.duplicateLine = seenLines.get(key);
+          duplicateCount++;
+        } else {
+          entry.state = "valid";
+          seen.set(key, { name: extractNameFromUrl(url.href) });
+          seenLines.set(key, index + 1);
+          valid.push({ url: url.href, name: extractNameFromUrl(url.href) });
+        }
+      }
+    } catch { /* Invalid partial input stays editable and appears in the preview. */ }
+    if (entry.state === "invalid" || entry.state === "unsupported") invalidLines.push(text);
+    entries.push(entry);
+  }));
+  return { valid, invalidLines, duplicateCount, entries, lineCount: raw ? lines.length : 0 };
 }
 
 export function MonitorBulkAddDialog({
 	open,
 	onOpenChange,
 }: MonitorBulkAddDialogProps) {
-	const { t } = useTranslation("uptimeMonitor");
+	const client = useQueryClient();
+  const { t, i18n } = useTranslation("uptimeMonitor");
+  const validation = useFormValidation();
+  const fieldId = useId();
 	const bulkMutation = useCreateUptimeMonitorsBulk();
+
+
 
 	const [urlsText, setUrlsText] = useState("");
 	const [method, setMethod] = useState<UptimeMonitorMethod>("GET");
 	const [interval, setInterval] = useState("300");
 	const [expectedStatus, setExpectedStatus] = useState("200");
 	const [timeout, setTimeout] = useState("10000");
-	const [failureThreshold, setFailureThreshold] = useState("3");
+	const [failureThreshold, setFailureThreshold] = useState(String(DEFAULT_FAILURE_THRESHOLD));
 	const [tags, setTags] = useState<string[]>([]);
 	const [tagInput, setTagInput] = useState("");
+	const tagEntry = useTagEntry({ tags, setTags, input: tagInput, setInput: setTagInput });
+  const values = { urlsText, method, interval, expectedStatus, timeout, failureThreshold, tags, tagInput };
+  const draft = useDraftComparison(values, values, open);
 
-	const parsed = useMemo(() => parseUrls(urlsText), [urlsText]);
+	const existing = useUptimeMonitors({ enabled: open });
+ const parsed = useMemo(() => parseUrls(urlsText, existing.data ?? []), [urlsText, existing.data]);
 	const validCount = parsed.valid.length;
 	const skippedCount = parsed.invalidLines.length + parsed.duplicateCount;
 	const tooMany = validCount > MAX_BULK;
 
 	const resetForm = () => {
+    validation.clear();
 		setUrlsText("");
 		setMethod("GET");
 		setInterval("300");
@@ -125,30 +159,22 @@ export function MonitorBulkAddDialog({
 		setFailureThreshold("3");
 		setTags([]);
 		setTagInput("");
+		tagEntry.reset();
 	};
 
-	const handleAddTag = () => {
-		const trimmed = tagInput.trim();
-		if (trimmed && !tags.includes(trimmed) && tags.length < 10) {
-			setTags([...tags, trimmed]);
-			setTagInput("");
-		}
-	};
+  const changeOpen = (next: boolean) => { if (!next) resetForm(); onOpenChange(next); };
 
 	const handleRemoveTag = (tag: string) => {
 		setTags(tags.filter((tg) => tg !== tag));
 	};
 
-	const handleTagKeyDown = (e: React.KeyboardEvent) => {
-		if (e.key === "Enter") {
-			e.preventDefault();
-			handleAddTag();
-		}
-	};
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
-		if (validCount === 0 || tooMany) return;
+		if (bulkMutation.isPending || validCount === 0 || tooMany || !validation.validate()) return;
+    const statusFields = expectedStatusFields(expectedStatus);
+    if (!statusFields) { validation.show([{ id: "bulk-expectedStatus", message: t("httpStatuses.invalid") }]); return; }
+
 
 		const monitors: CreateUptimeMonitorInput[] = parsed.valid.map(
 			({ url, name }) => ({
@@ -156,7 +182,7 @@ export function MonitorBulkAddDialog({
 				url,
 				method,
 				interval: Number(interval),
-				expectedStatus: Number(expectedStatus),
+				...statusFields,
 				timeout: Number(timeout),
 				failureThreshold: Number(failureThreshold),
 				tags: tags.length > 0 ? tags : undefined,
@@ -165,6 +191,7 @@ export function MonitorBulkAddDialog({
 
 		try {
 			const created = await bulkMutation.mutateAsync(monitors);
+      if (!isSessionClientActive(client)) return;
 			toast.success(
 				t("bulkAdd.success", {
 					defaultValue: "Created {{count}} monitors",
@@ -174,7 +201,10 @@ export function MonitorBulkAddDialog({
 			resetForm();
 			onOpenChange(false);
 		} catch (error) {
-			toast.error(
+      if (!isSessionClientActive(client)) return;
+      const hasFieldErrors = validation.server(error, { urls: "bulk-urls", expectedStatus: "bulk-expectedStatus", expectedStatuses: "bulk-expectedStatus", timeout: "bulk-timeout", failureThreshold: "bulk-failureThreshold", tags: "bulk-tags", interval: `${fieldId}-interval`, method: `${fieldId}-method` });
+
+			if (!hasFieldErrors) toast.error(
 				extractErrorMessage(
 					error,
 					t("bulkAdd.error", "Failed to create monitors"),
@@ -185,11 +215,11 @@ export function MonitorBulkAddDialog({
 
 	return (
 		<>
-		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-[560px]">
-				<form onSubmit={handleSubmit}>
+		<Dialog open={open} onOpenChange={changeOpen}>
+			<DialogContent hasUnsavedChanges={draft.dirty} className={layoutTokens.createDialog}>
+				<form {...draft.formProps} ref={validation.formRef} noValidate onSubmit={handleSubmit}>
 					<DialogHeader>
-						<DialogTitle>{t("bulkAdd.title", "Bulk Add Monitors")}</DialogTitle>
+						<DialogTitle>{t("bulkAdd.title", "Bulk add monitors")}</DialogTitle>
 						<DialogDescription>
 							{t(
 								"bulkAdd.description",
@@ -198,21 +228,18 @@ export function MonitorBulkAddDialog({
 						</DialogDescription>
 					</DialogHeader>
 
-					<div className="grid gap-4 py-4">
-						<div className="grid gap-2">
+					<div className="grid gap-y-[var(--field-row-gap)] py-6">
+            <FormErrorSummary issues={validation.issues} />
+						<FormField className="form-field">
 							<Label htmlFor="bulk-urls">
 								{t("bulkAdd.urlsLabel", "URLs")}
 							</Label>
 							<Textarea
-								id="bulk-urls"
+								id="bulk-urls" {...validation.field("bulk-urls")}
 								value={urlsText}
 								onChange={(e) => setUrlsText(e.target.value)}
-								placeholder={t("bulkAdd.urlsPlaceholder", {
-									defaultValue:
-										"https://example.com\nhttps://api.example.com/health\nhttps://blog.example.com",
-								})}
-								className="min-h-[180px] resize-y font-mono text-sm sm:min-h-[140px]"
-								autoFocus
+								placeholder={t("formUX.example", { defaultValue: "Example: {{value}}", value: "https://example.com\nhttps://api.example.com/health\nhttps://blog.example.com" })}
+								dir="ltr" rows={7} maxLength={110000} className="max-h-72 resize-y font-mono text-base leading-5 sm:text-sm"
 							/>
 							<div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-foreground">
 								<span>
@@ -231,39 +258,19 @@ export function MonitorBulkAddDialog({
 									</span>
 								)}
 							</div>
-							{parsed.invalidLines.length > 0 && (
-								<div className="grid gap-1">
-									<p className="text-xs font-medium text-muted-foreground">
-										{t("bulkAdd.invalidLabel", "Skipped (not valid URLs):")}
-									</p>
-									<div className="flex flex-wrap gap-1">
-										{parsed.invalidLines.slice(0, 8).map((line, i) => (
-											<Badge
-												key={`${line}-${i}`}
-												variant="outline"
-												className="max-w-[200px] truncate border-destructive/40 text-destructive"
-											>
-												{line}
-											</Badge>
-										))}
-										{parsed.invalidLines.length > 8 && (
-											<Badge variant="outline">
-												+{parsed.invalidLines.length - 8}
-											</Badge>
-										)}
-									</div>
-								</div>
-							)}
-						</div>
+              <p className="text-sm text-muted-foreground">{t("bulkUX.lines", { count: parsed.lineCount })} · {t("bulkUX.previewHelp")}</p>
+              {parsed.entries.length > 0 && <Collapsible defaultOpen><CollapsibleTrigger>{t("bulkUX.preview")}</CollapsibleTrigger><CollapsibleContent><ol className="max-h-52 space-y-2 overflow-y-auto rounded-md border p-3 text-sm" aria-label={t("bulkUX.preview")}>{parsed.entries.map((entry, index) => <li key={index} className="grid min-w-0 gap-1"><p>{t("bulkUX.line", { number: entry.line })} · <span className={entry.state === "valid" ? "text-foreground" : "text-muted-foreground"}>{t(`bulkUX.${entry.state}`)}</span></p><bdi dir="ltr" className="break-all font-mono text-[13px]">{entry.text}</bdi>{entry.duplicateLine ? <p>{t("bulkUX.duplicateLine", { line: entry.duplicateLine })}</p> : entry.duplicateName ? <p>{t("creation.duplicateUrl", { name: entry.duplicateName })}</p> : null}</li>)}</ol></CollapsibleContent></Collapsible>}
 
-						<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-							<div className="grid gap-2">
-								<Label>{t("create.fields.method", "HTTP Method")}</Label>
+						</FormField>
+
+						<div className="form-grid grid-cols-1 sm:grid-cols-2">
+							<FormField className="form-field">
+								<Label htmlFor={`${fieldId}-method`}>{t("create.fields.method", "HTTP Method")}</Label>
 								<Select
 									value={method}
 									onValueChange={(v) => setMethod(v as UptimeMonitorMethod)}
 								>
-									<SelectTrigger>
+									<SelectTrigger id={`${fieldId}-method`}>
 										<SelectValue />
 									</SelectTrigger>
 									<SelectContent>
@@ -274,81 +281,65 @@ export function MonitorBulkAddDialog({
 										))}
 									</SelectContent>
 								</Select>
-							</div>
+							</FormField>
 
-							<div className="grid gap-2">
-								<Label>{t("create.fields.interval", "Check Interval")}</Label>
+							<FormField className="form-field">
+								<Label htmlFor={`${fieldId}-interval`}>{t("create.fields.interval", "Check Interval")}</Label>
 								<Select value={interval} onValueChange={setInterval}>
-									<SelectTrigger>
+									<SelectTrigger id={`${fieldId}-interval`}>
 										<SelectValue />
 									</SelectTrigger>
 									<SelectContent>
 										{ALL_INTERVALS.map((i) => (
 											<SelectItem key={i.value} value={i.value}>
-												{t(`intervals.${i.value}`, i.label)}
+												{formatInterval(Number(i.value), t, i18n.language)}
 											</SelectItem>
 										))}
 									</SelectContent>
 								</Select>
-							</div>
+							</FormField>
 						</div>
 
-						<div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-							<div className="grid gap-2">
-								<Label htmlFor="bulk-expectedStatus">
-									{t("create.fields.expectedStatus", "Expected Status")}
-								</Label>
-								<Input
-									id="bulk-expectedStatus"
-									type="number"
-									min={100}
-									max={599}
+						<div className="form-grid grid-cols-1 sm:grid-cols-3">
+							<FormField label={t("create.fields.expectedStatus", "Expected Status")} control={<ExpectedStatusInput
+									id="bulk-expectedStatus" {...validation.field("bulk-expectedStatus")} required
 									value={expectedStatus}
 									onChange={(e) => setExpectedStatus(e.target.value)}
-								/>
-							</div>
+								/>} />
 
-							<div className="grid gap-2">
-								<Label htmlFor="bulk-timeout">
-									{t("create.fields.timeout", "Timeout")}
-								</Label>
-								<Input
-									id="bulk-timeout"
+							<FormField label={t("create.fields.timeout", "Timeout")} control={<Input
+									id="bulk-timeout" {...validation.field("bulk-timeout")} validateOnBlur required
 									type="number"
 									min={1000}
-									max={60000}
-									step={1000}
+									max={MAX_MONITOR_TIMEOUT_MS}
+									step={1}
 									value={timeout}
 									onChange={(e) => setTimeout(e.target.value)}
-								/>
-							</div>
+								/>} helper={t("create.fields.timeoutDescription")} />
 
-							<div className="grid gap-2">
-								<Label htmlFor="bulk-failureThreshold">
-									{t("create.fields.failureThreshold", "Threshold")}
-								</Label>
-								<Input
-									id="bulk-failureThreshold"
+							<FormField label={t("create.fields.failureThreshold", "Threshold")} control={<Input
+									id="bulk-failureThreshold" {...validation.field("bulk-failureThreshold")} validateOnBlur required
 									type="number"
 									min={1}
 									max={10}
 									value={failureThreshold}
 									onChange={(e) => setFailureThreshold(e.target.value)}
-								/>
-							</div>
+								/>} helper={t("create.fields.failureThresholdDescription", { default: new Intl.NumberFormat(formattingLocale(i18n.language)).format(DEFAULT_FAILURE_THRESHOLD) })} />
 						</div>
 
-						<div className="grid gap-2">
+						<FormField className="form-field">
 							<Label htmlFor="bulk-tags">{t("tags.label", "Tags")}</Label>
 							<Input
-								id="bulk-tags"
+								id="bulk-tags" {...validation.field("bulk-tags")}
 								value={tagInput}
-								onChange={(e) => setTagInput(e.target.value)}
-								onKeyDown={handleTagKeyDown}
-								onBlur={handleAddTag}
-								placeholder={t("tags.placeholder", "Add a tag...")}
+								onChange={tagEntry.onChange}
+								onKeyDown={tagEntry.onKeyDown}
+								onBlur={tagEntry.commit}
+								aria-describedby="bulk-add-tags-feedback"
+								placeholder={t("tags.placeholder", "Example: production")}
 								disabled={tags.length >= 10}
 							/>
+							<p id="bulk-add-tags-feedback" role="status" className="text-xs text-muted-foreground">{tagEntry.feedback}</p>
 							{tags.length > 0 && (
 								<div className="flex flex-wrap gap-1">
 									{tags.map((tag) => (
@@ -373,14 +364,16 @@ export function MonitorBulkAddDialog({
 									))}
 								</div>
 							)}
-						</div>
+						</FormField>
 					</div>
 
-					<DialogFooter className="border-t pt-3">
+					<div className="border-t py-3 text-sm text-muted-foreground">
+            <p>{t("bulkUX.atomic")}</p>
+          </div><DialogFooter>
 						<Button
 							type="button"
 							variant="outline"
-							onClick={() => onOpenChange(false)}
+							data-dialog-discard onClick={() => changeOpen(false)}
 							className="h-[44px] w-full sm:w-auto"
 						>
 							{t("actions.cancel", "Cancel")}
@@ -393,15 +386,13 @@ export function MonitorBulkAddDialog({
 							{bulkMutation.isPending && (
 								<Loader2 className="h-4 w-4 me-2 animate-spin" />
 							)}
-							{t("bulkAdd.submit", {
-								defaultValue: "Add {{count}} Monitors",
-								count: validCount,
-							})}
+							{validCount === 0 ? t("bulkAdd.submitEmpty", "Add monitors") : formatCount((key, options) => t(key, { ...options, defaultValue: validCount === 1 ? "Add {{formattedCount}} monitor" : "Add {{formattedCount}} monitors" }), "bulkAdd.submit", validCount, i18n.language)}
 						</Button>
 					</DialogFooter>
 				</form>
 			</DialogContent>
 		</Dialog>
+
 		</>
 	);
 }

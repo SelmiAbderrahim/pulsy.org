@@ -66,4 +66,18 @@ describe("filterMonitors()", () => {
 		const withoutTags = [monitor({ uptimeMonitorId: "4", name: "X", tags: undefined as unknown as string[] })];
 		expect(filterMonitors(withoutTags, "zzz")).toHaveLength(0);
 	});
+
+	it("matches DNS identity fields without requiring a URL or matching name", () => {
+		const dns = monitor({ uptimeMonitorId: "dns", name: "Resolver", url: "", monitorType: "dns", networkConfig: { type: "dns", hostname: "records.internal", recordType: "MX", mode: "exists", expected: [] } });
+		for (const query of ["RECORDS.INTERNAL", "mx"]) {
+			expect(filterMonitors([dns, ...monitors], query).map(row => row.uptimeMonitorId)).toEqual(["dns"]);
+		}
+	});
+
+	it("matches TCP hostname, port and combined address", () => {
+		const tcp = monitor({ uptimeMonitorId: "tcp", name: "Database", url: "", monitorType: "tcp", networkConfig: { type: "tcp", hostname: "db.internal", port: 5432 } });
+		for (const query of ["DB.INTERNAL", "5432", "db.internal:5432"]) {
+			expect(filterMonitors([tcp, ...monitors], query).map(row => row.uptimeMonitorId)).toEqual(["tcp"]);
+		}
+	});
 });

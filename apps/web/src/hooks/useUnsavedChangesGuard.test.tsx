@@ -1,0 +1,23 @@
+import { renderHook } from "@testing-library/react";
+import { expect, it, vi } from "vitest";
+import { useUnsavedChangesGuard } from "./useUnsavedChangesGuard";
+const mocks = vi.hoisted(() => ({ blocker: vi.fn(), confirm: vi.fn() }));
+vi.mock("@tanstack/react-router", () => ({ useBlocker: mocks.blocker }));
+vi.mock("@/lib/confirmation", () => ({ requestConfirmation: mocks.confirm }));
+vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
+it("blocks dirty navigation until themed discard is accepted and unregisters unload after save", async () => {
+  const { rerender } = renderHook(({ dirty }) => useUnsavedChangesGuard(dirty), { initialProps: { dirty: true } });
+  const options = mocks.blocker.mock.lastCall![0];
+  expect(options.disabled).toBe(false);
+  const transition = { current: { pathname: "/monitor", search: { tab: "settings" } }, next: { pathname: "/monitor", search: { tab: "overview" } } };
+  mocks.confirm.mockResolvedValue(false);
+  expect(await options.shouldBlockFn(transition)).toBe(true);
+  mocks.confirm.mockResolvedValue(true);
+  expect(await options.shouldBlockFn(transition)).toBe(false);
+  expect(mocks.confirm).toHaveBeenCalledWith("common:nav.leaveDescription", expect.objectContaining({ title: "common:nav.leaveWithoutSaving", action: "communication.discard" }));
+  const dirtyUnload = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(dirtyUnload);
+  expect(dirtyUnload.defaultPrevented).toBe(true);
+  rerender({ dirty: false });
+  const cleanUnload = new Event("beforeunload", { cancelable: true }); window.dispatchEvent(cleanUnload);
+  expect(cleanUnload.defaultPrevented).toBe(false);
+});

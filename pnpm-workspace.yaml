@@ -4,7 +4,15 @@ packages:
 
 # Security floor for transitive Vite/Vitest consumers (GHSA-r28c-9q8g-f849).
 overrides:
-  postcss: 8.5.18
+  undici: 7.30.1
+  postcss: 8.5.23
+  vite: 7.3.7
+  seroval: 1.6.3
+  qs: 6.16.1
+  source-map-js: 1.2.2
+  proxy-addr: 2.0.8
+  body-parser: 2.4.0
+  "nanoid@3": 3.3.18
   "@esbuild-kit/core-utils>esbuild": 0.25.4
 
 # pnpm's automatic node_modules-vs-lockfile check wants to purge/reinstall

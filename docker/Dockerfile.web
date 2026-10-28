@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # Build context = repo root. Builds the Vite SPA and serves it with nginx,
 # proxying /api/* to the server container (same-origin cookies).
-FROM node:24-slim AS build
+FROM node:24-slim AS dependencies
 ENV PNPM_HOME=/pnpm
 ENV PATH=$PNPM_HOME:$PATH
 RUN corepack enable
@@ -11,11 +11,16 @@ COPY packages/db/package.json packages/db/package.json
 COPY apps/server/package.json apps/server/package.json
 COPY apps/web/package.json apps/web/package.json
 RUN pnpm install --frozen-lockfile
+FROM dependencies AS source
 COPY . .
+
+FROM source AS assets
+RUN node scripts/check-translations.mjs
+
+FROM assets AS build
 # Client-exposed build-time config. VITE_-prefixed vars are baked into the
-# bundle by Vite; unset means analytics is disabled.
+# bundle by Vite.
 ARG VITE_SERVER_URL=""
-ARG VITE_GA_MEASUREMENT_ID=""
 # Canonical app host: any other host is treated as a custom status-page domain.
 ARG VITE_APP_URL=""
 # Routing target advertised when a user attaches a custom domain (CNAME/A).
@@ -27,7 +32,6 @@ ARG VITE_DEMO_NOTICE=""
 # with their exact commit; source builds can override it through Compose.
 ARG VITE_SOURCE_CODE_URL="https://github.com/SelmiAbderrahim/pulsy"
 ENV VITE_SERVER_URL=$VITE_SERVER_URL
-ENV VITE_GA_MEASUREMENT_ID=$VITE_GA_MEASUREMENT_ID
 ENV VITE_APP_URL=$VITE_APP_URL
 ENV VITE_CUSTOM_DOMAIN_CNAME_TARGET=$VITE_CUSTOM_DOMAIN_CNAME_TARGET
 ENV VITE_CUSTOM_DOMAIN_IP=$VITE_CUSTOM_DOMAIN_IP
@@ -42,11 +46,17 @@ RUN pnpm --filter @pulsy/web typecheck
 # trips vitest's 30s per-test timeout on nothing but emulation overhead. The
 # release workflow gates on the same suite natively in its `validate` job
 # before any image is built. Every other build path leaves this on.
+ENV VITEST_MAX_FORKS=1
 ARG RUN_WEB_TESTS=1
 RUN if [ "$RUN_WEB_TESTS" = "1" ]; then pnpm --filter @pulsy/web test; fi
 
 # Unprivileged nginx: master process runs as UID 101 (nginx), listens on 8080.
 FROM nginxinc/nginx-unprivileged:1.29-alpine AS runtime
+USER root
+RUN mkdir -p /var/cache/pulsy/assets && chown -R 101:101 /var/cache/pulsy
+COPY --chmod=0755 docker/40-retain-assets.sh /docker-entrypoint.d/40-retain-assets.sh
 COPY docker/web.nginx.conf /etc/nginx/conf.d/default.conf
 COPY --from=build /app/apps/web/dist /usr/share/nginx/html
+COPY --from=build /app/docs/api/openapi.yaml /usr/share/nginx/html/openapi.yaml
 EXPOSE 8080
+USER 101:101

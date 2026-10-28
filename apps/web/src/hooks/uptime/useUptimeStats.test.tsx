@@ -2,8 +2,10 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { UptimeService } from "@/services/uptime/uptimeService";
 import { createWrapper } from "@/test/query-wrapper";
+import { uptimeKeys } from "./queryKeys";
 import {
 	useUptimeCheckLogs,
+	useUptimeDailyUptime,
 	useUptimeDashboardSummary,
 	useUptimeIncident,
 	useUptimeIncidents,
@@ -15,6 +17,7 @@ import {
 vi.mock("@/services/uptime/uptimeService", () => ({
 	UptimeService: {
 		getDashboardSummary: vi.fn(),
+		getDailyUptime: vi.fn(),
 		getCheckLogStats: vi.fn(),
 		listCheckLogs: vi.fn(),
 		listNotificationLogs: vi.fn(),
@@ -196,6 +199,14 @@ describe("useUptimeStatusChanges", () => {
 });
 
 describe("useUptimeIncidents", () => {
+	it("revalidates a cached empty list when returning after an external check", async () => {
+		const { Wrapper, client } = createWrapper();
+		client.setQueryData(uptimeKeys.incidents.list("m1"), []);
+		svc.listIncidents.mockResolvedValue([{ incidentId: "new-incident", status: "ongoing" }] as never);
+		const { result } = renderHook(() => useUptimeIncidents("m1", 50), { wrapper: Wrapper });
+		await waitFor(() => expect(result.current.data?.[0]?.incidentId).toBe("new-incident"));
+		expect(svc.listIncidents).toHaveBeenCalledWith("m1", 50);
+	});
 	it("fetches incidents with a limit", async () => {
 		svc.listIncidents.mockResolvedValue([] as never);
 		const { Wrapper } = createWrapper();
@@ -251,4 +262,65 @@ describe("useUptimeIncident", () => {
 		);
 		expect(result.current.fetchStatus).toBe("idle");
 	});
+});
+
+
+describe("useUptimeDailyUptime", () => {
+  it("does not fetch for an empty monitor identity", () => {
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useUptimeDailyUptime(""), { wrapper: Wrapper });
+    expect(result.current.fetchStatus).toBe("idle");
+    expect(svc.getDailyUptime).not.toHaveBeenCalled();
+  });
+
+  it("isolates monitor and day-window caches and clears old identity while pending", async () => {
+    svc.getDailyUptime.mockResolvedValue([{ date: "2026-10-09", status: "down", uptimePercent: 0, totalChecks: 4 }]);
+    const { Wrapper, client } = createWrapper();
+    const { result, rerender } = renderHook(({ id, days }) => useUptimeDailyUptime(id, days),
+      { wrapper: Wrapper, initialProps: { id: "m1", days: 90 } });
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+    svc.getDailyUptime.mockImplementation(() => new Promise(() => {}));
+    rerender({ id: "m2", days: 90 });
+    expect(result.current.data).toBeUndefined();
+    expect(result.current.isPending).toBe(true);
+    rerender({ id: "m1", days: 7 });
+    expect(result.current.data).toBeUndefined();
+    expect(client.getQueryCache().getAll()).toHaveLength(3);
+  });
+
+  it("exposes fetch failure and recovers through explicit retry", async () => {
+    svc.getDailyUptime.mockRejectedValueOnce(new Error("offline")).mockResolvedValue([]);
+    const { Wrapper } = createWrapper();
+    const { result } = renderHook(() => useUptimeDailyUptime("m1"), { wrapper: Wrapper });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(svc.getDailyUptime).toHaveBeenCalledTimes(1);
+    await result.current.refetch();
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+  });
+});
+
+
+describe("statistics window identity", () => {
+  it("refetches a changed window without reusing another window's value", async () => {
+    svc.getCheckLogStats.mockImplementation(async (_id,days) => ({uptimePercentage:days===7?0:100} as never));
+    const {Wrapper}=createWrapper();
+    const {result,rerender}=renderHook(({days})=>useUptimeMonitorStats("m1",days),{wrapper:Wrapper,initialProps:{days:30}});
+    await waitFor(()=>expect(result.current.data?.uptimePercentage).toBe(100));
+    rerender({days:7});
+    expect(result.current.data).toBeUndefined();
+    await waitFor(()=>expect(result.current.data?.uptimePercentage).toBe(0));
+    expect(svc.getCheckLogStats).toHaveBeenCalledWith("m1",7);
+  });
+});
+
+it("separates check-log pages in the cache while keeping their invalidation prefix", async () => {
+  svc.listCheckLogs.mockImplementation(async (_id, options) => ({ data: [{ checkLogId: `page-${options?.offset ?? 0}` }], total: 201 }) as never);
+  const { Wrapper, client } = createWrapper();
+  const { result, rerender } = renderHook(({ offset }) => useUptimeCheckLogs("m1", { limit: 100, offset }), { initialProps: { offset: 0 }, wrapper: Wrapper });
+  await waitFor(() => expect(result.current.data?.data[0]?.checkLogId).toBe("page-0"));
+  rerender({ offset: 100 });
+  await waitFor(() => expect(result.current.data?.data[0]?.checkLogId).toBe("page-100"));
+  expect(client.getQueriesData({ queryKey: uptimeKeys.checkLogs.list("m1") })).toHaveLength(2);
+  rerender({ offset: 0 });
+  await waitFor(() => expect(result.current.data?.data[0]?.checkLogId).toBe("page-0"));
 });

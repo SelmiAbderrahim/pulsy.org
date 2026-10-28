@@ -1,4 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithQueryClient as render } from "@/test/query-wrapper";
+import { registerConfirmationHandler } from "@/lib/confirmation";
+import { afterEach as afterConfirmationTest } from "vitest";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reactI18nextMock } from "@/test/i18n-mock";
@@ -22,6 +25,7 @@ const toggleMutateAsync = vi.fn();
 const checkNowMutateAsync = vi.fn();
 const pending = { delete: false, toggle: false, check: false };
 vi.mock("@/hooks/uptime", () => ({
+ useCreateUptimeShareLink: () => ({ mutateAsync: vi.fn(), isPending: false }),
 	useDeleteUptimeMonitor: () => ({
 		mutateAsync: deleteMutateAsync,
 		isPending: pending.delete,
@@ -38,7 +42,7 @@ vi.mock("@/hooks/uptime", () => ({
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
-vi.mock("sonner", () => ({
+vi.mock("@/lib/toast", () => ({
 	toast: {
 		success: (m: unknown) => toastSuccess(m),
 		error: (m: unknown) => toastError(m),
@@ -56,10 +60,18 @@ function monitor(overrides: Partial<UptimeMonitor> = {}): UptimeMonitor {
 	} as UptimeMonitor;
 }
 
+const confirmationDecision = vi.fn().mockResolvedValue(true);
+let unregisterConfirmation: (() => void) | undefined;
+beforeEach(() => {
+  confirmationDecision.mockResolvedValue(true);
+  unregisterConfirmation = registerConfirmationHandler(confirmationDecision);
+});
+afterConfirmationTest(() => unregisterConfirmation?.());
+
 beforeEach(() => {
 	vi.clearAllMocks();
 	pending.delete = pending.toggle = pending.check = false;
-	vi.spyOn(window, "confirm").mockReturnValue(true);
+	confirmationDecision.mockResolvedValue(true);
 });
 
 describe("MonitorDetailHeader status badge", () => {
@@ -71,7 +83,7 @@ describe("MonitorDetailHeader status badge", () => {
 	] satisfies Array<[UptimeMonitorStatus, string]>;
 
 	it.each(statusCases)("renders the %s status badge", (status, label) => {
-		render(<MonitorDetailHeader monitor={monitor({ status })} />);
+		render(<MonitorDetailHeader monitor={monitor({ status, lastCheckedAt: "2026-10-13T12:00:00Z" })} />);
 		expect(screen.getByText(label)).toBeInTheDocument();
 	});
 });
@@ -87,22 +99,21 @@ describe("MonitorDetailHeader actions", () => {
 		expect(toastSuccess).toHaveBeenCalledWith("checkNow.success");
 	});
 
-	it("disables/checks now is unavailable for inactive monitors and shows Enable", () => {
+	it("disables/checks now is unavailable for inactive monitors and shows Enable", async () => {
 		render(<MonitorDetailHeader monitor={monitor({ active: false })} />);
 		expect(
 			screen.getByRole("button", { name: "actions.checkNow" }),
 		).toBeDisabled();
+ await userEvent.click(screen.getByRole("button", { name: "detailUX.more" }));
 		expect(
-			screen.getByRole("button", { name: /actions.enable/ }),
+			screen.getByRole("menuitem", { name: /actions.enable/ }),
 		).toBeInTheDocument();
 	});
 
 	it("toggles a monitor and shows the disable-success toast when active", async () => {
 		toggleMutateAsync.mockResolvedValue(undefined);
 		render(<MonitorDetailHeader monitor={monitor({ active: true })} />);
-		await userEvent.click(
-			screen.getByRole("button", { name: /actions.disable/ }),
-		);
+		await menuAction(/actions.disable/);
 		await waitFor(() =>
 			expect(toastSuccess).toHaveBeenCalledWith("toggle.disableSuccess"),
 		);
@@ -111,9 +122,7 @@ describe("MonitorDetailHeader actions", () => {
 	it("toggles a monitor and shows the enable-success toast when inactive", async () => {
 		toggleMutateAsync.mockResolvedValue(undefined);
 		render(<MonitorDetailHeader monitor={monitor({ active: false })} />);
-		await userEvent.click(
-			screen.getByRole("button", { name: /actions.enable/ }),
-		);
+		await menuAction(/actions.enable/);
 		await waitFor(() =>
 			expect(toastSuccess).toHaveBeenCalledWith("toggle.enableSuccess"),
 		);
@@ -122,20 +131,16 @@ describe("MonitorDetailHeader actions", () => {
 	it("deletes and navigates home on confirm", async () => {
 		deleteMutateAsync.mockResolvedValue(undefined);
 		render(<MonitorDetailHeader monitor={monitor()} />);
-		await userEvent.click(
-			screen.getByRole("button", { name: "actions.deleteMonitor" }),
-		);
+		await menuAction("Delete monitor");
 		await waitFor(() => expect(deleteMutateAsync).toHaveBeenCalled());
 		expect(navigate).toHaveBeenCalledWith({ to: "/dashboard" });
 		expect(toastSuccess).toHaveBeenCalledWith("delete.success");
 	});
 
 	it("aborts delete when confirm is declined", async () => {
-		vi.spyOn(window, "confirm").mockReturnValue(false);
+		confirmationDecision.mockResolvedValue(false);
 		render(<MonitorDetailHeader monitor={monitor()} />);
-		await userEvent.click(
-			screen.getByRole("button", { name: "actions.deleteMonitor" }),
-		);
+		await menuAction("Delete monitor");
 		expect(deleteMutateAsync).not.toHaveBeenCalled();
 	});
 
@@ -148,13 +153,9 @@ describe("MonitorDetailHeader actions", () => {
 			screen.getByRole("button", { name: "actions.checkNow" }),
 		);
 		await waitFor(() => expect(toastError).toHaveBeenCalledWith("check fail"));
-		await userEvent.click(
-			screen.getByRole("button", { name: /actions.disable/ }),
-		);
+		await menuAction(/actions.disable/);
 		await waitFor(() => expect(toastError).toHaveBeenCalledWith("toggle fail"));
-		await userEvent.click(
-			screen.getByRole("button", { name: "actions.deleteMonitor" }),
-		);
+		await menuAction("Delete monitor");
 		await waitFor(() => expect(toastError).toHaveBeenCalledWith("delete fail"));
 	});
 
@@ -164,3 +165,7 @@ describe("MonitorDetailHeader actions", () => {
 		expect(container.querySelector(".animate-spin")).toBeInTheDocument();
 	});
 });
+
+vi.mock("../monitor-reuse-controls", () => ({ MonitorReuseActions: ({ children }: { children: (actions: { duplicate: () => void; saveTemplate: () => void; busy: boolean }) => unknown }) => children({ duplicate: vi.fn(), saveTemplate: vi.fn(), busy: false }) }));
+
+async function menuAction(name: string | RegExp) { await userEvent.click(screen.getByRole("button", { name: "detailUX.more" })); await userEvent.click(screen.getByRole("menuitem", { name })); }

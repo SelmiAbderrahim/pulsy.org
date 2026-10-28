@@ -1,7 +1,14 @@
-import { Globe, Loader2, Pencil, Plus, Send, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { isSessionClientActive } from "@/lib/session-query-client";
+import { WebhookSecretDialog, RotateWebhookSecret } from "@/components/uptime/webhook-secret-dialog";
+import { SectionCard } from "@/components/ui/section-card";
+import { requestConfirmation } from "@/lib/confirmation";
+import { parseRecipients } from "@/lib/uptime/recipients";
+import { channelDestination } from "@/lib/uptime/channel-destination";
+import { Bell, Loader2, Pencil, Plus, Send, Trash2 } from "lucide-react";
+import { useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -14,6 +21,7 @@ import {
 	useDeleteUptimeNotificationChannel,
 	useTestUptimeNotificationChannel,
 	useUpdateUptimeNotificationChannel,
+	useUptimeChannelHealth,
 	useUptimeDefaultChannels,
 	useUptimeEmailProviders,
 } from "@/hooks/uptime";
@@ -22,6 +30,7 @@ import type {
 	UptimeNotificationChannel,
 	UptimeNotificationChannelType,
 } from "@/types/uptime";
+import { CHANNEL_UNHEALTHY_THRESHOLD } from "@/types/uptime";
 
 /**
  * Account-level default notification channels. These apply to every monitor
@@ -30,13 +39,17 @@ import type {
  */
 export function DefaultChannelsSection() {
 	const { t } = useTranslation("uptimeMonitor");
-	const { data: channels } = useUptimeDefaultChannels();
+ const client = useQueryClient();
+	const { data: channels, isPending: channelsLoading, error: channelsError, refetch: retryChannels } = useUptimeDefaultChannels();
+	const { data: channelHealth } = useUptimeChannelHealth();
 	const { data: emailProviders } = useUptimeEmailProviders();
 	const createMutation = useCreateUptimeDefaultChannel();
 	const updateMutation = useUpdateUptimeNotificationChannel();
 	const deleteMutation = useDeleteUptimeNotificationChannel();
 	const testMutation = useTestUptimeNotificationChannel();
-	const [createOpen, setCreateOpen] = useState(false);
+	const [signingSecret, setSigningSecret] = useState<string | null>(null);
+	const editorGeneration = useRef(0);
+ const [createOpen, setCreateOpen] = useState(false);
 	const [editChannel, setEditChannel] =
 		useState<UptimeNotificationChannel | null>(null);
 
@@ -46,39 +59,48 @@ export function DefaultChannelsSection() {
 	const [emailProviderId, setEmailProviderId] = useState("");
 	const [webhookUrl, setWebhookUrl] = useState("");
 	const [webhookHeaders, setWebhookHeaders] = useState("");
+  const [submissionError, setSubmissionError] = useState<unknown>(null);
 	const [recipients, setRecipients] = useState("");
 	const [notifyOnDown, setNotifyOnDown] = useState(true);
+	const [notifyOnDegraded, setNotifyOnDegraded] = useState(false);
 	const [notifyOnRecovery, setNotifyOnRecovery] = useState(true);
 	const [notifyOnTlsExpiry, setNotifyOnTlsExpiry] = useState(false);
 	const [tlsExpiryThresholdDays, setTlsExpiryThresholdDays] = useState("14");
 
 	const resetForm = () => {
+    setSubmissionError("");
 		setChannelType("email");
 		setEmailProviderId("");
 		setWebhookUrl("");
 		setWebhookHeaders("");
 		setRecipients("");
 		setNotifyOnDown(true);
+		setNotifyOnDegraded(false);
 		setNotifyOnRecovery(true);
 		setNotifyOnTlsExpiry(false);
 		setTlsExpiryThresholdDays("14");
 	};
+	const handleChannelTypeChange = (type: UptimeNotificationChannelType) => {
+		setChannelType(type);
+	};
 
 	const openCreateDialog = () => {
+ editorGeneration.current++;
 		resetForm();
 		setCreateOpen(true);
 	};
 
 	const openEditDialog = (channel: UptimeNotificationChannel) => {
+ editorGeneration.current++;
+    setSubmissionError("");
 		setEditChannel(channel);
 		setChannelType(channel.channelType);
 		setEmailProviderId(channel.emailProviderId ?? "");
-		// Secret values are write-only. Blank fields preserve the encrypted values;
-		// masked metadata is passed to the dialog as placeholder text.
 		setWebhookUrl("");
 		setWebhookHeaders("");
 		setRecipients(channel.recipientAddresses?.join(", ") ?? "");
 		setNotifyOnDown(channel.notifyOnDown);
+		setNotifyOnDegraded(channel.notifyOnDegraded ?? false);
 		setNotifyOnRecovery(channel.notifyOnRecovery);
 		setNotifyOnTlsExpiry(channel.notifyOnTlsExpiry);
 		setTlsExpiryThresholdDays(String(channel.tlsExpiryThresholdDays));
@@ -86,8 +108,10 @@ export function DefaultChannelsSection() {
 
 	const handleCreate = async (e: React.FormEvent) => {
 		e.preventDefault();
+ const requestGeneration = editorGeneration.current;
+    setSubmissionError("");
 		if (channelType === "email" && !emailProviderId) {
-			toast.error(
+			setSubmissionError(
 				t(
 					"notifications.create.emailProviderRequired",
 					"Select an email provider before adding an email channel",
@@ -95,12 +119,9 @@ export function DefaultChannelsSection() {
 			);
 			return;
 		}
-		const parsedWebhookHeaders =
-			channelType === "email"
-				? undefined
-				: parseWebhookHeaders(webhookHeaders);
+		const parsedWebhookHeaders = channelType !== "webhook" ? undefined : parseWebhookHeaders(webhookHeaders);
 		if (parsedWebhookHeaders === false) {
-			toast.error(
+			setSubmissionError(
 				t(
 					"notifications.fields.webhookHeadersInvalid",
 					"Headers must be a JSON object with string values",
@@ -109,40 +130,47 @@ export function DefaultChannelsSection() {
 			return;
 		}
 		try {
-			await createMutation.mutateAsync({
+			const created = await createMutation.mutateAsync({
 				channelType,
 				emailProviderId: channelType === "email" ? emailProviderId : undefined,
 				webhookUrl: channelType !== "email" ? webhookUrl : undefined,
 				webhookHeaders:
-					channelType !== "email" ? parsedWebhookHeaders : undefined,
+					channelType === "webhook" ? parsedWebhookHeaders : undefined,
 				recipientAddresses:
 					channelType === "email"
-						? recipients
-								.split(",")
-								.map((s) => s.trim())
-								.filter(Boolean)
+						? parseRecipients(recipients).recipients
 						: undefined,
 				notifyOnDown,
+				notifyOnDegraded,
 				notifyOnRecovery,
 				notifyOnTlsExpiry,
 				tlsExpiryThresholdDays: Number(tlsExpiryThresholdDays),
 			});
-			toast.success(t("notifications.create.success"));
+			if (!isSessionClientActive(client)) return;
+ setSigningSecret(created?.signingSecret ?? null);
+      createMutation.reset?.();
+			if (!isSessionClientActive(client)) return;
+ toast.success(t("notifications.create.success"));
+ if (requestGeneration !== editorGeneration.current) return;
 			resetForm();
 			setCreateOpen(false);
 		} catch (error) {
-			toast.error(extractErrorMessage(error, t("notifications.create.error")));
+ if (requestGeneration !== editorGeneration.current) return;
+ if (!isSessionClientActive(client)) return;
+			setSubmissionError(error);
 		}
 	};
 
 	const handleEdit = async (e: React.FormEvent) => {
 		e.preventDefault();
+ const requestGeneration = editorGeneration.current;
+    setSubmissionError("");
 		// defensive: the edit form only renders when `editChannel` is set, so this
 		// guard's early-return is unreachable from the UI.
 		/* v8 ignore next */
 		if (!editChannel) return;
 		if (channelType === "email" && !emailProviderId) {
-			toast.error(
+			setSubmissionError(
 				t(
 					"notifications.create.emailProviderRequired",
 					"Select an email provider before saving an email channel",
@@ -150,12 +178,9 @@ export function DefaultChannelsSection() {
 			);
 			return;
 		}
-		const parsedWebhookHeaders =
-			channelType === "email"
-				? undefined
-				: parseWebhookHeaders(webhookHeaders);
+		const parsedWebhookHeaders = channelType !== "webhook" ? undefined : parseWebhookHeaders(webhookHeaders);
 		if (parsedWebhookHeaders === false) {
-			toast.error(
+			setSubmissionError(
 				t(
 					"notifications.fields.webhookHeadersInvalid",
 					"Headers must be a JSON object with string values",
@@ -163,94 +188,87 @@ export function DefaultChannelsSection() {
 			);
 			return;
 		}
-		const secretUpdates =
-			channelType === "email"
-				? { webhookUrl: null, webhookHeaders: null }
-				: {
-						...(webhookUrl.trim() ? { webhookUrl } : {}),
-						...(parsedWebhookHeaders !== undefined
-							? { webhookHeaders: parsedWebhookHeaders }
-							: {}),
-					};
 		try {
 			await updateMutation.mutateAsync({
 				channelId: editChannel.channelId,
 				uptimeMonitorId: null,
 				channelType,
 				emailProviderId: channelType === "email" ? emailProviderId : null,
-				...secretUpdates,
+				...(channelType === "email" ? { webhookUrl: null, webhookHeaders: null } : {
+          ...(webhookUrl.trim() ? { webhookUrl } : {}),
+          ...(channelType === "webhook" && parsedWebhookHeaders !== undefined ? { webhookHeaders: parsedWebhookHeaders } : {}),
+        }),
 				recipientAddresses:
 					channelType === "email"
-						? recipients
-								.split(",")
-								.map((s) => s.trim())
-								.filter(Boolean)
+						? parseRecipients(recipients).recipients
 						: undefined,
 				notifyOnDown,
+				notifyOnDegraded,
 				notifyOnRecovery,
 				notifyOnTlsExpiry,
 				tlsExpiryThresholdDays: Number(tlsExpiryThresholdDays),
 			});
-			toast.success(
+			if (!isSessionClientActive(client)) return;
+ toast.success(
 				t("notifications.edit.success", "Channel updated successfully"),
 			);
+ if (requestGeneration !== editorGeneration.current) return;
 			setEditChannel(null);
 			resetForm();
 		} catch (error) {
-			toast.error(
-				extractErrorMessage(
-					error,
-					t("notifications.edit.error", "Failed to update channel"),
-				),
-			);
+ if (requestGeneration !== editorGeneration.current) return;
+ if (!isSessionClientActive(client)) return;
+			setSubmissionError(error);
 		}
 	};
 
 	const handleDelete = async (channelId: string) => {
+ if (!await requestConfirmation(t("notificationUX.deleteChannel"), { title: t("notificationUX.deleteChannelTitle"), action: t("common:actions.delete") })) return;
 		try {
 			await deleteMutation.mutateAsync({ channelId, uptimeMonitorId: null });
-			toast.success(t("notifications.delete.success"));
+			if (!isSessionClientActive(client)) return;
+ toast.success(t("notifications.delete.success"));
 		} catch (error) {
+ if (!isSessionClientActive(client)) return;
 			toast.error(extractErrorMessage(error, t("notifications.delete.error")));
 		}
 	};
 
-	const handleTest = async (channelId: string) => {
+	// A test is a real send: name the destination first, and report only what the provider actually accepted.
+	const handleTest = async (channel: UptimeNotificationChannel) => {
+		const destination = channelDestination(channel);
+		if (!await requestConfirmation(t("notificationUX.confirmTest", { destination }), { title: t("notificationUX.testTitle"), action: t("notificationUX.sendTestAction"), destructive: false })) return;
 		try {
-			await testMutation.mutateAsync(channelId);
-			toast.success(t("notifications.test.success"));
+			await testMutation.mutateAsync(channel.channelId);
+			if (!isSessionClientActive(client)) return;
+ toast.success(t("notificationUX.testAccepted", { destination }));
 		} catch (error) {
+ if (!isSessionClientActive(client)) return;
 			toast.error(extractErrorMessage(error, t("notifications.test.error")));
 		}
 	};
 
+	// Channels failing every recent delivery, so a dead target is visible right
+	// where it is managed — not only in the per-monitor delivery log.
+	const healthByChannel = new Map(
+		(channelHealth ?? [])
+			.filter(
+				(entry) => entry.consecutiveFailures >= CHANNEL_UNHEALTHY_THRESHOLD,
+			)
+			.map((entry) => [entry.channelId, entry]),
+	);
+
+ if (channelsLoading) return <p role="status">{t("notificationUX.loadingChannels")}</p>;
+ if (channelsError && !channels) return <div role="alert"><p>{t("notificationUX.errorChannels")}</p><Button variant="outline" onClick={() => void retryChannels()}>{t("workspace.retry")}</Button></div>;
+
 	return (
-		<div className="flex flex-col gap-3">
-			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-				<div>
-					<h3 className="text-lg font-medium">
-						{t("notificationSettings.defaults.title", "Default Channels")}
-					</h3>
-					<p className="text-sm text-muted-foreground">
-						{t(
-							"notificationSettings.defaults.description",
-							"Alert channels that apply to all your monitors automatically, including ones you create later.",
-						)}
-					</p>
-				</div>
-				<Button
-					onClick={openCreateDialog}
-					size="sm"
-					className="h-[44px] shrink-0"
-				>
-					<Plus className="h-4 w-4 me-2" />
-					{t("notificationSettings.defaults.add", "Add default channel")}
-				</Button>
-			</div>
+    <SectionCard title={t("notificationSettings.defaults.title", "Default channels")} description={t("notificationSettings.defaults.description", "Alert channels that apply to all your monitors automatically, including ones you create later.")}>
+      <div className="flex flex-col gap-3">
+        <Button onClick={openCreateDialog} size="sm" className="w-full self-end sm:w-auto"><Plus className="h-4 w-4" aria-hidden="true" />{t("notificationSettings.defaults.add", "Add default channel")}</Button>
 
 			{!channels || channels.length === 0 ? (
-				<div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-8 text-center">
-					<Globe className="h-8 w-8 text-muted-foreground mb-2" />
+				<div className="flex flex-col items-center justify-center rounded-lg border p-8 text-center">
+					<Bell className="h-8 w-8 text-muted-foreground mb-2" aria-hidden="true" />
 					<p className="text-sm text-muted-foreground">
 						{t(
 							"notificationSettings.defaults.empty",
@@ -279,11 +297,17 @@ export function DefaultChannelsSection() {
 											"All monitors",
 										)}
 									</span>
+									{healthByChannel.get(ch.channelId) ? (
+										<Badge
+											variant="outline"
+											className="border-destructive/40 text-destructive"
+										>
+											{t("channelHealth.failing", "Failing")}
+										</Badge>
+									) : null}
 								</div>
-								<p className="text-xs text-muted-foreground truncate mt-1">
-									{ch.channelType === "email"
-										? ch.recipientAddresses?.join(", ")
-										: ch.webhookUrlMasked}
+								<p className="text-sm text-muted-foreground break-words mt-1">
+									{channelDestination(ch)}
 								</p>
 							</div>
 							<div className="flex items-center gap-1 shrink-0">
@@ -294,7 +318,7 @@ export function DefaultChannelsSection() {
 										`notifications.channelTypes.${ch.channelType}`,
 										ch.channelType,
 									)}`}
-									onClick={() => handleTest(ch.channelId)}
+									onClick={() => handleTest(ch)}
 									disabled={testMutation.isPending}
 									className="h-[44px] min-w-[44px]"
 								>
@@ -304,7 +328,8 @@ export function DefaultChannelsSection() {
 										<Send className="h-3.5 w-3.5" />
 									)}
 								</Button>
-								<Button
+								{ch.channelType === "webhook" && <RotateWebhookSecret channelId={ch.channelId} onSecret={setSigningSecret} />}
+<Button
 									variant="ghost"
 									size="sm"
 									aria-label={`${t("actions.edit")} ${t(
@@ -336,11 +361,12 @@ export function DefaultChannelsSection() {
 				</div>
 			)}
 
-			<ChannelFormDialog
+			<WebhookSecretDialog secret={signingSecret} onClose={() => setSigningSecret(null)} />
+      <ChannelFormDialog
 				open={createOpen}
-				onOpenChange={setCreateOpen}
+				onOpenChange={open => { if (!open) editorGeneration.current++; setCreateOpen(open); }}
 				channelType={channelType}
-				setChannelType={setChannelType}
+				setChannelType={handleChannelTypeChange}
 				emailProviders={emailProviders ?? []}
 				emailProviderId={emailProviderId}
 				setEmailProviderId={setEmailProviderId}
@@ -351,6 +377,8 @@ export function DefaultChannelsSection() {
 				recipients={recipients}
 				setRecipients={setRecipients}
 				notifyOnDown={notifyOnDown}
+					notifyOnDegraded={notifyOnDegraded}
+					setNotifyOnDegraded={setNotifyOnDegraded}
 				setNotifyOnDown={setNotifyOnDown}
 				notifyOnRecovery={notifyOnRecovery}
 				setNotifyOnRecovery={setNotifyOnRecovery}
@@ -359,20 +387,21 @@ export function DefaultChannelsSection() {
 				tlsExpiryThresholdDays={tlsExpiryThresholdDays}
 				setTlsExpiryThresholdDays={setTlsExpiryThresholdDays}
 				onSubmit={handleCreate}
-				isPending={createMutation.isPending}
+				isPending={createMutation.isPending} error={submissionError || undefined}
 			/>
 
 			<ChannelFormDialog
 				open={Boolean(editChannel)}
 				onOpenChange={(open) => {
 					if (!open) {
+ editorGeneration.current++;
 						setEditChannel(null);
 						resetForm();
 					}
 				}}
-				isEdit
+				isEdit storedTargetLabel={editChannel?.webhookUrlMasked} storedHeaderNames={editChannel?.webhookHeaderNames} storedChannelType={editChannel?.channelType} hasStoredTarget={Boolean(editChannel?.hasWebhookUrl)}
 				channelType={channelType}
-				setChannelType={setChannelType}
+				setChannelType={handleChannelTypeChange}
 				emailProviders={emailProviders ?? []}
 				emailProviderId={emailProviderId}
 				setEmailProviderId={setEmailProviderId}
@@ -380,13 +409,11 @@ export function DefaultChannelsSection() {
 				setWebhookUrl={setWebhookUrl}
 				webhookHeaders={webhookHeaders}
 				setWebhookHeaders={setWebhookHeaders}
-				hasStoredWebhookUrl={editChannel?.hasWebhookUrl}
-				webhookUrlMasked={editChannel?.webhookUrlMasked}
-				hasStoredWebhookHeaders={editChannel?.hasWebhookHeaders}
-				webhookHeaderNames={editChannel?.webhookHeaderNames}
 				recipients={recipients}
 				setRecipients={setRecipients}
 				notifyOnDown={notifyOnDown}
+					notifyOnDegraded={notifyOnDegraded}
+					setNotifyOnDegraded={setNotifyOnDegraded}
 				setNotifyOnDown={setNotifyOnDown}
 				notifyOnRecovery={notifyOnRecovery}
 				setNotifyOnRecovery={setNotifyOnRecovery}
@@ -395,8 +422,10 @@ export function DefaultChannelsSection() {
 				tlsExpiryThresholdDays={tlsExpiryThresholdDays}
 				setTlsExpiryThresholdDays={setTlsExpiryThresholdDays}
 				onSubmit={handleEdit}
-				isPending={updateMutation.isPending}
+				isPending={updateMutation.isPending} error={submissionError || undefined}
 			/>
+
 		</div>
+    </SectionCard>
 	);
 }

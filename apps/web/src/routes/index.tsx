@@ -47,13 +47,14 @@ function AppEntryGate() {
 }
 
 function CustomDomainStatusPage({ host }: { host: string }) {
-	const { data, isLoading, error } = usePublicStatusPageByDomain(host);
+	const { data, isLoading, error, refetch } = usePublicStatusPageByDomain(host);
 	return (
 		<PublicStatusContent
 			data={data}
 			isLoading={isLoading}
 			error={error}
 			errorKey="statusPage.notFound"
+      onRetry={() => void refetch()}
 		/>
 	);
 }

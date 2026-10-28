@@ -32,34 +32,39 @@ shell-postgres: ## psql into the database
 	$(COMPOSE) exec postgres psql -U pulsy -d pulsy
 
 migrate: ## Apply committed SQL migrations (packages/db/drizzle)
-	$(COMPOSE) exec server node packages/db/scripts/migrate.mjs
+	$(COMPOSE) exec -T server node packages/db/scripts/migrate.mjs
 
 db-push: ## DEV ONLY — push the live schema without a migration (drizzle-kit push)
-	$(COMPOSE) exec server sh -lc 'cd packages/db && ./node_modules/.bin/drizzle-kit push'
+	$(COMPOSE) exec -T server sh -lc 'cd packages/db && ./node_modules/.bin/drizzle-kit push'
 
 generate: ## Generate SQL migration files from the schema
-	$(COMPOSE) exec server sh -lc 'cd packages/db && ./node_modules/.bin/drizzle-kit generate'
+	$(COMPOSE) exec -T server sh -lc 'cd packages/db && ./node_modules/.bin/drizzle-kit generate'
 
 seed: ## Seed a demo user + example monitors
-	$(COMPOSE) exec server ./apps/server/node_modules/.bin/tsx apps/server/src/seed.ts
+	$(COMPOSE) exec -T server ./apps/server/node_modules/.bin/tsx apps/server/src/seed.ts
 
 seed-superadmin: ## Seed the superadmin from SUPERADMIN_* env (idempotent)
-	$(COMPOSE) exec server ./apps/server/node_modules/.bin/tsx apps/server/src/seed-superadmin.ts
+	$(COMPOSE) exec -T server ./apps/server/node_modules/.bin/tsx apps/server/src/seed-superadmin.ts
 
 typecheck: ## Typecheck server/db in containers and web during Docker build
-	$(COMPOSE) exec server sh -lc 'cd apps/server && ./node_modules/.bin/tsc --noEmit'
-	$(COMPOSE) exec server sh -lc 'cd packages/db && ./node_modules/.bin/tsc --noEmit'
+	$(COMPOSE) exec -T server sh -lc 'cd apps/server && ./node_modules/.bin/tsc --noEmit'
+	$(COMPOSE) exec -T server sh -lc 'cd packages/db && ./node_modules/.bin/tsc --noEmit'
 	$(COMPOSE) build web
 
-lint: ## Run lint-equivalent checks in containers
-	$(COMPOSE) exec server sh -lc 'cd apps/server && ./node_modules/.bin/tsc --noEmit'
-	$(COMPOSE) exec server sh -lc 'cd packages/db && ./node_modules/.bin/tsc --noEmit'
+lint: eslint-check ## Run ESLint policy and typechecks in rebuilt containers
+	$(COMPOSE) exec -T server sh -lc 'cd apps/server && ./node_modules/.bin/tsc --noEmit'
+	$(COMPOSE) exec -T server sh -lc 'cd packages/db && ./node_modules/.bin/tsc --noEmit'
 	$(COMPOSE) build web
+
+.PHONY: eslint-check
+eslint-check: ## Enforce shared controls and themed-dialog policy
+	$(COMPOSE) exec -T server ./node_modules/.bin/eslint . --max-warnings 0
+	$(COMPOSE) exec -T server node --test scripts/check-eslint.test.mjs
 
 test: ## Run server/db tests against an isolated DB and web tests during Docker build
-	$(COMPOSE) exec postgres sh -lc 'dropdb --if-exists --force -U "$$POSTGRES_USER" "$${POSTGRES_DB}_test" && createdb -U "$$POSTGRES_USER" "$${POSTGRES_DB}_test"'
-	$(COMPOSE) exec server sh -lc 'cd apps/server && DATABASE_URL="postgres://$$POSTGRES_USER:$$POSTGRES_PASSWORD@postgres:5432/$${POSTGRES_DB}_test" ./node_modules/.bin/vitest run'
-	$(COMPOSE) exec server sh -lc 'cd packages/db && DATABASE_URL="postgres://$$POSTGRES_USER:$$POSTGRES_PASSWORD@postgres:5432/$${POSTGRES_DB}_test" ./node_modules/.bin/vitest run'
+	$(COMPOSE) exec -T postgres sh -lc 'dropdb --if-exists --force -U "$$POSTGRES_USER" "$${POSTGRES_DB}_test" && createdb -U "$$POSTGRES_USER" "$${POSTGRES_DB}_test"'
+	$(COMPOSE) exec -T server sh -lc 'cd apps/server && DATABASE_URL="postgres://$$POSTGRES_USER:$$POSTGRES_PASSWORD@postgres:5432/$${POSTGRES_DB}_test" ./node_modules/.bin/vitest run'
+	$(COMPOSE) exec -T server sh -lc 'cd packages/db && DATABASE_URL="postgres://$$POSTGRES_USER:$$POSTGRES_PASSWORD@postgres:5432/$${POSTGRES_DB}_test" ./node_modules/.bin/vitest run'
 	$(COMPOSE) build web
 
 custom-domains-install: ## Install the host custom-domain provisioner (systemd timer; needs root)
@@ -119,3 +124,82 @@ graph-clean: ## Remove the local graph database (next build will be from scratch
 
 graph-help: ## Show code-review-graph CLI help
 	uvx --python python3.11 code-review-graph --help
+
+.PHONY: audit-private-targets
+audit-private-targets: ## Read-only audit of stored destinations against strict egress policy
+	$(COMPOSE) exec -T server ./apps/server/node_modules/.bin/tsx apps/server/src/audit-private-targets.ts
+
+.PHONY: server-health-check
+server-health-check: start ## Rebuild and check server health against an isolated test database
+	$(COMPOSE) exec -T server sh -lc 'cd apps/server && ./node_modules/.bin/tsc --noEmit'
+	$(COMPOSE) exec -T postgres sh -lc 'dropdb --if-exists --force -U "$$POSTGRES_USER" "$${POSTGRES_DB}_server_health_test" && createdb -U "$$POSTGRES_USER" "$${POSTGRES_DB}_server_health_test"'
+	$(COMPOSE) exec -T server sh -lc 'cd apps/server && DATABASE_URL="postgres://$$POSTGRES_USER:$$POSTGRES_PASSWORD@postgres:5432/$${POSTGRES_DB}_server_health_test" ./node_modules/.bin/vitest run server-health agent-release-route'
+
+.PHONY: agent-format agent-check agent-build agent-install-check agent-compose-check
+agent-format: ## Format Go sources in the pinned Docker toolchain
+	docker build -f docker/Dockerfile.agent --target toolchain -t pulsy-agent-toolchain .
+	docker run --rm -v "$(CURDIR)/agent:/src/agent" pulsy-agent-toolchain gofmt -w .
+
+agent-check: ## Vet and test the agent in Docker
+	docker build -f docker/Dockerfile.agent --target check -t pulsy-agent-check .
+
+agent-build: ## Export reproducible Linux amd64/arm64 binaries and checksums
+	docker build -f docker/Dockerfile.agent --target artifacts --output type=local,dest=artifacts/agent .
+
+agent-install-check: agent-build ## Exercise the real installer and systemd in disposable Linux
+	docker build -f docker/Dockerfile.agent-install-test -t pulsy-agent-install-test .
+	@set -eu; fixture=$$(docker run -d --cgroupns private --cap-add SYS_ADMIN --security-opt seccomp=unconfined --security-opt apparmor=unconfined --tmpfs /run --tmpfs /run/lock --tmpfs /tmp --tmpfs /sys/fs/cgroup -v "$(CURDIR)/artifacts/agent:/artifacts:ro" pulsy-agent-install-test); trap 'docker rm -f "$$fixture" >/dev/null' EXIT; docker exec "$$fixture" python3 /test/installer_test.py
+
+AGENT_FIXTURE_COMPOSE := PULSY_SOURCE_DIR="$(CURDIR)" docker compose --env-file .env --project-directory "$(CURDIR)/artifacts/agent-compose" -p pulsy-agent-install-fixture -f "$(CURDIR)/docker/docker-compose.agent-install-test.yml"
+agent-compose-check: agent-build ## Run the installer-generated Compose agent with host metrics
+	mkdir -p artifacts/agent-compose
+	rm -f artifacts/agent-compose/ready
+	@set -eu; trap '$(AGENT_FIXTURE_COMPOSE) -f "$(CURDIR)/artifacts/agent-compose/compose.yaml" down --remove-orphans >/dev/null 2>&1 || $(AGENT_FIXTURE_COMPOSE) down --remove-orphans >/dev/null' EXIT; $(AGENT_FIXTURE_COMPOSE) up -d --build --wait agent-receiver; $(AGENT_FIXTURE_COMPOSE) -f "$(CURDIR)/artifacts/agent-compose/compose.yaml" up -d pulsy-agent; $(AGENT_FIXTURE_COMPOSE) exec -T agent-receiver python3 /test/verify_compose.py
+
+.PHONY: translations-check
+translations-check: ## Check locale references, plurals, placeholders and untranslated values; exercise the regression gate
+	$(COMPOSE) exec -T server node scripts/check-translations.mjs
+	$(COMPOSE) exec -T server node --test scripts/check-translations.test.mjs
+
+.PHONY: test-infrastructure web-assets-check server-health-web-check server-health-regression-check
+# The source server retains tsc, Vitest, ESLint and translation tooling.
+test-infrastructure: ## Rebuild source server and start PostgreSQL for isolated checks
+	$(COMPOSE) up -d --build --wait postgres server
+
+web-assets-check: ## Verify immutable assets survive image changes under nginx UID 101
+	sh tests/infrastructure/web-assets.sh
+
+server-health-web-check: ## Build and check current server-health and Help UI inside Docker
+	docker build -f docker/Dockerfile.web --target source -t pulsy-web-check .
+	docker run --rm -e NODE_ENV=test -e VITEST_MAX_FORKS=1 pulsy-web-check sh -ec 'pnpm --filter @pulsy/web build; pnpm --filter @pulsy/web typecheck; pnpm --filter @pulsy/web test server-health dashboard-help dashboard-search'
+
+server-health-regression-check: test-infrastructure ## Rerun service regressions in an isolated database
+	$(COMPOSE) exec -T postgres sh -lc 'dropdb --if-exists --force -U "$$POSTGRES_USER" "$${POSTGRES_DB}_server_health_test" && createdb -U "$$POSTGRES_USER" "$${POSTGRES_DB}_server_health_test"'
+	$(COMPOSE) exec -T server sh -lc 'cd apps/server && DATABASE_URL="postgres://$$POSTGRES_USER:$$POSTGRES_PASSWORD@postgres:5432/$${POSTGRES_DB}_server_health_test" ./node_modules/.bin/vitest run server-health agent-release-route validation-http page-selection'
+
+SERVER_E2E := docker compose -p pulsy-server-health-e2e -f docker/docker-compose.server-health-e2e.yml
+.PHONY: server-health-e2e server-health-e2e-run server-health-e2e-logs server-health-e2e-lock server-health-e2e-fixture-status
+server-health-e2e: ## Real installed-agent and browser acceptance in disposable Docker resources
+	mkdir -p artifacts/server-health-e2e
+	$(SERVER_E2E) build
+	$(MAKE) server-health-e2e-run
+
+server-health-e2e-run: ## Rerun installed-agent acceptance using built images
+	mkdir -p artifacts/server-health-e2e
+	find artifacts/server-health-e2e -maxdepth 1 -type f -delete
+	@set -eu; trap 'result=$$?; if test $$result -ne 0; then $(SERVER_E2E) logs --tail=60 server proxy fixture > artifacts/server-health-e2e/service-failure.log; fi; if docker container inspect pulsy-server-health-e2e-browser >/dev/null 2>&1; then docker cp pulsy-server-health-e2e-browser:/evidence/. artifacts/server-health-e2e/ || result=1; docker rm -f pulsy-server-health-e2e-browser >/dev/null; fi; $(SERVER_E2E) down -v --remove-orphans >/dev/null; exit $$result' EXIT; \
+	$(SERVER_E2E) up -d postgres fixture server web; \
+	$(SERVER_E2E) exec -d fixture python3 /test/e2e.py; \
+	$(SERVER_E2E) exec -T fixture sh -c 'for attempt in $$(seq 1 60); do curl --max-time 2 --fail --silent http://127.0.0.1:8080/ >/dev/null && exit 0; sleep 1; done; exit 1'; \
+	$(SERVER_E2E) up -d proxy; \
+	$(SERVER_E2E) run --name pulsy-server-health-e2e-browser browser
+
+server-health-e2e-logs: ## Inspect only disposable acceptance services
+	$(SERVER_E2E) logs --tail=40 server proxy fixture
+
+server-health-e2e-lock: ## Export browser fixture manifests from its pinned Docker image
+	$(SERVER_E2E) run --rm --no-deps --entrypoint cat browser /e2e/package.json > tests/server-health-e2e/package.json
+	$(SERVER_E2E) run --rm --no-deps --entrypoint cat browser /e2e/package-lock.json > tests/server-health-e2e/package-lock.json
+
+server-health-e2e-fixture-status: ## Diagnose only the disposable systemd fixture
+	$(SERVER_E2E) exec -T fixture sh -c 'ps -ef | head -20; ls -l /fixture; curl --max-time 2 --silent http://127.0.0.1:8080/ || true'

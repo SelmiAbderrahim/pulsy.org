@@ -1,6 +1,7 @@
+import * as confirmations from "@/lib/confirmation";
+import { renderWithQueryClient as render } from "@/test/query-wrapper";
 import {
 	fireEvent,
-	render,
 	screen,
 	waitFor,
 	within,
@@ -63,7 +64,7 @@ vi.mock("@/hooks/uptime", () => ({
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
-vi.mock("sonner", () => ({
+vi.mock("@/lib/toast", () => ({
 	toast: {
 		success: (m: unknown) => toastSuccess(m),
 		error: (m: unknown) => toastError(m),
@@ -108,6 +109,7 @@ function provider(): UptimeEmailProvider {
 }
 
 beforeEach(() => {
+ vi.spyOn(confirmations, "requestConfirmation").mockResolvedValue(true);
 	vi.clearAllMocks();
 	channelsData.value = undefined;
 	defaultChannelsData.value = undefined;
@@ -230,7 +232,7 @@ describe("NotificationsTab create channel", () => {
 			"https://hooks.x.com/zzz",
 		);
 		fireEvent.change(
-			within(dialog).getByLabelText("Headers / Options (JSON)"),
+			within(dialog).getByLabelText("Headers / options (JSON)"),
 			{
 				target: { value: '{ "X-Pulsy-Test": "true" }' },
 			},
@@ -262,7 +264,7 @@ describe("NotificationsTab create channel", () => {
 			"https://hooks.x.com/zzz",
 		);
 		fireEvent.change(
-			within(dialog).getByLabelText("Headers / Options (JSON)"),
+			within(dialog).getByLabelText("Headers / options (JSON)"),
 			{
 				target: { value: '{ "X-Pulsy-Test": true }' },
 			},
@@ -270,9 +272,8 @@ describe("NotificationsTab create channel", () => {
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "actions.addChannel" }),
 		);
-		expect(toastError).toHaveBeenCalledWith(
-			"Headers must be a JSON object with string values",
-		);
+		expect(within(dialog).getByLabelText("Headers / options (JSON)")).toHaveAttribute("aria-invalid", "true");
+ expect(toastError).not.toHaveBeenCalled();
 		expect(createMutateAsync).not.toHaveBeenCalled();
 	});
 
@@ -291,9 +292,10 @@ describe("NotificationsTab create channel", () => {
 		await userEvent.click(channelTypeSelect);
 		await userEvent.click(screen.getByRole("option", { name: "telegram" }));
 		await userEvent.type(
-			within(dialog).getByLabelText("Telegram Target"),
-			"123456:abcdef:-100999",
+			within(dialog).getByLabelText("notificationUX.telegramBotToken"),
+			"123456:abcdef",
 		);
+ await userEvent.type(within(dialog).getByLabelText("notificationUX.telegramChatId"), "-100999");
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "actions.addChannel" }),
 		);
@@ -333,9 +335,8 @@ describe("NotificationsTab create channel", () => {
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "actions.addChannel" }),
 		);
-		expect(toastError).toHaveBeenCalledWith(
-			"Select an email provider before adding an email channel",
-		);
+		expect(within(dialog).getAllByText(/notificationUX.noProviderTitle|notificationUX.chooseProvider/).length).toBeGreaterThan(0);
+ expect(toastError).not.toHaveBeenCalled();
 		expect(createMutateAsync).not.toHaveBeenCalled();
 	});
 
@@ -370,7 +371,7 @@ describe("NotificationsTab create channel", () => {
 			// enable TLS expiry → reveals the threshold input
 			const switches = within(dialog).getAllByRole("switch");
 			const tlsExpirySwitch = requireElement(
-				switches[2],
+				switches[3],
 				"TLS expiry switch not found",
 			);
 			await userEvent.click(tlsExpirySwitch);
@@ -413,7 +414,7 @@ describe("NotificationsTab create channel", () => {
 			within(dialog).getByRole("button", { name: "actions.addChannel" }),
 		);
 		await waitFor(() =>
-			expect(toastError).toHaveBeenCalledWith("create boom"),
+			expect(within(dialog).getByRole("alert")).toHaveTextContent("create boom"),
 		);
 	});
 
@@ -471,13 +472,15 @@ describe("NotificationsTab list & row actions", () => {
 		await userEvent.click(
 			screen.getByRole("button", { name: /actions.test/ }),
 		);
+ await confirmTestSend();
 		await waitFor(() => expect(testMutateAsync).toHaveBeenCalledWith("c1"));
-		expect(toastSuccess).toHaveBeenCalledWith("notifications.test.success");
+		expect(toastSuccess).toHaveBeenCalledWith("notificationUX.testAccepted");
 
 		testMutateAsync.mockRejectedValueOnce(new Error("test boom"));
 		await userEvent.click(
 			screen.getByRole("button", { name: /actions.test/ }),
 		);
+ await confirmTestSend();
 		await waitFor(() =>
 			expect(toastError).toHaveBeenCalledWith("test boom"),
 		);
@@ -569,9 +572,8 @@ describe("NotificationsTab edit channel", () => {
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "actions.save" }),
 		);
-		expect(toastError).toHaveBeenCalledWith(
-			"Select an email provider before saving an email channel",
-		);
+		expect(within(dialog).getByText("notificationUX.noProviderTitle")).toBeInTheDocument();
+ expect(toastError).not.toHaveBeenCalled();
 		expect(updateMutateAsync).not.toHaveBeenCalled();
 	});
 
@@ -587,7 +589,7 @@ describe("NotificationsTab edit channel", () => {
 			within(dialog).getByRole("button", { name: "actions.save" }),
 		);
 		await waitFor(() =>
-			expect(toastError).toHaveBeenCalledWith("edit boom"),
+			expect(within(dialog).getByRole("alert")).toHaveTextContent("edit boom"),
 		);
 	});
 
@@ -624,7 +626,7 @@ describe("NotificationsTab edit channel", () => {
 			"https://hooks.x.com/••••••••",
 		);
 		const headersField = within(dialog).getByLabelText(
-			"Headers / Options (JSON)",
+			"Headers / options (JSON)",
 		);
 		expect(targetField).toHaveValue("");
 		expect(headersField).toHaveValue("");
@@ -661,12 +663,13 @@ describe("NotificationsTab edit channel", () => {
 			screen.getByRole("button", { name: /actions.edit/ }),
 		);
 		const dialog = screen.getByRole("dialog");
+ await replaceTarget(dialog); await replaceHeaders(dialog);
 		await userEvent.type(
-			within(dialog).getByPlaceholderText("https://hooks.x.com/••••••••"),
+			within(dialog).getByLabelText("notifications.fields.webhookUrl"),
 			"https://hooks.example.com/replacement",
 		);
 		fireEvent.change(
-			within(dialog).getByLabelText("Headers / Options (JSON)"),
+			within(dialog).getByLabelText("Headers / options (JSON)"),
 			{ target: { value: '{ "Authorization": "Bearer replacement" }' } },
 		);
 		await userEvent.click(
@@ -698,8 +701,10 @@ describe("NotificationsTab edit channel", () => {
 			screen.getByRole("button", { name: /actions.edit/ }),
 		);
 		const dialog = screen.getByRole("dialog");
+
+ await replaceHeaders(dialog);
 		fireEvent.change(
-			within(dialog).getByLabelText("Headers / Options (JSON)"),
+			within(dialog).getByLabelText("Headers / options (JSON)"),
 			{ target: { value: "{ stale invalid JSON" } },
 		);
 		const channelTypeSelect = requireElement(
@@ -741,9 +746,10 @@ describe("NotificationsTab edit channel", () => {
 			screen.getByRole("button", { name: /actions.edit/ }),
 		);
 		const dialog = screen.getByRole("dialog");
+ await replaceHeaders(dialog);
 		// Unparseable JSON drives `parseWebhookHeaders` into its `catch` branch.
 		fireEvent.change(
-			within(dialog).getByLabelText("Headers / Options (JSON)"),
+			within(dialog).getByLabelText("Headers / options (JSON)"),
 			{
 				target: { value: "{ not valid json" },
 			},
@@ -751,9 +757,8 @@ describe("NotificationsTab edit channel", () => {
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "actions.save" }),
 		);
-		expect(toastError).toHaveBeenCalledWith(
-			"Headers must be a JSON object with string values",
-		);
+		expect(within(dialog).getByLabelText("Headers / options (JSON)")).toHaveAttribute("aria-invalid", "true");
+ expect(toastError).not.toHaveBeenCalled();
 		expect(updateMutateAsync).not.toHaveBeenCalled();
 	});
 
@@ -764,9 +769,10 @@ describe("NotificationsTab edit channel", () => {
 			screen.getByRole("button", { name: /actions.edit/ }),
 		);
 		const dialog = screen.getByRole("dialog");
+ await replaceHeaders(dialog);
 		// A JSON array parses but is not a plain object → the non-object guard.
 		fireEvent.change(
-			within(dialog).getByLabelText("Headers / Options (JSON)"),
+			within(dialog).getByLabelText("Headers / options (JSON)"),
 			{
 				target: { value: '["a", "b"]' },
 			},
@@ -774,9 +780,8 @@ describe("NotificationsTab edit channel", () => {
 		await userEvent.click(
 			within(dialog).getByRole("button", { name: "actions.save" }),
 		);
-		expect(toastError).toHaveBeenCalledWith(
-			"Headers must be a JSON object with string values",
-		);
+		expect(within(dialog).getByLabelText("Headers / options (JSON)")).toHaveAttribute("aria-invalid", "true");
+ expect(toastError).not.toHaveBeenCalled();
 		expect(updateMutateAsync).not.toHaveBeenCalled();
 	});
 });
@@ -818,3 +823,17 @@ describe("NotificationsTab dialog pending", () => {
 		expect(screen.getByRole("dialog")).toBeInTheDocument();
 	});
 });
+
+async function confirmTestSend() {
+ const dialog = await screen.findByRole("alertdialog");
+ await userEvent.click(within(dialog).getByRole("button", { name: "actions.test" }));
+}
+
+async function replaceHeaders(dialog: HTMLElement) {
+ const action = within(dialog).queryByRole("combobox", { name: "notificationUX.headersAction" });
+ if (action) { await userEvent.click(action); await userEvent.click(screen.getByRole("option", { name: "notificationUX.replace" })); }
+}
+async function replaceTarget(dialog: HTMLElement) {
+ await userEvent.click(within(dialog).getByRole("combobox", { name: "notificationUX.targetAction" }));
+ await userEvent.click(screen.getByRole("option", { name: "notificationUX.replace" }));
+}

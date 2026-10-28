@@ -20,7 +20,9 @@ vi.mock("../../charts/response-time-chart", () => ({
 
 const useUptimeMonitorStats = vi.fn();
 const useUptimeCheckLogs = vi.fn();
+const useUptimeDailyUptime = vi.fn();
 vi.mock("@/hooks/uptime", () => ({
+ useUptimeDailyUptime: (id: string, days: number) => useUptimeDailyUptime(id, days),
 	useUptimeMonitorStats: (id: string, days: number) =>
 		useUptimeMonitorStats(id, days),
 	useUptimeCheckLogs: (id: string, opts: unknown) =>
@@ -42,7 +44,8 @@ function monitor(overrides: Partial<UptimeMonitor> = {}): UptimeMonitor {
 
 beforeEach(() => {
 	vi.clearAllMocks();
-	useUptimeMonitorStats.mockReturnValue({ data: undefined });
+	useUptimeMonitorStats.mockReturnValue({ data: undefined, isPending: true });
+ useUptimeDailyUptime.mockReturnValue({ data: undefined, isPending: true, refetch: vi.fn() });
 	useUptimeCheckLogs.mockReturnValue({ data: undefined });
 });
 
@@ -51,11 +54,11 @@ describe("OverviewTab", () => {
 		render(<OverviewTab monitor={monitor()} />);
 		expect(useUptimeMonitorStats).toHaveBeenCalledWith("m1", 30);
 		expect(useUptimeCheckLogs).toHaveBeenCalledWith("m1", { limit: 100 });
-		// Total checks defaults to 0; success rate + avg response show em dash.
-		expect(screen.getByText("0")).toBeInTheDocument();
+		// Unknown checks and timings stay unknown while statistics load.
+		expect(screen.queryByText("0")).not.toBeInTheDocument();
 		expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(2);
-		// uptime bar always renders 90 days
-		expect(screen.getByTestId("uptime-bar")).toHaveAttribute("data-len", "90");
+		// Daily history is supplied by the server, never fabricated from recent logs.
+		expect(screen.getByTestId("uptime-bar")).toHaveAttribute("data-len", "0");
 	});
 
 	it("formats populated stats and a present TLS expiry", () => {
@@ -86,14 +89,14 @@ describe("OverviewTab", () => {
 			<OverviewTab monitor={monitor({ tlsExpiresInDays: 30 })} />,
 		);
 		expect(screen.getByText("42")).toBeInTheDocument();
-		expect(screen.getByText("98.7%")).toBeInTheDocument();
-		expect(screen.getByText("123ms")).toBeInTheDocument();
-		expect(screen.getByText("99.50%")).toBeInTheDocument();
+		expect(screen.getByText("98.70%")).toBeInTheDocument();
+		expect(screen.getByText("123 ms")).toBeInTheDocument();
+		expect(screen.queryByText("99.50%")).not.toBeInTheDocument();
 		expect(
 			screen.getByText("detail.tls.expiresInDays"),
 		).toBeInTheDocument();
 		// Today's bucket has logs (1 up / 2) → partial; chart still 90 days.
-		expect(screen.getByTestId("uptime-bar")).toHaveAttribute("data-len", "90");
+		expect(screen.getByTestId("uptime-bar")).toHaveAttribute("data-len", "0");
 		expect(screen.getByTestId("response-time")).toHaveAttribute(
 			"data-len",
 			"4",
@@ -105,3 +108,5 @@ describe("OverviewTab", () => {
 		expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3);
 	});
 });
+
+vi.mock("@tanstack/react-router", () => ({ Link: ({ children }: { children: React.ReactNode }) => <a href="/dashboard/uptime/m1?tab=settings">{children}</a> }));

@@ -1,17 +1,14 @@
 import * as React from "react";
+import { ScrollableTable } from "./scrollable-table";
 import { cn } from "@/lib/utils";
 
 const Table = React.forwardRef<
-	HTMLTableElement,
-	React.HTMLAttributes<HTMLTableElement>
->(({ className, ...props }, ref) => (
-	<div className="relative w-full overflow-auto">
-		<table
-			ref={ref}
-			className={cn("w-full caption-bottom text-sm", className)}
-			{...props}
-		/>
-	</div>
+  HTMLTableElement,
+  React.HTMLAttributes<HTMLTableElement> & { containerClassName?: string; pageScroll?: boolean }
+>(({ className, containerClassName, pageScroll = false, ...props }, ref) => (
+  <ScrollableTable aria-label={props["aria-label"]} dir={props.dir} containerClassName={containerClassName} pageScroll={pageScroll}>
+    <table ref={ref} className={cn("w-full caption-bottom text-sm", className)} {...props} />
+  </ScrollableTable>
 ));
 Table.displayName = "Table";
 
@@ -67,12 +64,15 @@ TableRow.displayName = "TableRow";
 
 const TableHead = React.forwardRef<
 	HTMLTableCellElement,
-	React.ThHTMLAttributes<HTMLTableCellElement>
->(({ className, ...props }, ref) => (
+	React.ThHTMLAttributes<HTMLTableCellElement> & { sticky?: "start" | "end" }
+>(({ className, sticky, scope, ...props }, ref) => (
 	<th
 		ref={ref}
+    scope={scope ?? "col"}
+    data-sticky={sticky}
 		className={cn(
 			"h-12 px-4 text-start align-middle font-medium text-muted-foreground [&:has([role=checkbox])]:pe-0",
+      sticky && "sticky z-10 bg-background", sticky === "end" && "end-0", sticky === "start" && "start-0",
 			className,
 		)}
 		{...props}
@@ -82,11 +82,12 @@ TableHead.displayName = "TableHead";
 
 const TableCell = React.forwardRef<
 	HTMLTableCellElement,
-	React.TdHTMLAttributes<HTMLTableCellElement>
->(({ className, ...props }, ref) => (
+	React.TdHTMLAttributes<HTMLTableCellElement> & { sticky?: "start" | "end" }
+>(({ className, sticky, ...props }, ref) => (
 	<td
 		ref={ref}
-		className={cn("p-4 align-middle [&:has([role=checkbox])]:pe-0", className)}
+    data-sticky={sticky}
+		className={cn("px-4 py-3 align-middle [&:has([role=checkbox])]:pe-0", sticky && "sticky z-10 bg-background", sticky === "end" && "end-0", sticky === "start" && "start-0", className)}
 		{...props}
 	/>
 ));

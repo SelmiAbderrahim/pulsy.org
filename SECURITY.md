@@ -51,14 +51,28 @@ much of its security posture depends on how you deploy and configure it.
   and do not bake secrets into images.
 - **Terminate TLS at a reverse proxy** in production and serve Pulsy over HTTPS so session
   cookies are protected in transit.
-- **SSRF / outbound egress filtering.** Pulsy fetches the URLs you configure — monitor
-  targets, TLS-probe hosts, and webhook/Slack/Discord notification endpoints. On a private
-  trusted-user instance that is the intended behaviour (you monitor your own internal
-  services). If you expose **signup to untrusted users**, set `BLOCK_PRIVATE_TARGETS=true`:
-  every outbound request is then resolved via DNS and rejected when it points at a
-  loopback, private, link-local (including the `169.254.169.254` cloud-metadata endpoint),
-  unique-local, or CGNAT address, and each redirect hop is re-validated. It is **off by
-  default** so internal monitoring keeps working out of the box.
+- **Outbound network policy.** `MONITOR_ALLOW_PRIVATE_NETWORKS=true` is the OSS
+  default, allowing private/LAN targets. Metadata and link-local destinations
+  remain blocked in every mode. Set `MONITOR_ALLOW_PRIVATE_NETWORKS=false` when
+  accounts should reach only public addresses; this also denies private,
+  loopback, ULA and CGNAT destinations. Input checks, DNS pinned at the actual
+  socket connection and a fresh check on every redirect defend against rebinding.
+  `BLOCK_PRIVATE_TARGETS=true` is a deprecated alias used only when the new setting
+  is absent. Startup logs the effective policy and warns when LAN access is
+  allowed. Inspect stored destinations with `make audit-private-targets`; see
+  [the operator guide](docs/self-hosting/ssrf.md).
+- **Capability ingress is deliberately narrow.** Heartbeat and server-health
+  credentials authenticate bounded, rate-limited routes; ordinary reads omit
+  credentials. Suppress heartbeat access/error logs at every proxy, including
+  the outer TLS proxy. Public status feeds expose published projections only;
+  subscriber addresses are encrypted and confirmation/unsubscribe capabilities
+  are redeemed only from JSON bodies. Configure `TRUST_PROXY_HOPS` for the actual
+  trusted proxy chain so rate-limit identities cannot be spoofed.
+- **Webhook signing keys never appear in server responses.** The browser creates
+  the one-time key locally and sends it for encryption. Rotation replaces the
+  key immediately and returns only an outcome. Receivers should verify HMAC-SHA256
+  against the raw request body with a timing-safe comparison and deduplicate
+  delivery IDs; see [the contract](docs/api/webhooks.md).
 - **Database access** should be restricted to the application host/network; do not expose
   Postgres publicly.
 

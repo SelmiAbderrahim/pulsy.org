@@ -24,7 +24,7 @@ describe("useIncidentSearch", () => {
 			wrapper: Wrapper,
 		});
 		await waitFor(() => expect(result.current.isSuccess).toBe(true));
-		expect(svc.searchIncidents).toHaveBeenCalledWith("api");
+		expect(svc.searchIncidents).toHaveBeenCalledWith("api", expect.any(AbortSignal));
 	});
 
 	it("is idle for an empty query", () => {

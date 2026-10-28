@@ -6,9 +6,8 @@
 #   # edit .env: set POSTGRES_PASSWORD, ENCRYPTION_KEY, BETTER_AUTH_SECRET
 #   docker compose -f docker/docker-compose.ghcr.yml --env-file .env up -d
 #
-# NOTE: the web image is prebuilt with default Vite flags (no analytics, no
-# custom-domain target) and a source link to its exact release
-# commit. To customize any VITE_* build arg, build from source with
+# NOTE: the web image uses default public Vite settings and a corresponding
+# source link to its exact release commit. To customize any VITE_* build arg, build from source with
 # docker-compose.yml instead.
 
 name: pulsy
@@ -37,6 +36,7 @@ services:
     image: ghcr.io/selmiabderrahim/pulsy-server:latest
     container_name: pulsy-server
     restart: unless-stopped
+    init: true
     depends_on:
       postgres:
         condition: service_healthy
@@ -65,6 +65,8 @@ services:
     depends_on:
       server:
         condition: service_healthy
+    volumes:
+      - web_assets:/var/cache/pulsy
     ports:
       # Container listens on 8080 (unprivileged nginx).
       - "${WEB_PORT:-3000}:8080"
@@ -77,3 +79,4 @@ services:
 
 volumes:
   pulsy_pgdata:
+  web_assets:

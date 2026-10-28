@@ -11,7 +11,11 @@
       "pagination": "Pagination",
       "endpoints": "Endpoints",
       "monitor-object": "The monitor object",
-      "openapi": "OpenAPI spec"
+      "openapi": "OpenAPI spec",
+      "access": "Key scopes",
+      "monitor-types": "Monitor types",
+      "channels": "Notification channels",
+      "status-pages": "Status pages"
     }
   },
   "copy": {
@@ -28,12 +32,12 @@
       "title": "Authentication",
       "body": "Every request authenticates with a Bearer API key. Create a key in the dashboard — the secret is shown once, so copy it then. Pulsy stores only a hash and can never show it again; if you lose a key, revoke it and create a new one.",
       "headerLabel": "Send your key in the Authorization header",
-      "note": "API keys authenticate the REST API only — never the dashboard session — and can be revoked at any time.",
+      "note": "New keys default to read-only. Choose full scope for writes and optionally set an expiry date (23:59:59 UTC). Expired or revoked keys cannot authenticate. The secret is shown once and stored only as a hash.",
       "createCta": "Create an API key"
     },
     "rateLimit": {
       "title": "Rate limiting",
-      "body": "Requests are limited per key in a fixed one-minute window (60 requests/minute by default). Every response carries rate-limit headers so you can pace your calls.",
+      "body": "Requests are limited per key in a fixed one-minute window (60 requests/minute by default). Every response to an authenticated request carries rate-limit headers so you can pace your calls; a 401 does not.",
       "tableHeaders": {
         "header": "Header",
         "meaning": "Meaning"
@@ -55,12 +59,15 @@
       },
       "rows": {
         "unauthorized": "Missing, malformed, invalid, or revoked key.",
-        "forbidden": "Your plan is below the required access level.",
-        "notFound": "The monitor doesn't exist or isn't yours.",
-        "validation": "Invalid body or query, or a plan limit (e.g. interval too frequent, monitor cap reached).",
+        "forbidden": "A read-only key cannot call a write endpoint.",
+        "notFound": "The monitor (or a channel you referenced) doesn't exist or isn't yours.",
+        "validation": "Invalid body or query. Malformed JSON or a body that is too large returns HTTP 400/413/415 with the same code.",
         "rateLimited": "Per-key rate-limit window exceeded.",
-        "internal": "Unexpected server error."
-      }
+        "internal": "Unexpected server error.",
+        "conflict": "Configuration apply only: your account changed after the preview. Preview again."
+      },
+      "rateLimitedExample": "Rate-limited response",
+      "retryNote": "After a 429, wait the number of seconds in Retry-After before you retry."
     },
     "pagination": {
       "title": "Pagination",
@@ -70,7 +77,8 @@
       "title": "Endpoints",
       "groups": {
         "monitors": "Monitors",
-        "data": "Checks, incidents & stats"
+        "data": "Checks, incidents & stats",
+        "configuration": "Configuration (every monitor type)"
       }
     },
     "monitorObject": {
@@ -79,7 +87,40 @@
     },
     "openapi": {
       "title": "OpenAPI specification",
-      "body": "Prefer machine-readable docs? The full contract ships as an OpenAPI 3.1 spec in the repository — import it into Postman or Insomnia, or generate a client with openapi-generator."
+      "body": "Prefer machine-readable docs? The full contract is an OpenAPI 3.1 spec that matches this deployment’s version. Import it into Postman or Insomnia, or generate a client with openapi-generator. It also covers the observed-availability, annotation and configuration export/preview/apply endpoints that are not walked through above.",
+      "download": "Download openapi.yaml"
+    },
+    "access": {
+      "title": "Key scopes",
+      "body": "Each API key has a read or full scope. Both scopes can read your account's data; full scope is required to create or change it.",
+      "ossNote": "Every account can use the entire API. Choose each key's read-only or full scope for the access it needs.",
+      "tableHeaders": {
+        "level": "Key scope",
+        "read": "Read endpoints",
+        "write": "Write endpoints"
+      }
+    },
+    "monitorTypes": {
+      "title": "DNS, TCP, heartbeat and server monitors",
+      "body": "POST /monitors creates HTTP monitors. Create and update every other type with a configuration manifest: preview it, review the planned entries, then apply it with the returned revision. Monitors are matched by your key, so the same manifest can be applied again to update them.",
+      "items": {
+        "http": "url, method, expected status, timeout and optional response assertions.",
+        "dns": "configuration.hostname and recordType (A, AAAA, CNAME, MX or TXT). Mode exists requires at least one answer; matches requires the exact expected set, ignoring order and duplicates.",
+        "tcp": "configuration.hostname and port. The check passes when the connection opens within the timeout.",
+        "heartbeat": "interval is the expected ping period and graceSeconds the delay before Down. New heartbeat monitors stay paused until you rotate their ping token in the dashboard.",
+        "server": "CPU, memory and disk thresholds plus excluded filesystems. New server monitors stay paused until you create the agent credential in the dashboard."
+      },
+      "exampleLabel": "manifest.json — one monitor of every type"
+    },
+    "channels": {
+      "title": "Notification channels",
+      "body": "Create Email, Webhook, Slack, Discord and Telegram channels in the dashboard. The API refers to them by id only: pass channelIds when you create an HTTP monitor or in a manifest. Unknown ids and channels you do not own return 404.",
+      "secrets": "Channel destinations, custom headers, provider credentials and webhook signing secrets are write-only. No API response, configuration export or log includes them; exports list channel ids only. Generic webhooks receive the signed version 1 payload described in docs/api/webhooks.md."
+    },
+    "statusPages": {
+      "title": "Status pages",
+      "body": "Build and publish status pages in the dashboard. A published page offers read-only projections without an API key: status.json, history.json, badge.svg, feed.rss and feed.atom. Drafts return 404, each client address may make {{limit}} requests per minute, and the projections never include URLs, credentials, subscribers or internal notes.",
+      "exampleLabel": "Read a published status page"
     }
   },
   "endpoint": {
@@ -104,7 +145,8 @@
       "id": "The monitor's ID.",
       "limit": "Items per page (1–100, default 20).",
       "cursor": "Opaque cursor from the previous response's nextCursor.",
-      "days": "Window in days for the aggregate (1–366, default 30)."
+      "days": "Window in days for the aggregate (1–366, default 30).",
+      "monitorIds": "Optional comma-separated selection of 1–200 owned monitor IDs. Without a selection, at most 1,000 monitors per scrape."
     },
     "bodyFields": {
       "name": "A label for the monitor.",
@@ -112,10 +154,13 @@
       "method": "HTTP method to use. Default GET.",
       "expectedStatus": "Expected HTTP status code (100–599). Default 200.",
       "timeout": "Request timeout in milliseconds (1000–60000). Default 10000.",
-      "interval": "Seconds between checks: 30, 60, 300, 600, 1800, or 3600. Lower values may need a higher plan. Default 300.",
+      "interval": "Seconds between checks: 30, 60, 300, 600, 1800, or 3600. Default 300.",
       "failureThreshold": "Consecutive failures before an incident opens (1–10). Default 3.",
       "active": "Whether the monitor runs. Default true.",
-      "tags": "Up to 10 string tags."
+      "tags": "Up to 10 string tags.",
+      "latencyPolicy": "Optional policy: thresholdMs/recoveryThresholdMs (both null disables latency), slowCount/recoveryCount (1–10), importance (critical/warning/informational), cooldownSeconds (0–3600). Recovery threshold must not exceed the slow threshold. Null preserves legacy behavior; omission retains a saved policy on update.",
+      "expectedStatuses": "Optional accepted statuses: 200,204; 2xx; or 200–299. Overrides expectedStatus. Null restores the numeric status rule.",
+      "tlsMonitoringEnabled": "Whether to watch HTTPS certificate expiry. Default true; disabling does not disable HTTPS certificate verification."
     }
   },
   "endpointDocs": {
@@ -154,6 +199,28 @@
     "getStats": {
       "summary": "Get monitor stats",
       "description": "Returns aggregate uptime and response-time statistics over the requested window."
+    },
+    "metrics": {
+      "summary": "Prometheus metrics",
+      "description": "Read stored account health with existing API-read access. Scraping never runs checks. Status: -1 unknown, 0 down, 1 up, 2 degraded. Fresh is 1 only when active and last check age is no more than twice the interval plus timeout. Missing values are NaN; durations are seconds and timestamps are Unix seconds. Labels contain monitor IDs only; names, URLs and tags stay private. Open incident is 1 while a measured incident is open. TLS expiry is the last observed certificate expiry, or NaN. See the Prometheus guide for a scrape configuration and freshness-aware query. Durations cover HTTP requests, DNS resolution and TCP connections; heartbeats have NaN duration. TLS applies only to HTTP. Freshness is zero for unknown, paused or future-dated observations. Heartbeats also need a stored deadline record with any next deadline at most ten seconds overdue."
+    },
+    "exportConfiguration": {
+      "summary": "Export configuration",
+      "description": "Returns a portable manifest for the selected monitors. Secrets are never included; entries that need them list needsReentry."
+    },
+    "previewConfiguration": {
+      "summary": "Preview a manifest",
+      "description": "Validates a manifest of any monitor types against your account and reports what applying it would create, update or reject. Changes nothing. Send the manifest as a JSON string in text."
+    },
+    "applyConfiguration": {
+      "summary": "Apply a manifest",
+      "description": "Applies exactly the previewed plan. Send the same text and the preview's revision; if your account changed in the meantime the request returns 409 and nothing is applied."
     }
+  },
+  "ux": {
+    "loadError": "API access could not be loaded. Retry to check your current access.",
+    "retry": "Retry",
+    "allowed": "Allowed",
+    "copyFailed": "Could not copy. Select and copy the code manually."
   }
 }

@@ -80,15 +80,16 @@ describe("apiCreateUptimeNotificationChannel — channel target validation", () 
 					...base,
 					channelType: "telegram",
 				}),
-			).toThrow(/Telegram target is required/);
+			).toThrow(/validation\.telegramTarget/);
 		});
 
-		it("accepts a Telegram API URL", () => {
+		it("accepts a Telegram API URL with an explicit chat ID", () => {
 			expect(() =>
 				apiCreateUptimeNotificationChannel.parse({
 					...base,
 					channelType: "telegram",
 					webhookUrl: "https://api.telegram.org/bot123:ABC/sendMessage",
+					webhookHeaders: { chat_id: "-1009999" },
 				}),
 			).not.toThrow();
 		});
@@ -110,7 +111,7 @@ describe("apiCreateUptimeNotificationChannel — channel target validation", () 
 					channelType: "telegram",
 					webhookUrl: "justone",
 				}),
-			).toThrow(/Telegram API URL or BOT_TOKEN:CHAT_ID/);
+			).toThrow(/validation\.telegramTarget/);
 		});
 
 		it("rejects a BOT_TOKEN:CHAT_ID target with an empty segment", () => {
@@ -120,7 +121,7 @@ describe("apiCreateUptimeNotificationChannel — channel target validation", () 
 					channelType: "telegram",
 					webhookUrl: "token::chat",
 				}),
-			).toThrow(/Telegram API URL or BOT_TOKEN:CHAT_ID/);
+			).toThrow(/validation\.telegramTarget/);
 		});
 	});
 
@@ -181,7 +182,7 @@ describe("apiCreateUptimeDefaultNotificationChannel — same target rules, no mo
 			apiCreateUptimeDefaultNotificationChannel.parse({
 				channelType: "telegram",
 			}),
-		).toThrow(/Telegram target is required/);
+		).toThrow(/validation\.telegramTarget/);
 	});
 
 	it("accepts a fully-configured default email channel with flag defaults", () => {
@@ -231,5 +232,24 @@ describe("apiCreateUptimeEmailProvider — SMTP field requirements", () => {
 		expect(() => apiCreateUptimeEmailProvider.parse(rest)).toThrow(
 			/SMTP username is required/,
 		);
+	});
+});
+
+describe("webhook channel limits", () => {
+	const webhook = { ...base, channelType: "webhook" as const, webhookUrl: "https://hooks.example.com/in" };
+	it("accepts ordinary headers and http(s) URLs", () => {
+		expect(() => apiCreateUptimeNotificationChannel.parse({ ...webhook, webhookHeaders: { Authorization: "Bearer x", "X-Api-Key": "k" } })).not.toThrow();
+		expect(() => apiCreateUptimeNotificationChannel.parse({ ...webhook, webhookUrl: "http://10.0.0.5:8080/hook" })).not.toThrow();
+	});
+	it.each(["ftp://example.com/x", "file:///etc/passwd", "gopher://example.com/"])("rejects the %s scheme at save time", (webhookUrl) => {
+		expect(() => apiCreateUptimeNotificationChannel.parse({ ...webhook, webhookUrl })).toThrow(/http or https/);
+	});
+	it("bounds header count, size and content, and refuses framing headers", () => {
+		const many = Object.fromEntries(Array.from({ length: 21 }, (_, i) => [`X-H${i}`, "v"]));
+		expect(() => apiCreateUptimeNotificationChannel.parse({ ...webhook, webhookHeaders: many })).toThrow(/At most 20 headers/);
+		expect(() => apiCreateUptimeNotificationChannel.parse({ ...webhook, webhookHeaders: { "X-Big": "x".repeat(4097) } })).toThrow();
+		expect(() => apiCreateUptimeNotificationChannel.parse({ ...webhook, webhookHeaders: { "X-Inject": "a\r\nHost: evil" } })).toThrow(/Invalid header value/);
+		expect(() => apiCreateUptimeNotificationChannel.parse({ ...webhook, webhookHeaders: { "bad name": "v" } })).toThrow(/Invalid header name/);
+		for (const name of ["Host", "content-length", "Transfer-Encoding"]) expect(() => apiCreateUptimeNotificationChannel.parse({ ...webhook, webhookHeaders: { [name]: "v" } }), name).toThrow(/Header not allowed/);
 	});
 });

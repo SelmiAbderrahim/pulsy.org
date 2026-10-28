@@ -1,11 +1,17 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { isSessionClientActive } from "@/lib/session-query-client";
+import { useDraftComparison } from "@/hooks/use-draft-comparison";
+import { FormField } from "@/components/ui/form-field";
+import { SectionCard } from "@/components/ui/section-card";
+import { FormErrorSummary, useFormValidation } from "@/components/ui/form-validation";
+import { requestConfirmation } from "@/lib/confirmation";
 import { Loader2, Mail, Pencil, Plus, Send, Trash2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useId, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
 import {
 	Dialog,
 	DialogContent,
@@ -54,7 +60,9 @@ const PROVIDER_TYPES: UptimeEmailProviderType[] = [
 
 export function EmailProvidersSection() {
 	const { t } = useTranslation("uptimeMonitor");
-	const { data: providers } = useUptimeEmailProviders();
+ const client = useQueryClient();
+	const { data: providers, isPending: loading, error: loadError, refetch } = useUptimeEmailProviders();
+ const [testResult, setTestResult] = useState("");
 	const createMutation = useCreateUptimeEmailProvider();
 	const updateMutation = useUpdateUptimeEmailProvider();
 	const deleteMutation = useDeleteUptimeEmailProvider();
@@ -66,28 +74,38 @@ export function EmailProvidersSection() {
 	);
 
 	const handleDelete = async (provider: UptimeEmailProvider) => {
+ if (!await requestConfirmation(t("notificationUX.deleteProvider", { name: provider.name }), { title: t("notificationUX.deleteProviderTitle"), action: t("common:actions.delete") })) return;
 		try {
 			await deleteMutation.mutateAsync(provider.emailProviderId);
-			toast.success(t("emailProviders.delete.success"));
+			if (!isSessionClientActive(client)) return;
+ toast.success(t("emailProviders.delete.success"));
 		} catch (error) {
+ if (!isSessionClientActive(client)) return;
 			toast.error(extractErrorMessage(error, t("emailProviders.delete.error")));
 		}
 	};
 
 	const handleTest = async (providerId: string) => {
+ setTestResult("");
 		try {
 			await testMutation.mutateAsync(providerId);
-			toast.success(t("emailProviders.test.success"));
+			if (!isSessionClientActive(client)) return;
+ toast.success(t("emailProviders.test.success"));
+ setTestResult(t("emailProviders.test.success"));
 		} catch (error) {
-			toast.error(extractErrorMessage(error, t("emailProviders.test.error")));
+ if (!isSessionClientActive(client)) return;
+			const message = extractErrorMessage(error, t("emailProviders.test.error"));
+ toast.error(message); setTestResult(message);
 		}
 	};
 
+ if (loading) return <SectionCard title={t("emailProviders.title")}><p role="status">{t("notificationUX.loadingProviders")}</p></SectionCard>;
+ if (loadError && !providers) return <SectionCard title={t("emailProviders.title")}><div role="alert" className="grid gap-2"><p>{t("notificationUX.errorProviders")}</p><Button className="w-full sm:w-auto sm:justify-self-start sm:self-start" variant="outline" onClick={() => void refetch()}>{t("workspace.retry")}</Button></div></SectionCard>;
 	if (!providers || providers.length === 0) {
 		return (
-			<Card>
-				<CardContent className="flex flex-col items-center justify-center p-12 text-center">
-					<Mail className="h-10 w-10 text-muted-foreground mb-3" />
+			<SectionCard title={t("emailProviders.title")} >
+				<div className="flex flex-col items-center justify-center text-center">
+					<Mail className="h-6 w-6 text-muted-foreground mb-2" />
 					<p className="font-medium">{t("emailProviders.empty")}</p>
 					<p className="text-sm text-muted-foreground mt-1">
 						{t("emailProviders.emptyDescription")}
@@ -96,42 +114,35 @@ export function EmailProvidersSection() {
 						<Plus className="h-4 w-4 me-2" />
 						{t("actions.addProvider")}
 					</Button>
-				</CardContent>
+				</div>
 
 				<EmailProviderDialog
 					open={createOpen}
 					onOpenChange={setCreateOpen}
 					onSubmit={async (input) => {
 						await createMutation.mutateAsync(input);
-						toast.success(t("emailProviders.create.success"));
+ if (!isSessionClientActive(client)) return;
+ toast.success(t("emailProviders.create.success"));
 						setCreateOpen(false);
 					}}
 					isPending={createMutation.isPending}
 				/>
-			</Card>
+			</SectionCard>
 		);
 	}
 
 	return (
-		<div className="flex min-w-0 flex-col gap-4">
-			<div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-				<div className="min-w-0">
-					<h3 className="text-lg font-medium">{t("emailProviders.title")}</h3>
-					<p className="text-sm text-muted-foreground">
-						{t("emailProviders.description")}
-					</p>
-				</div>
-				<Button
+<SectionCard title={t("emailProviders.title")} description={t("emailProviders.description")} headerEnd={<Button
 					onClick={() => setCreateOpen(true)}
 					size="sm"
-					className="h-[44px] w-full sm:w-auto"
+					className="max-w-full whitespace-normal"
 				>
 					<Plus className="h-4 w-4 me-2" />
 					{t("actions.addProvider")}
-				</Button>
-			</div>
+				</Button>}><div className="grid gap-4">
 
-			<div className="w-full min-w-0 overflow-x-auto rounded-lg border">
+			<p className="text-sm text-muted-foreground">{t("notificationUX.providerTestDestination")}</p>{testResult && <p role="status" className="break-words text-sm">{testResult}</p>}
+ <div role="region" tabIndex={0} aria-label={t("emailProviders.title")} className="w-full min-w-0 overflow-x-auto rounded-lg border">
 				<Table>
 					<TableHeader>
 						<TableRow>
@@ -152,7 +163,7 @@ export function EmailProvidersSection() {
 					<TableBody>
 						{providers.map((provider) => (
 							<TableRow key={provider.emailProviderId}>
-								<TableCell className="font-medium">{provider.name}</TableCell>
+								<TableCell className="font-medium"><span className="block break-words">{provider.name}</span><Badge variant="outline">{t(provider.verified ? "notificationUX.providerVerified" : "notificationUX.providerUntested")}</Badge></TableCell>
 								<TableCell>
 									<Badge variant="outline">
 										{t(
@@ -218,7 +229,8 @@ export function EmailProvidersSection() {
 				onOpenChange={setCreateOpen}
 				onSubmit={async (input) => {
 					await createMutation.mutateAsync(input);
-					toast.success(t("emailProviders.create.success"));
+ if (!isSessionClientActive(client)) return;
+ toast.success(t("emailProviders.create.success"));
 					setCreateOpen(false);
 				}}
 				isPending={createMutation.isPending}
@@ -237,13 +249,14 @@ export function EmailProvidersSection() {
 							emailProviderId: editProvider.emailProviderId,
 							...input,
 						});
-						toast.success(t("emailProviders.edit.success"));
+						if (!isSessionClientActive(client)) return;
+ toast.success(t("emailProviders.edit.success"));
 						setEditProvider(null);
 					}}
 					isPending={updateMutation.isPending}
 				/>
 			)}
-		</div>
+		</div></SectionCard>
 	);
 }
 
@@ -255,7 +268,7 @@ interface EmailProviderDialogProps {
 	isPending: boolean;
 }
 
-function EmailProviderDialog({
+export function EmailProviderDialog({
 	open,
 	onOpenChange,
 	provider,
@@ -263,7 +276,12 @@ function EmailProviderDialog({
 	isPending,
 }: EmailProviderDialogProps) {
 	const { t } = useTranslation("uptimeMonitor");
+ const client = useQueryClient();
 	const isEdit = Boolean(provider);
+ const [errorMessage, setErrorMessage] = useState("");
+  const fieldId = useId();
+  const validation = useFormValidation();
+  const fieldMessage = (field: string) => { const issue = validation.issues.find(issue => issue.id === `${fieldId}-${field}`); return issue ? <p className="text-sm text-destructive">{issue.message}</p> : null; };
 
 	const [name, setName] = useState(provider?.name ?? "");
 	const [providerType, setProviderType] = useState<UptimeEmailProviderType>(
@@ -278,18 +296,32 @@ function EmailProviderDialog({
 	);
 	const [smtpPassword, setSmtpPassword] = useState("");
 	const [smtpSecure, setSmtpSecure] = useState(provider?.smtpSecure ?? true);
+  const draftValues = { name, providerType, apiKey, fromAddress, smtpHost, smtpPort, smtpUsername, smtpPassword, smtpSecure };
+  const draft = useDraftComparison(draftValues, draftValues, open);
+
+  useEffect(() => {
+    if (open) return;
+    setName(provider?.name ?? ""); setProviderType(provider?.providerType ?? "resend");
+    setApiKey(""); setFromAddress(provider?.fromAddress ?? "");
+    setSmtpHost(provider?.smtpHost ?? ""); setSmtpPort(String(provider?.smtpPort ?? 587));
+    setSmtpUsername(provider?.smtpUsername ?? ""); setSmtpPassword(""); setSmtpSecure(provider?.smtpSecure ?? true);
+    setErrorMessage(""); validation.clear();
+  }, [open]);
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
+ if (isPending) return;
+ setErrorMessage("");
+ if (!validation.validate()) return;
 		try {
 			await onSubmit({
-				name,
+				name: name.trim(),
 				providerType,
 				apiKey:
 					providerType !== "smtp" && (!isEdit || apiKey)
 						? apiKey
 						: undefined,
-				fromAddress,
+				fromAddress: fromAddress.trim(),
 				smtpHost: providerType === "smtp" ? smtpHost : undefined,
 				smtpPort: providerType === "smtp" ? Number(smtpPort) : undefined,
 				smtpUsername: providerType === "smtp" ? smtpUsername : undefined,
@@ -300,6 +332,9 @@ function EmailProviderDialog({
 				smtpSecure: providerType === "smtp" ? smtpSecure : undefined,
 			});
 		} catch (error) {
+ if (!isSessionClientActive(client)) return;
+      if (validation.server(error, Object.fromEntries(["name", "fromAddress", "providerType", "apiKey", "smtpHost", "smtpPort", "smtpUsername", "smtpPassword"].map(key => [key, `${fieldId}-${key}`])))) return;
+      setErrorMessage(extractErrorMessage(error, t("emailProviders.test.error")));
 			toast.error(
 				extractErrorMessage(
 					error,
@@ -313,8 +348,8 @@ function EmailProviderDialog({
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-[420px]">
-				<form onSubmit={handleSubmit}>
+			<DialogContent className="sm:max-w-[var(--dialog-standard)]">
+				<form {...draft.formProps} ref={validation.formRef} onChangeCapture={event => validation.clear((event.target as HTMLElement).id)} noValidate className="dialog-form" onSubmit={handleSubmit}>
 					<DialogHeader>
 						<DialogTitle>
 							{isEdit
@@ -326,26 +361,30 @@ function EmailProviderDialog({
 						</DialogDescription>
 					</DialogHeader>
 
-					<div className="grid gap-4 py-4">
-						<div className="grid gap-2">
-							<Label>{t("emailProviders.fields.name")}</Label>
-							<Input
+					<div className="dialog-body grid gap-y-[var(--field-row-gap)] py-6"><fieldset disabled={isPending} className="contents">
+ <FormErrorSummary issues={validation.issues} />
+ {errorMessage && <p role="alert" className="text-sm text-destructive">{errorMessage}</p>}
+ {isEdit && <div id={`${fieldId}-secret-help`} className="grid gap-1 text-sm text-muted-foreground"><p>{t("notificationUX.retainSecrets")}</p><p>{t("notificationUX.reverifyHint")}</p></div>}
+						<FormField className="form-field">
+							<Label htmlFor={`${fieldId}-name`}>{t("emailProviders.fields.name")}</Label>
+							<Input {...validation.field(`${fieldId}-name`)} id={`${fieldId}-name`}
 								value={name}
 								onChange={(e) => setName(e.target.value)}
 								placeholder={t("emailProviders.fields.namePlaceholder")}
 								required
 							/>
-						</div>
+              {fieldMessage("name")}
+						</FormField>
 
-						<div className="grid gap-2">
-							<Label>{t("emailProviders.fields.providerType")}</Label>
+						<FormField className="form-field">
+							<Label htmlFor={`${fieldId}-providerType`}>{t("emailProviders.fields.providerType")}</Label>
 							<Select
 								value={providerType}
 								onValueChange={(v) =>
 									setProviderType(v as UptimeEmailProviderType)
 								}
 							>
-								<SelectTrigger>
+								<SelectTrigger id={`${fieldId}-providerType`} {...validation.field(`${fieldId}-providerType`)}>
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
@@ -356,36 +395,39 @@ function EmailProviderDialog({
 									))}
 								</SelectContent>
 							</Select>
-						</div>
+              {fieldMessage("providerType")}
+						</FormField>
 
-						<div className="grid gap-2">
-							<Label>{t("emailProviders.fields.fromAddress")}</Label>
-							<Input
+						<FormField className="form-field">
+							<Label htmlFor={`${fieldId}-fromAddress`}>{t("emailProviders.fields.fromAddress")}</Label>
+							<Input {...validation.field(`${fieldId}-fromAddress`)} id={`${fieldId}-fromAddress`}
 								type="email"
 								value={fromAddress}
 								onChange={(e) => setFromAddress(e.target.value)}
 								placeholder={t("emailProviders.fields.fromAddressPlaceholder")}
 								required
 							/>
-						</div>
+              {fieldMessage("fromAddress")}
+						</FormField>
 
 						{providerType !== "smtp" ? (
-							<div className="grid gap-2">
-								<Label>{t("emailProviders.fields.apiKey")}</Label>
-								<Input
-									type="password"
+							<FormField className="form-field">
+								<Label htmlFor={`${fieldId}-apiKey`}>{t("emailProviders.fields.apiKey")}</Label>
+								<Input {...validation.field(`${fieldId}-apiKey`, isEdit ? `${fieldId}-secret-help` : undefined)} id={`${fieldId}-apiKey`}
+									type="password" autoComplete="new-password"
 									value={apiKey}
 									onChange={(e) => setApiKey(e.target.value)}
-									placeholder={t("emailProviders.fields.apiKeyPlaceholder")}
+									placeholder={isEdit ? t("notificationUX.storedSecretPlaceholder") : t("emailProviders.fields.apiKeyPlaceholder")}
 									required={!isEdit}
 								/>
-							</div>
+              {fieldMessage("apiKey")}
+							</FormField>
 						) : (
 							<>
-								<div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-									<div className="grid gap-2">
-										<Label>{t("emailProviders.fields.smtpHost")}</Label>
-										<Input
+								<div className="form-grid grid-cols-1 sm:grid-cols-2">
+									<FormField className="form-field">
+										<Label htmlFor={`${fieldId}-smtpHost`}>{t("emailProviders.fields.smtpHost")}</Label>
+										<Input {...validation.field(`${fieldId}-smtpHost`)} id={`${fieldId}-smtpHost`}
 											value={smtpHost}
 											onChange={(e) => setSmtpHost(e.target.value)}
 											placeholder={t(
@@ -393,10 +435,11 @@ function EmailProviderDialog({
 											)}
 											required
 										/>
-									</div>
-									<div className="grid gap-2">
-										<Label>{t("emailProviders.fields.smtpPort")}</Label>
-										<Input
+              {fieldMessage("smtpHost")}
+									</FormField>
+									<FormField className="form-field">
+										<Label htmlFor={`${fieldId}-smtpPort`}>{t("emailProviders.fields.smtpPort")}</Label>
+										<Input {...validation.field(`${fieldId}-smtpPort`)} id={`${fieldId}-smtpPort`}
 											type="number"
 											value={smtpPort}
 											onChange={(e) => setSmtpPort(e.target.value)}
@@ -404,26 +447,29 @@ function EmailProviderDialog({
 											max={65535}
 											required
 										/>
-									</div>
+              {fieldMessage("smtpPort")}
+									</FormField>
 								</div>
 
-								<div className="grid gap-2">
-									<Label>{t("emailProviders.fields.smtpUsername")}</Label>
-									<Input
-										value={smtpUsername}
+								<FormField className="form-field">
+									<Label htmlFor={`${fieldId}-smtpUsername`}>{t("emailProviders.fields.smtpUsername")}</Label>
+									<Input {...validation.field(`${fieldId}-smtpUsername`)} id={`${fieldId}-smtpUsername`}
+										required value={smtpUsername}
 										onChange={(e) => setSmtpUsername(e.target.value)}
 									/>
-								</div>
+              {fieldMessage("smtpUsername")}
+								</FormField>
 
-								<div className="grid gap-2">
-									<Label>{t("emailProviders.fields.smtpPassword")}</Label>
-									<Input
-										type="password"
-										value={smtpPassword}
+								<FormField className="form-field">
+									<Label htmlFor={`${fieldId}-smtpPassword`}>{t("emailProviders.fields.smtpPassword")}</Label>
+									<Input {...validation.field(`${fieldId}-smtpPassword`, isEdit ? `${fieldId}-secret-help` : undefined)} id={`${fieldId}-smtpPassword`}
+										type="password" autoComplete="new-password"
+										value={smtpPassword} placeholder={isEdit ? t("notificationUX.storedSecretPlaceholder") : undefined}
 										onChange={(e) => setSmtpPassword(e.target.value)}
 										required={!isEdit}
 									/>
-								</div>
+              {fieldMessage("smtpPassword")}
+								</FormField>
 
 								<div className="flex items-center justify-between p-3 rounded-md bg-muted/50">
 									<Label htmlFor="smtp-secure">
@@ -437,13 +483,13 @@ function EmailProviderDialog({
 								</div>
 							</>
 						)}
-					</div>
+					</fieldset></div>
 
 					<DialogFooter className="border-t pt-3">
 						<Button
 							type="button"
 							variant="outline"
-							onClick={() => onOpenChange(false)}
+							data-dialog-discard onClick={() => onOpenChange(false)}
 							className="h-[44px] w-full sm:w-auto"
 						>
 							{t("actions.cancel")}

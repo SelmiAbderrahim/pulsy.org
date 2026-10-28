@@ -1,0 +1,21 @@
+import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { expect, it, vi } from "vitest";
+import { reactI18nextMock } from "@/test/i18n-mock";
+import { NetworkForm } from "./network-controls";
+vi.mock("react-i18next", () => reactI18nextMock());
+it.each(["threshold", "slowCount", "recoveryCount", "cooldown"])("does not save an old policy value when required %s is empty", async field => {
+  const save = vi.fn();
+  render(<NetworkForm label="Save network" onSave={save} initial={{ name: "DNS", configuration: { type: "dns", hostname: "example.invalid", recordType: "A", mode: "exists", expected: [] }, interval: 300, timeout: 10000, failureThreshold: 3, active: true, tags: [], latencyPolicy: { thresholdMs: 500, recoveryThresholdMs: 300, slowCount: 2, recoveryCount: 2, importance: "critical", cooldownSeconds: 0 } }} />);
+  fireEvent.change(screen.getByLabelText("network.name"), { target: { value: "Updated DNS" } });
+  await userEvent.click(screen.getByRole("button", { name: "latency.title" }));
+  const input = screen.getByLabelText(`latency.${field}`);
+  fireEvent.change(input, { target: { value: "" } });
+  await userEvent.click(screen.getByRole("button", { name: "Save network" }));
+  expect(save).not.toHaveBeenCalled();
+  expect(input).toBeInvalid();
+  expect(input).toHaveFocus();
+  screen.getByLabelText("network.name").focus();
+  await userEvent.click(screen.getByRole("link", { name: new RegExp(`latency.${field}:`) }));
+  expect(input).toHaveFocus();
+});

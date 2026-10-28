@@ -1,4 +1,6 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import * as confirmations from "@/lib/confirmation";
+import { renderWithQueryClient as render } from "@/test/query-wrapper";
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reactI18nextMock } from "@/test/i18n-mock";
@@ -41,7 +43,7 @@ vi.mock("@/hooks/uptime", () => ({
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
-vi.mock("sonner", () => ({
+vi.mock("@/lib/toast", () => ({
 	toast: {
 		success: (m: unknown) => toastSuccess(m),
 		error: (m: unknown) => toastError(m),
@@ -65,6 +67,7 @@ function provider(
 }
 
 beforeEach(() => {
+ vi.spyOn(confirmations, "requestConfirmation").mockResolvedValue(true);
 	vi.clearAllMocks();
 	providersData.value = undefined;
 	pending.create = pending.update = pending.delete = pending.test = false;
@@ -404,7 +407,7 @@ describe("EmailProviderDialog edit", () => {
 			screen.getByRole("button", { name: "actions.edit Primary" }),
 		);
 		await userEvent.type(
-			screen.getByPlaceholderText("emailProviders.fields.apiKeyPlaceholder"),
+			screen.getByPlaceholderText("notificationUX.storedSecretPlaceholder"),
 			"newkey",
 		);
 		await userEvent.click(

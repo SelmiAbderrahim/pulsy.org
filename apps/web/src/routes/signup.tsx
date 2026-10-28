@@ -1,8 +1,10 @@
+import { safeAuthReturn } from "@/lib/auth-return";
+import { FormField } from "@/components/ui/form-field";
+import { Helmet } from "@dr.pogodin/react-helmet";
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { Activity, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -10,77 +12,94 @@ import {
 	CardContent,
 	CardDescription,
 	CardHeader,
-	CardTitle,
 } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { PasswordInput } from "@/components/ui/password-input";
 import { Label } from "@/components/ui/label";
-import { authClient } from "@/lib/auth-client";
-import { extractErrorMessage } from "@/lib/api/extractErrorMessage";
+import { useResolveShareLink } from "@/hooks/uptime/useUptimeShareLinks";
+import { authClient, useSession } from "@/lib/auth-client";
+import { authFailureKey } from "@/lib/auth-failure";
 
 export const Route = createFileRoute("/signup")({
-	component: SignupPage,
-	// `share` carries a token through the auth flow — only the token, never a
-	// redirect path. The destination is always the literal route (/share/$token),
-	// so there is no open-redirect surface.
-	validateSearch: (search: Record<string, unknown>): { share?: string } => {
-		const share = typeof search.share === "string" ? search.share.trim() : "";
-		return share && share.length <= 128 ? { share } : {};
-	},
+  component: SignupPage,
+  validateSearch: (search: Record<string, unknown>): { share?: string; returnTo?: string; reason?: "session"; verificationError?: boolean } => {
+    const share = typeof search.share === "string" ? search.share.trim() : "";
+    return {
+      ...(share && share.length <= 128 ? { share } : {}),
+      ...(safeAuthReturn(search.returnTo) ? { returnTo: safeAuthReturn(search.returnTo) } : {}),
+      ...(search.reason === "session" ? { reason: "session" as const } : {}),
+      ...(["TOKEN_EXPIRED", "INVALID_TOKEN"].includes(typeof search.error === "string" ? search.error.toUpperCase() : "") ? { verificationError: true } : {}),
+    };
+  },
 });
 
 function SignupPage() {
 	const { t } = useTranslation(["auth", "common"]);
 	const navigate = useNavigate();
-	const { share } = Route.useSearch();
-	const carriedSearch = share ? { share } : {};
+  const { data: observedSession, error: sessionError } = useSession();
+  const session = sessionError?.status === 401 || sessionError?.status === 403 ? null : observedSession;
+  const { share, returnTo } = Route.useSearch();
+  const carriedSearch = { ...(share ? { share } : {}), ...(returnTo ? { returnTo } : {}) };
+  useEffect(() => {
+    if (!session?.user) return;
+    if (share) void navigate({ to: "/share/$token", params: { token: share }, replace: true });
+    else if (returnTo) void navigate({ href: returnTo, replace: true });
+    else void navigate({ to: "/dashboard", replace: true });
+  }, [navigate, returnTo, session?.user, share]);
+  const sharedMonitors = useResolveShareLink(share ?? "", { enabled: Boolean(share) }).data?.monitors.length ?? 0;
 	const [name, setName] = useState("");
 	const [email, setEmail] = useState("");
 	const [password, setPassword] = useState("");
 	const [submitting, setSubmitting] = useState(false);
+  const sending = useRef(false);
+  const [formError, setFormError] = useState("");
 
 	const handleSubmit = async (e: React.FormEvent) => {
 		e.preventDefault();
-		setSubmitting(true);
+    if (sending.current) return;
+    setFormError("");
+		sending.current = true;
+    setSubmitting(true);
 		try {
 			const { error } = await authClient.signUp.email({
 				name,
 				email,
 				password,
 				// Where the verification link lands the user after confirming.
-				callbackURL: share ? `/share/${share}` : "/dashboard",
+        callbackURL: share ? `/share/${encodeURIComponent(share)}` : returnTo ?? "/dashboard",
 			});
 			if (error) {
-				toast.error(error.message ?? t("auth:signup.error"));
+				setFormError(t(authFailureKey(error, "auth:signup.error")));
 				return;
 			}
-			if (share) {
-				navigate({ to: "/share/$token", params: { token: share } });
-			} else {
-				navigate({ to: "/dashboard" });
-			}
-		} catch (err) {
-			toast.error(extractErrorMessage(err, t("auth:signup.error")));
+      if (share) await navigate({ to: "/share/$token", params: { token: share } });
+      else if (returnTo) await navigate({ href: returnTo });
+      else await navigate({ to: "/dashboard" });
+		} catch {
+			setFormError(t("auth:signup.error"));
 		} finally {
-			setSubmitting(false);
+			sending.current = false;
+      setSubmitting(false);
 		}
 	};
 
 	return (
-		<div className="flex min-h-[calc(100dvh-45px)] items-center justify-center bg-muted/30 p-4">
-			<Card className="w-full max-w-sm">
+		<main className="grid min-h-[calc(100dvh-45px)] place-items-center bg-background px-4 py-8">
+			<Helmet><title>{t("auth:signup.title")} | Pulsy</title></Helmet>
+			<Card className="mx-auto my-auto w-full max-w-[var(--auth-width)]">
 				<CardHeader className="space-y-2 text-center">
-					<div className="flex justify-center">
-						<Activity className="h-8 w-8 text-primary" />
-					</div>
-					<CardTitle className="text-xl">{t("auth:signup.title")}</CardTitle>
+					<div className="mx-auto inline-flex min-h-11 items-center gap-2 text-primary"><Activity aria-hidden="true" className="size-6" /><span className="font-semibold">Pulsy</span></div>
+					<h1 className="text-xl font-semibold tracking-tight">{t("auth:signup.title")}</h1>
 					<CardDescription>{t("auth:signup.description")}</CardDescription>
+					{sharedMonitors > 0 && <p role="status" className="rounded-md border bg-muted/40 px-3 py-2 text-sm">{t("auth:signup.shareContext", "You're signing up to receive {{count}} shared monitors.", { count: sharedMonitors })}</p>}
 				</CardHeader>
 				<CardContent>
-					<form onSubmit={handleSubmit} className="flex flex-col gap-4">
-						<div className="grid gap-2">
+					<form onSubmit={handleSubmit} className="flex flex-col gap-5">
+            {formError && <p role="alert" className="text-sm text-destructive">{formError}</p>}
+						<FormField className="form-field">
 							<Label htmlFor="name">{t("auth:fields.name")}</Label>
 							<Input
-								id="name"
+								id="name" name="name" dir="auto" validateOnBlur
 								type="text"
 								autoComplete="name"
 								value={name}
@@ -88,11 +107,11 @@ function SignupPage() {
 								placeholder={t("auth:fields.namePlaceholder")}
 								required
 							/>
-						</div>
-						<div className="grid gap-2">
+						</FormField>
+						<FormField className="form-field">
 							<Label htmlFor="email">{t("auth:fields.email")}</Label>
 							<Input
-								id="email"
+								id="email" name="email" dir="ltr" validateOnBlur
 								type="email"
 								autoComplete="email"
 								value={email}
@@ -100,20 +119,22 @@ function SignupPage() {
 								placeholder={t("auth:fields.emailPlaceholder")}
 								required
 							/>
-						</div>
-						<div className="grid gap-2">
+						</FormField>
+						<FormField className="form-field">
 							<Label htmlFor="password">{t("auth:fields.password")}</Label>
-							<Input
-								id="password"
-								type="password"
+							<PasswordInput
+								id="password" name="password"
+
 								autoComplete="new-password"
 								value={password}
 								onChange={(e) => setPassword(e.target.value)}
 								placeholder={t("auth:fields.passwordPlaceholder")}
 								required
 								minLength={8}
+                  aria-describedby="password-requirements"
 							/>
-						</div>
+						</FormField>
+              <p id="password-requirements" className="text-sm text-muted-foreground">{t("auth:ux.passwordRequirements")}</p>
 						<Button
 							type="submit"
 							className="h-[44px] w-full"
@@ -137,6 +158,6 @@ function SignupPage() {
 					</p>
 				</CardContent>
 			</Card>
-		</div>
+		</main>
 	);
 }

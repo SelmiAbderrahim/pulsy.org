@@ -19,6 +19,7 @@ beforeEach(() => {
 
 describe("UptimeService monitor CRUD", () => {
 	it("listMonitors queries monitor.list", async () => {
+    mockQuery.mockResolvedValueOnce([]);
 		await UptimeService.listMonitors();
 		expect(mockQuery).toHaveBeenCalledWith("uptimeMonitor", "monitor.list");
 	});
@@ -65,7 +66,9 @@ describe("UptimeService monitor CRUD", () => {
 			monitorIds: ["m1", "m2"],
 			patch: { timeout: 5000 },
 		} as never;
-		await UptimeService.updateMonitorsBulk(input);
+    const updated = [{ uptimeMonitorId: "m1" }, { uptimeMonitorId: "m2" }];
+    mockMutation.mockResolvedValueOnce({ updated, results: updated.map(row => ({ id: row.uptimeMonitorId, status: "updated" })) } as never);
+    expect(await UptimeService.updateMonitorsBulk(input)).toEqual({ updated, results: updated.map(row => ({ id: row.uptimeMonitorId, status: "updated" })) });
 		expect(mockMutation).toHaveBeenCalledWith(
 			"uptimeMonitor",
 			"monitor.updateBulk",
@@ -187,8 +190,14 @@ describe("UptimeService incidents", () => {
 		await UptimeService.searchIncidents("api");
 		expect(mockQuery).toHaveBeenCalledWith("uptimeMonitor", "incident.search", {
 			query: "api",
-		});
+		}, undefined);
 	});
+
+  it("passes cancellation through for superseded incident searches", async () => {
+    const signal = new AbortController().signal;
+    await UptimeService.searchIncidents("api", signal);
+    expect(mockQuery).toHaveBeenCalledWith("uptimeMonitor", "incident.search", { query: "api" }, { signal });
+  });
 });
 
 describe("UptimeService email providers", () => {
@@ -256,22 +265,22 @@ describe("UptimeService notification channels", () => {
 	});
 
 	it("createDefaultChannel mutates channel.createDefault with input", async () => {
-		const input = { channelType: "webhook" } as never;
+		const input = { channelType: "webhook" as const };
 		await UptimeService.createDefaultChannel(input);
 		expect(mockMutation).toHaveBeenCalledWith(
 			"uptimeMonitor",
 			"channel.createDefault",
-			input,
+			{ ...input, signingSecret: expect.stringMatching(/^[a-f0-9]{64}$/) },
 		);
 	});
 
 	it("createChannel mutates channel.create with input", async () => {
-		const input = { uptimeMonitorId: "m1", type: "webhook" } as never;
+		const input = { uptimeMonitorId: "m1", channelType: "webhook" as const };
 		await UptimeService.createChannel(input);
 		expect(mockMutation).toHaveBeenCalledWith(
 			"uptimeMonitor",
 			"channel.create",
-			input,
+			{ ...input, signingSecret: expect.stringMatching(/^[a-f0-9]{64}$/) },
 		);
 	});
 
@@ -533,4 +542,80 @@ describe("UptimeService status pages", () => {
 			{ host: "status.acme.com" },
 		);
 	});
+});
+
+
+describe("UptimeService daily coverage and complete monitor collections", () => {
+  it("requests exact daily windows with the calendar aggregate contract", async () => {
+    await UptimeService.getDailyUptime("m1");
+    expect(mockQuery).toHaveBeenCalledWith("uptimeMonitor", "checkLog.daily", { uptimeMonitorId: "m1", days: 90 });
+    await UptimeService.getDailyUptime("m2", 7);
+    expect(mockQuery).toHaveBeenCalledWith("uptimeMonitor", "checkLog.daily", { uptimeMonitorId: "m2", days: 7 });
+  });
+  it("collects successive owner-scoped pages rather than truncating a large fleet", async () => {
+    const first = Array.from({ length: 200 }, (_, id) => ({ uptimeMonitorId: `monitor-${id}` }));
+    const second = Array.from({ length: 200 }, (_, id) => ({ uptimeMonitorId: `monitor-${id + 200}` }));
+    const last = [{ uptimeMonitorId: "monitor-400" }];
+    mockQuery.mockResolvedValueOnce(first).mockResolvedValueOnce(second).mockResolvedValueOnce(last);
+    expect(await UptimeService.listMonitors()).toEqual([...first, ...second, ...last]);
+    expect(mockQuery.mock.calls).toEqual([
+      ["uptimeMonitor", "monitor.list"],
+      ["uptimeMonitor", "monitor.list", { cursor: "monitor-199" }],
+      ["uptimeMonitor", "monitor.list", { cursor: "monitor-399" }],
+    ]);
+  });
+});
+
+
+it("sends large membership previews in a POST body without putting selected monitor IDs in a URL", async () => {
+ const ids = Array.from({ length: 1000 }, (_, index) => `00000000-0000-4000-8000-${String(index).padStart(12, "0")}`);
+ await UptimeService.previewStatusPageMonitors("owned-page", ids);
+ expect(mockMutation).toHaveBeenCalledWith("uptimeMonitor", "statusPage.setMonitorsPreviewPost", { statusPageId: "owned-page", uptimeMonitorIds: ids });
+ expect(mockQuery).not.toHaveBeenCalled();
+});
+
+describe("webhook secrets stay local when server responses are masked", () => {
+  it.each(["default", "monitor"] as const)("creates a %s webhook with the same local secret sent for encryption", async kind => {
+    mockMutation.mockResolvedValueOnce({ channelId: "channel-1", channelType: "webhook" } as never);
+    const input = { channelType: "webhook" as const, webhookUrl: "https://example.test/hook" };
+    const created = kind === "default"
+      ? await UptimeService.createDefaultChannel(input)
+      : await UptimeService.createChannel({ ...input, uptimeMonitorId: "monitor-1" });
+    expect(created.signingSecret).toEqual(expect.stringMatching(/^[a-f0-9]{64}$/));
+    expect(mockMutation).toHaveBeenCalledWith("uptimeMonitor", kind === "default" ? "channel.createDefault" : "channel.create", {
+      ...input, ...(kind === "monitor" ? { uptimeMonitorId: "monitor-1" } : {}), signingSecret: created.signingSecret,
+    });
+  });
+
+  it("rotates to fresh locally generated secrets while the server returns only an outcome", async () => {
+    mockMutation.mockResolvedValue({ rotated: true } as never);
+    const first = await UptimeService.rotateChannelSecret("channel-1");
+    const second = await UptimeService.rotateChannelSecret("channel-1");
+    expect(first.signingSecret).toEqual(expect.stringMatching(/^[a-f0-9]{64}$/));
+    expect(second.signingSecret).toEqual(expect.stringMatching(/^[a-f0-9]{64}$/));
+    expect(second.signingSecret).not.toBe(first.signingSecret);
+    expect(mockMutation).toHaveBeenNthCalledWith(1, "uptimeMonitor", "channel.rotateSecret", { channelId: "channel-1", signingSecret: first.signingSecret });
+    expect(mockMutation).toHaveBeenNthCalledWith(2, "uptimeMonitor", "channel.rotateSecret", { channelId: "channel-1", signingSecret: second.signingSecret });
+  });
+
+  it("does not report a new local secret when the server rejects rotation", async () => {
+    mockMutation.mockRejectedValueOnce(new Error("Request rejected"));
+    await expect(UptimeService.rotateChannelSecret("channel-1")).rejects.toThrow("Request rejected");
+  });
+
+  it("requires cryptographic randomness before making a secret mutation", async () => {
+    const random = vi.spyOn(crypto, "getRandomValues").mockImplementation(() => { throw new Error("Randomness unavailable"); });
+    try {
+      await expect(UptimeService.rotateChannelSecret("channel-1")).rejects.toThrow("Randomness unavailable");
+      expect(mockMutation).not.toHaveBeenCalled();
+    } finally { random.mockRestore(); }
+  });
+
+  it("leaves non-webhook channels free of signing material", async () => {
+    const input = { channelType: "email" as const, recipientAddresses: ["owner@example.test"] };
+    mockMutation.mockResolvedValueOnce({ channelId: "channel-1", channelType: "email" } as never);
+    const created = await UptimeService.createDefaultChannel(input);
+    expect(created).not.toHaveProperty("signingSecret");
+    expect(mockMutation).toHaveBeenCalledWith("uptimeMonitor", "channel.createDefault", input);
+  });
 });

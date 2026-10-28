@@ -132,6 +132,7 @@ describe("GlobalSearchDialog", () => {
 
 	it("ignores keyboard navigation with no results", () => {
 		open();
+ fireEvent.change(input(), { target: { value: "no results fixture" } });
 		fireEvent.keyDown(input(), { key: "ArrowDown" });
 		fireEvent.keyDown(input(), { key: "ArrowUp" });
 		fireEvent.keyDown(input(), { key: "Enter" });
@@ -184,7 +185,7 @@ describe("GlobalSearchDialog", () => {
 		monitorsState.data = undefined as never;
 		incidentsState.data = undefined as never;
 		open();
-		fireEvent.change(input(), { target: { value: "api" } });
+		fireEvent.change(input(), { target: { value: "no matches fixture" } });
 		expect(screen.getByText("No results found.")).toBeInTheDocument();
 	});
 

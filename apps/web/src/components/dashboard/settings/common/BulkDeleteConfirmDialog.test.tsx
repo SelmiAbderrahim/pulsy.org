@@ -107,21 +107,21 @@ describe("BulkDeleteConfirmDialog", () => {
 		expect(onConfirm).not.toHaveBeenCalled();
 	});
 
-	it("truncates the visible list and shows a +N more row", () => {
+	it("keeps every affected name accessible in the scrollable list", () => {
 		const items = Array.from({ length: 7 }, (_v, i) => ({
 			id: String(i),
 			name: `Item ${i}`,
 		}));
 		renderDialog({ items });
-		expect(screen.getByText("+2 more")).toBeInTheDocument();
-		expect(screen.queryByText("Item 6")).not.toBeInTheDocument();
+		expect(screen.getByRole("region", { name: "Items to delete (7)" })).toBeInTheDocument();
+		expect(screen.getByText("Item 6")).toBeInTheDocument();
 	});
 
 	it("renders per-item warnings and an aggregate constraint banner", () => {
 		renderDialog({
 			getItemWarning: (item) => (item.id === "a" ? "has incidents" : null),
 		});
-		expect(screen.getByText("(has incidents)")).toBeInTheDocument();
+		expect(screen.getByText("has incidents")).toBeInTheDocument();
 		expect(
 			screen.getByText(/have constraints that may require manual cleanup/),
 		).toBeInTheDocument();

@@ -1,3 +1,10 @@
+import { assertMonitorUrlAllowed } from "./egress-input";
+import { countersForPolicyChange } from "./latency-policy";
+import { assertCredentialOrigin, httpConfigPatch } from "./http-config";
+import { firstCheckAt } from "./first-check";
+import { rearmResumedHeartbeat } from "./heartbeat-service";
+import { rearmResumedServer } from "./server-health-service";
+import { getTranslator, type Translator } from "../../lib/i18n";
 import type { z } from "zod";
 import {
 	db,
@@ -46,60 +53,39 @@ export const listOwnedMonitors = async (
 	});
 };
 
+/** Serialize method/body changes against the current owned configuration. */
 export const updateUptimeMonitor = async (
-	input: z.infer<typeof apiUpdateUptimeMonitor>,
-	userId: string,
+  input: z.output<typeof apiUpdateUptimeMonitor>,
+  userId: string,
+  t: Translator = getTranslator("en"),
 ): Promise<UptimeMonitor> => {
-	const { uptimeMonitorId, ...data } = input;
-
-	const existing = await db.query.uptimeMonitor.findFirst({
-		where: and(
-			eq(uptimeMonitor.uptimeMonitorId, uptimeMonitorId),
-			eq(uptimeMonitor.userId, userId),
-		),
-	});
-
-	if (!existing) {
-		throw new TRPCError({
-			code: "NOT_FOUND",
-			message: "Uptime monitor not found",
-		});
-	}
-
-	const updateData: Record<string, unknown> = {};
-	for (const [key, value] of Object.entries(data)) {
-		if (value !== undefined) {
-			updateData[key] = value;
-		}
-	}
-
-	if (updateData.interval && updateData.interval !== existing.interval) {
-		const now = new Date();
-		updateData.nextCheckAt = new Date(
-			now.getTime() + (updateData.interval as number) * 1000,
-		).toISOString();
-	}
-
-	const [updated] = await db
-		.update(uptimeMonitor)
-		.set(updateData)
-		.where(
-			and(
-				eq(uptimeMonitor.uptimeMonitorId, uptimeMonitorId),
-				eq(uptimeMonitor.userId, userId),
-			),
-		)
-		.returning();
-
-	/* v8 ignore next 6 -- unreachable: UPDATE ... RETURNING on an existing row */
-	if (!updated) {
-		throw new TRPCError({
-			code: "INTERNAL_SERVER_ERROR",
-			message: "Failed to update uptime monitor",
-		});
-	}
-
-	return updated;
+  // DNS-backed policy check before taking the row lock.
+  if (input.url !== undefined) await assertMonitorUrlAllowed(input.url, t);
+  return db.transaction(async tx => {
+  const { uptimeMonitorId, requestConfig: _requestConfig, ...data } = input;
+  const scope = and(eq(uptimeMonitor.uptimeMonitorId, uptimeMonitorId), eq(uptimeMonitor.userId, userId));
+  const [existing] = await tx.select().from(uptimeMonitor).where(scope).for("update");
+  if (!existing) throw new TRPCError({ code: "NOT_FOUND", message: t("errors.notFound", { resource: "monitor" }) });
+  if (existing.monitorType !== "http" && [input.interval, input.url, input.method, input.expectedStatus, input.expectedStatuses, input.tlsMonitoringEnabled, input.timeout, input.failureThreshold, input.requestConfig, input.httpAssertions, input.redirectPolicy, input.latencyPolicy].some(value => value !== undefined)) throw new TRPCError({ code: "BAD_REQUEST", message: t("errors.monitorTypeAction") });
+  assertCredentialOrigin(existing.requestCipher, existing.url, input.url, input.requestConfig, t);
+  const updateData: Record<string, unknown> = httpConfigPatch(input, input.method ?? existing.method, t, existing.requestCipher);
+  for (const [key, value] of Object.entries(data)) if (value !== undefined) updateData[key] = value;
+  if (input.expectedStatus !== undefined && input.expectedStatuses === undefined) updateData.expectedStatuses = null;
+  if (input.tlsMonitoringEnabled === false) Object.assign(updateData, { tlsExpiresAt: null, tlsExpiresInDays: null });
+  Object.assign(updateData, countersForPolicyChange(existing.latencyPolicy, input.latencyPolicy));
+  // Resume or a change to what is checked runs the next check now (see firstCheckAt).
+  if (input.active === false) updateData.nextCheckAt = null;
+  const resumed = input.active === true && !existing.active;
+  const retargeted = (input.url !== undefined && input.url !== existing.url) || (input.method !== undefined && input.method !== existing.method) || (input.interval !== undefined && input.interval !== existing.interval) || input.requestConfig !== undefined;
+  if ((resumed || retargeted) && (input.active ?? existing.active) && !["heartbeat", "server"].includes(existing.monitorType)) updateData.nextCheckAt = firstCheckAt();
+  const [updated] = await tx.update(uptimeMonitor).set(updateData).where(scope).returning();
+  if (!updated) throw new TRPCError({ code: "INTERNAL_SERVER_ERROR", message: t("errors.internal") });
+  const heartbeatDeadline = await rearmResumedHeartbeat(tx, existing, updated);
+  if (heartbeatDeadline !== undefined) updated.nextCheckAt = heartbeatDeadline;
+  const serverDeadline = await rearmResumedServer(tx, existing, updated);
+  if (serverDeadline !== undefined) updated.nextCheckAt = serverDeadline;
+  return updated;
+  });
 };
 
 export const findUptimeMonitorById = async (

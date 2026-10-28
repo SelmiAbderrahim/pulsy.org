@@ -22,10 +22,11 @@ vi.mock("@/hooks/useConfig", () => ({
 
 const toastError = vi.fn();
 const toastSuccess = vi.fn();
+const deliveredToastOptions = vi.fn();
 vi.mock("sonner", () => ({
 	toast: {
-		error: (m: unknown) => toastError(m),
-		success: (m: unknown) => toastSuccess(m),
+		error: (m: unknown, options?: unknown) => { deliveredToastOptions("error", options); toastError(m); },
+		success: (m: unknown, options?: unknown) => { deliveredToastOptions("success", options); toastSuccess(m); },
 	},
 }));
 
@@ -77,6 +78,15 @@ describe("VerifyEmailBanner visibility", () => {
 describe("VerifyEmailBanner resend", () => {
 	beforeEach(() => {
 		setSession({ email: "a@b.com", emailVerified: false });
+	});
+
+	it.each(["success", "error"] as const)("uses the shared dismissible %s toast duration after resend", async (kind) => {
+		sendVerificationEmail.mockResolvedValue({ error: kind === "error" ? { message: "rate limited" } : null });
+		render(<VerifyEmailBanner />);
+		await userEvent.click(screen.getByRole("button", { name: "auth:verifyBanner.resend" }));
+		await waitFor(() => expect(deliveredToastOptions).toHaveBeenCalledWith(kind, expect.objectContaining({
+			duration: kind === "error" ? 10_000 : 5_000, closeButton: true,
+		})));
 	});
 
 	it("sends the verification email and shows success", async () => {

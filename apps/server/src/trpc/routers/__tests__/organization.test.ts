@@ -77,13 +77,15 @@ async function makeUser(): Promise<{ id: string; email: string }> {
 describe("regression — per-user monitor flow", () => {
 	it("a user with NO org can still list and own their monitors", async () => {
 		const u = await createTestUser();
-		await createTestMonitor(u.id, { name: "A" });
-		await createTestMonitor(u.id, { name: "B" });
+		const a = await createTestMonitor(u.id, { name: "A" });
+		const b = await createTestMonitor(u.id, { name: "B" });
+    const foreign = await createTestUser();
+    await createTestMonitor(foreign.id, { name: "Foreign" });
 
 		const caller = authedCaller({ id: u.id, email: u.email });
 		const list = await caller.uptimeMonitor.monitor.list();
 		expect(list).toHaveLength(2);
-		expect(list.map((m) => m.userId)).toEqual([u.id, u.id]);
+		expect(list.map(m => m.uptimeMonitorId).sort()).toEqual([a.uptimeMonitorId, b.uptimeMonitorId].sort());
 	});
 
 	it("a user without any membership sees no organizations", async () => {

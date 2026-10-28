@@ -9,6 +9,7 @@ export {
 
 export {
 	createMonitorForUser,
+	createMonitorsForUser,
 	runManualCheck,
 } from "./monitor-operations";
 
@@ -74,9 +75,14 @@ export {
 } from "./incident-service";
 
 export {
+	getOwnedUptimeAggregates,
+	getMonitorIncidentsForWindow,
+	summarizeWindowIncidents,
 	getMonitorStats,
 	getMonitorStatsForWindow,
 	getMonitorDailyUptime,
+	getUptimeBarData,
+  type UptimeBarEntry,
 	getMonitorIncidentSummary,
 	getCheckLogs,
 	type MonitorStats,
@@ -93,6 +99,7 @@ export {
 
 export {
 	buildSlaReportModel,
+	accountReportTimezone,
 	renderSlaReportPdf,
 	renderSlaReportEmailHtml,
 	slaReportPdfUrl,
@@ -102,3 +109,6 @@ export {
 	type SlaReportWindow,
 	type ProcessSubscriptionResult,
 } from "./sla-report-service";
+
+export * from "./scheduler-leader";
+export { cancelAllMonitorChecks, setSchedulingEnabled, reconcileScheduledMonitors, withMonitorCheckSlot } from "./scheduler-service";

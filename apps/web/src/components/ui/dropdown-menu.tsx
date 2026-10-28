@@ -1,10 +1,58 @@
 import * as React from "react";
+import { useTranslation } from "react-i18next";
 import * as DropdownMenuPrimitive from "@radix-ui/react-dropdown-menu";
 import { Check, ChevronRight, Circle } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useOverlayFocusReturn } from "./overlay-focus";
+import { useReadyTriggerProps } from "./control-readiness";
 
-const DropdownMenu = DropdownMenuPrimitive.Root;
-const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
+const MenuFocus = React.createContext<{
+  focusReturn: ReturnType<typeof useOverlayFocusReturn>;
+  trigger: React.MutableRefObject<HTMLButtonElement | null>;
+  interactedOutside: React.MutableRefObject<boolean>;
+  escapeHandler: React.MutableRefObject<((event: KeyboardEvent) => void) | undefined>;
+  handleEscape: (event: React.KeyboardEvent<HTMLElement>) => void;
+} | null>(null);
+function DropdownMenu({ modal = false, dir, open: controlledOpen, defaultOpen = false, onOpenChange, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
+  const { i18n } = useTranslation();
+  const [localOpen, setLocalOpen] = React.useState(defaultOpen);
+  const open = controlledOpen ?? localOpen;
+  const focusReturn = useOverlayFocusReturn();
+  const trigger = React.useRef<HTMLButtonElement | null>(null);
+  const interactedOutside = React.useRef(false);
+  const escapeHandler = React.useRef<((event: KeyboardEvent) => void) | undefined>(undefined);
+  const changeOpen = (nextOpen: boolean) => {
+    if (nextOpen) { interactedOutside.current = false; focusReturn.capture(trigger.current); }
+    if (controlledOpen === undefined) setLocalOpen(nextOpen);
+    onOpenChange?.(nextOpen);
+  };
+  const handleEscape = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (event.key !== "Escape" || event.defaultPrevented || !open) return;
+    // Radix's document listener uses a cached layer index. During its first
+    // registration frame that index can still be -1, leaving Escape unhandled.
+    // A local handler exists from commit and only fills that unhandled gap.
+    escapeHandler.current?.(event.nativeEvent);
+    if (event.defaultPrevented || event.nativeEvent.defaultPrevented) return;
+    event.preventDefault();
+    changeOpen(false);
+  };
+  return <MenuFocus.Provider value={{ focusReturn, trigger, interactedOutside, escapeHandler, handleEscape }}><DropdownMenuPrimitive.Root modal={modal} dir={dir ?? (i18n?.language?.startsWith("ar") ? "rtl" : "ltr")} {...props} open={open} onOpenChange={changeOpen} /></MenuFocus.Provider>;
+}
+const DropdownMenuTrigger = React.forwardRef<
+  React.ElementRef<typeof DropdownMenuPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Trigger>
+>((props, ref) => {
+  const readiness = useReadyTriggerProps(props);
+  const context = React.useContext(MenuFocus);
+  const trigger = context?.trigger;
+  const composedRef = React.useCallback((element: HTMLButtonElement | null) => {
+    if (trigger) trigger.current = element;
+    if (typeof ref === "function") ref(element);
+    else if (ref) ref.current = element;
+  }, [trigger, ref]);
+  return <DropdownMenuPrimitive.Trigger {...props} {...readiness} ref={composedRef} onKeyDown={event => { props.onKeyDown?.(event); context?.handleEscape(event); }} />;
+});
+DropdownMenuTrigger.displayName = DropdownMenuPrimitive.Trigger.displayName;
 const DropdownMenuGroup = DropdownMenuPrimitive.Group;
 const DropdownMenuPortal = DropdownMenuPrimitive.Portal;
 const DropdownMenuSub = DropdownMenuPrimitive.Sub;
@@ -19,7 +67,7 @@ const DropdownMenuSubTrigger = React.forwardRef<
 	<DropdownMenuPrimitive.SubTrigger
 		ref={ref}
 		className={cn(
-			"flex cursor-default select-none items-center rounded-xs px-2 py-1.5 text-sm outline-hidden focus:bg-accent data-[state=open]:bg-accent",
+			"flex min-h-11 cursor-default select-none items-center rounded-xs px-2 py-1.5 text-sm outline-hidden focus:bg-accent data-[state=open]:bg-accent",
 			inset && "ps-8",
 			className,
 		)}
@@ -38,7 +86,7 @@ const DropdownMenuSubContent = React.forwardRef<
 	<DropdownMenuPrimitive.SubContent
 		ref={ref}
 		className={cn(
-			"z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-xs data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+			"z-50 min-w-[8rem] max-w-[calc(100vw-2rem)] max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-xs data-[state=open]:animate-in data-[state=open]:fade-in-0",
 			className,
 		)}
 		{...props}
@@ -49,19 +97,46 @@ DropdownMenuSubContent.displayName = "DropdownMenuSubContent";
 const DropdownMenuContent = React.forwardRef<
 	React.ElementRef<typeof DropdownMenuPrimitive.Content>,
 	React.ComponentPropsWithoutRef<typeof DropdownMenuPrimitive.Content>
->(({ className, sideOffset = 4, ...props }, ref) => (
+>(({ className, sideOffset = 4, ...props }, ref) => {
+  const context = React.useContext(MenuFocus);
+  if (context) context.escapeHandler.current = props.onEscapeKeyDown;
+  const contextRef = React.useRef(context);
+  contextRef.current = context;
+  const mountedContent = React.useRef<HTMLDivElement | null>(null);
+  const composedRef = React.useCallback((element: HTMLDivElement | null) => {
+    // Runs whenever the portalled content mounts, including defaultOpen roots.
+    // Keep the callback stable so ordinary rerenders cannot recapture a new dialog.
+    if (element && element !== mountedContent.current && contextRef.current) {
+      mountedContent.current = element;
+      contextRef.current.interactedOutside.current = false;
+      contextRef.current.focusReturn.capture(contextRef.current.trigger.current);
+    }
+    if (typeof ref === "function") ref(element);
+    else if (ref) ref.current = element;
+  }, [ref]);
+  return (
 	<DropdownMenuPrimitive.Portal>
 		<DropdownMenuPrimitive.Content
-			ref={ref}
+			ref={composedRef}
 			sideOffset={sideOffset}
 			className={cn(
-				"z-50 min-w-[8rem] overflow-hidden rounded-md border bg-popover p-1 text-popover-foreground shadow-xs data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:zoom-out-95 data-[state=open]:zoom-in-95",
+				"z-50 min-w-[8rem] max-w-[calc(100vw-2rem)] max-h-[var(--radix-dropdown-menu-content-available-height)] overflow-y-auto rounded-md border bg-popover p-1 text-popover-foreground shadow-xs data-[state=open]:animate-in data-[state=open]:fade-in-0",
 				className,
 			)}
 			{...props}
+      onKeyDown={event => {
+        props.onKeyDown?.(event);
+        // A submenu or a portalled dialog owns its own Escape behavior.
+        if (event.target instanceof HTMLElement && event.target.closest("[data-radix-menu-content]") === event.currentTarget) context?.handleEscape(event);
+      }}
+      onInteractOutside={event => { props.onInteractOutside?.(event); if (!event.defaultPrevented && context) context.interactedOutside.current = true; }}
+      onCloseAutoFocus={event => {
+        props.onCloseAutoFocus?.(event);
+        if (!context?.interactedOutside.current) context?.focusReturn.restore(event);
+      }}
 		/>
 	</DropdownMenuPrimitive.Portal>
-));
+); });
 DropdownMenuContent.displayName = "DropdownMenuContent";
 
 const DropdownMenuItem = React.forwardRef<

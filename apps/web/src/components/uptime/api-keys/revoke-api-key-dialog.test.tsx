@@ -1,4 +1,6 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithQueryClient as render } from "@/test/query-wrapper";
+vi.mock("@/components/account-timezone", () => ({ useAccountTimezone: () => "UTC" }));
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -21,7 +23,7 @@ vi.mock("@/hooks/apiKeys/useApiKeys", () => ({
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
-vi.mock("sonner", () => ({
+vi.mock("@/lib/toast", () => ({
 	toast: {
 		success: (m: unknown) => toastSuccess(m),
 		error: (m: unknown) => toastError(m),
@@ -30,7 +32,7 @@ vi.mock("sonner", () => ({
 
 const apiKey: ApiKey = {
 	apiKeyId: "k1",
-	userId: "u1",
+	scope: "full",
 	name: "CI pipeline",
 	keyPrefix: "pul_abcd",
 	lastUsedAt: null,

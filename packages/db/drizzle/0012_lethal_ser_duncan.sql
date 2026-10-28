@@ -1,0 +1,1 @@
+ALTER TYPE "public"."uptimeNotificationEvent" ADD VALUE 'degraded' BEFORE 'recovery';

@@ -1,4 +1,7 @@
-import { render, screen, waitFor } from "@testing-library/react";
+vi.mock("@dr.pogodin/react-helmet", () => ({ Helmet: () => null }));
+import { renderWithQueryClient as render } from "@/test/query-wrapper";
+vi.mock("@/components/account-timezone", () => ({ useAccountTimezone: () => "UTC" }));
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reactI18nextMock } from "@/test/i18n-mock";
@@ -10,6 +13,7 @@ vi.mock("react-i18next", () => reactI18nextMock());
 const navigateMock = vi.fn();
 vi.mock("@tanstack/react-router", () => ({
 	useNavigate: () => navigateMock,
+  Link: ({ children }: { children: React.ReactNode }) => <a>{children}</a>,
 }));
 
 const resolveState: {
@@ -19,9 +23,11 @@ const resolveState: {
 } = { data: undefined, isLoading: false, error: null };
 const cloneMutateAsync = vi.fn();
 const cloneState = { isPending: false };
+const ownMonitors = { data: [], isPending: false, refetch: vi.fn() };
 
 vi.mock("@/hooks/uptime", () => ({
-	useResolveShareLink: () => ({
+	useUptimeMonitors: () => ownMonitors,
+  useResolveShareLink: () => ({
 		data: resolveState.data,
 		isLoading: resolveState.isLoading,
 		error: resolveState.error,
@@ -34,7 +40,7 @@ vi.mock("@/hooks/uptime", () => ({
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
-vi.mock("sonner", () => ({
+vi.mock("@/lib/toast", () => ({
 	toast: {
 		success: (m: unknown) => toastSuccess(m),
 		error: (m: unknown) => toastError(m),
@@ -130,7 +136,7 @@ describe("ShareClaimPage states", () => {
 		resolveState.data = resolved({ sharedBy: null });
 		render(<ShareClaimPage token="tok1" />);
 		expect(
-			screen.getByText("Someone shared monitors with you"),
+			screen.getByText("A Pulsy user shared monitors with you"),
 		).toBeInTheDocument();
 	});
 });
@@ -192,14 +198,15 @@ describe("ShareClaimPage cloning", () => {
 		expect(navigateMock).toHaveBeenCalledWith({ to: "/dashboard" });
 	});
 
-	it("shows an error toast when cloning fails", async () => {
+	it("shows an inline error when cloning fails", async () => {
 		resolveState.data = resolved();
 		cloneMutateAsync.mockRejectedValue(new Error("expired"));
 		render(<ShareClaimPage token="tok1" />);
 		await userEvent.click(
 			screen.getByRole("button", { name: "Add 2 monitors" }),
 		);
-		await waitFor(() => expect(toastError).toHaveBeenCalled());
+		await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent("expired"));
+    expect(toastError).not.toHaveBeenCalled();
 		expect(navigateMock).not.toHaveBeenCalled();
 	});
 

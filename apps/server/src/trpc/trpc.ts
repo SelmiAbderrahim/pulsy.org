@@ -1,3 +1,5 @@
+import { formatApiError } from "./validation-errors";
+import { randomUUID } from "node:crypto";
 import type { Database } from "@pulsy/db";
 import { db, user } from "@pulsy/db";
 import { eq } from "drizzle-orm";
@@ -21,6 +23,7 @@ type AuthUser = NonNullable<SessionResult>["user"];
 type AuthSession = NonNullable<SessionResult>["session"];
 
 export interface Context {
+	requestId?: string;
 	db: Database;
 	user: AuthUser | null;
 	session: AuthSession | null;
@@ -44,10 +47,13 @@ export function toHeaders(req: Request): Headers {
 
 export async function createContext({
 	req,
+	res,
 }: {
 	req: Request;
 	res: Response;
 }): Promise<Context> {
+	const requestId = randomUUID();
+	res.setHeader("X-Request-Id", requestId);
 	const headers = toHeaders(req);
 
 	let sessionResult: SessionResult = null;
@@ -66,6 +72,7 @@ export async function createContext({
 	const t = getTranslator(language);
 
 	return {
+		requestId,
 		db,
 		user: sessionResult?.user ?? null,
 		session: sessionResult?.session ?? null,
@@ -83,8 +90,8 @@ export type AppContext = Context;
 const t = initTRPC.context<Context>().create({
 	transformer: superjson,
 	/* v8 ignore next 3 -- tRPC error formatter; exercised at the HTTP transport layer, not via createCaller */
-	errorFormatter({ shape }) {
-		return shape;
+	errorFormatter({ shape, error, ctx }) {
+		return formatApiError(shape, error, ctx?.t, ctx?.requestId);
 	},
 });
 

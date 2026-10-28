@@ -11,7 +11,11 @@
       "pagination": "Paginierung",
       "endpoints": "Endpunkte",
       "monitor-object": "Das Monitor-Objekt",
-      "openapi": "OpenAPI-Spezifikation"
+      "openapi": "OpenAPI-Spezifikation",
+      "access": "Berechtigungsumfang der Schlüssel",
+      "monitor-types": "Monitor-Typen",
+      "channels": "Benachrichtigungskanäle",
+      "status-pages": "Statusseiten"
     }
   },
   "copy": {
@@ -28,12 +32,12 @@
       "title": "Authentifizierung",
       "body": "Jede Anfrage authentifiziert sich mit einem Bearer-API-Schlüssel. Erstellen Sie einen Schlüssel im Dashboard — das Geheimnis wird nur einmal angezeigt, kopieren Sie es also sofort. Pulsy speichert nur einen Hash und kann es nie wieder anzeigen; wenn Sie einen Schlüssel verlieren, widerrufen Sie ihn und erstellen Sie einen neuen.",
       "headerLabel": "Senden Sie Ihren Schlüssel im Authorization-Header",
-      "note": "API-Schlüssel authentifizieren ausschließlich die REST API — niemals die Dashboard-Sitzung — und können jederzeit widerrufen werden.",
+      "note": "Neue Schlüssel sind standardmäßig schreibgeschützt. Wählen Sie den Berechtigungsumfang full für Schreibvorgänge und optional ein Ablaufdatum (23:59:59 UTC). Abgelaufene oder widerrufene Schlüssel können sich nicht authentifizieren. Das Geheimnis wird einmal angezeigt und nur als Hash gespeichert.",
       "createCta": "Einen API-Schlüssel erstellen"
     },
     "rateLimit": {
       "title": "Ratenbegrenzung",
-      "body": "Anfragen werden pro Schlüssel in einem festen Zeitfenster von einer Minute begrenzt (standardmäßig 60 Anfragen/Minute). Jede Antwort enthält Ratenbegrenzungs-Header, damit Sie Ihre Aufrufe steuern können.",
+      "body": "Anfragen werden pro Schlüssel in einem festen Ein-Minuten-Fenster begrenzt (standardmäßig 60 Anfragen/Minute). Jede Antwort auf eine authentifizierte Anfrage enthält Rate-Limit-Header zur Steuerung Ihrer Aufrufe; eine 401-Antwort nicht.",
       "tableHeaders": {
         "header": "Header",
         "meaning": "Bedeutung"
@@ -50,17 +54,20 @@
       "body": "Jeder Fehler hat dieselbe Form. Nachrichten werden anhand des Accept-Language-Headers der Anfrage lokalisiert (en, ar, fr, de, es).",
       "tableHeaders": {
         "status": "HTTP",
-        "code": "Code",
+        "code": "Fehlercode",
         "when": "Wann"
       },
       "rows": {
         "unauthorized": "Fehlender, fehlerhafter, ungültiger oder widerrufener Schlüssel.",
-        "forbidden": "Ihr Tarif liegt unter der erforderlichen Zugriffsebene.",
-        "notFound": "Der Monitor existiert nicht oder gehört Ihnen nicht.",
-        "validation": "Ungültiger Body oder ungültige Abfrage oder ein Tariflimit (z. B. Intervall zu häufig, Monitor-Obergrenze erreicht).",
+        "forbidden": "Ein schreibgeschützter Schlüssel kann keinen Schreib-Endpunkt aufrufen.",
+        "notFound": "Der Monitor (oder ein referenzierter Kanal) existiert nicht oder gehört Ihnen nicht.",
+        "validation": "Ungültiger Body oder ungültige Abfrage. Fehlerhaftes JSON oder ein zu großer Body liefert HTTP 400/413/415 mit demselben Code.",
         "rateLimited": "Ratenbegrenzungs-Zeitfenster pro Schlüssel überschritten.",
-        "internal": "Unerwarteter Serverfehler."
-      }
+        "internal": "Unerwarteter Serverfehler.",
+        "conflict": "Nur beim Anwenden einer Konfiguration: Ihr Konto hat sich nach der Vorschau geändert. Erstellen Sie die Vorschau erneut."
+      },
+      "rateLimitedExample": "Antwort bei Ratenbegrenzung",
+      "retryNote": "Warten Sie nach einer 429 so viele Sekunden, wie in Retry-After steht, bevor Sie es erneut versuchen."
     },
     "pagination": {
       "title": "Paginierung",
@@ -70,7 +77,8 @@
       "title": "Endpunkte",
       "groups": {
         "monitors": "Monitore",
-        "data": "Prüfungen, Vorfälle & Statistiken"
+        "data": "Prüfungen, Vorfälle & Statistiken",
+        "configuration": "Konfiguration (alle Monitor-Typen)"
       }
     },
     "monitorObject": {
@@ -79,7 +87,40 @@
     },
     "openapi": {
       "title": "OpenAPI-Spezifikation",
-      "body": "Bevorzugen Sie maschinenlesbare Dokumentation? Der vollständige Vertrag wird als OpenAPI 3.1-Spezifikation im Repository ausgeliefert — importieren Sie ihn in Postman oder Insomnia oder generieren Sie einen Client mit openapi-generator."
+      "body": "Lieber maschinenlesbare Dokumentation? Der vollständige Vertrag ist eine OpenAPI-3.1-Spezifikation passend zur Version dieser Installation. Importieren Sie sie in Postman oder Insomnia oder erzeugen Sie mit openapi-generator einen Client. Sie umfasst außerdem die oben nicht ausgeführten Endpunkte für beobachtete Verfügbarkeit, Annotationen sowie Konfigurationsexport/-vorschau/-anwendung.",
+      "download": "openapi.yaml herunterladen"
+    },
+    "access": {
+      "title": "Berechtigungsumfang der Schlüssel",
+      "body": "Jeder API-Schlüssel hat den Berechtigungsumfang read oder full. Beide können die Daten Ihres Kontos lesen; full ist zum Erstellen oder Ändern erforderlich.",
+      "ossNote": "Jedes Konto kann die gesamte API nutzen. Wählen Sie für jeden Schlüssel den benötigten Berechtigungsumfang: read zum Lesen oder full für Vollzugriff.",
+      "tableHeaders": {
+        "level": "Berechtigungsumfang",
+        "read": "Lese-Endpunkte",
+        "write": "Schreib-Endpunkte"
+      }
+    },
+    "monitorTypes": {
+      "title": "DNS-, TCP-, Heartbeat- und Server-Monitore",
+      "body": "POST /monitors erstellt HTTP-Monitore. Alle anderen Typen erstellen und aktualisieren Sie mit einem Konfigurationsmanifest: Vorschau erzeugen, geplante Einträge prüfen, dann mit der zurückgegebenen Revision anwenden. Monitore werden über Ihren Schlüssel zugeordnet, daher kann dasselbe Manifest erneut angewendet werden, um sie zu aktualisieren.",
+      "items": {
+        "http": "url, method, expected status, timeout und optionale Antwortprüfungen.",
+        "dns": "configuration.hostname und recordType (A, AAAA, CNAME, MX oder TXT). Der Modus exists erfordert mindestens eine Antwort; matches verlangt die exakt erwartete Menge, unabhängig von Reihenfolge und Duplikaten.",
+        "tcp": "configuration.hostname und port. Die Prüfung gilt als bestanden, wenn die Verbindung innerhalb des Timeouts zustande kommt.",
+        "heartbeat": "interval ist die erwartete Ping-Periode und graceSeconds die Verzögerung bis Ausfall. Neue Heartbeat-Monitore bleiben pausiert, bis Sie im Dashboard ihr Ping-Token erneuern.",
+        "server": "CPU-, Arbeitsspeicher- und Festplattenschwellen sowie ausgeschlossene Dateisysteme. Neue Server-Monitore bleiben pausiert, bis Sie im Dashboard die Agent-Zugangsdaten erstellen."
+      },
+      "exampleLabel": "manifest.json – ein Monitor von jedem Typ"
+    },
+    "channels": {
+      "title": "Benachrichtigungskanäle",
+      "body": "Erstellen Sie E-Mail-, Webhook-, Slack-, Discord- und Telegram-Kanäle im Dashboard. Die API verweist nur per ID darauf: Übergeben Sie channelIds beim Erstellen eines HTTP-Monitors oder in einem Manifest. Unbekannte IDs und Kanäle, die Ihnen nicht gehören, liefern 404.",
+      "secrets": "Kanalziele, benutzerdefinierte Header, Anbieter-Zugangsdaten und Webhook-Signaturschlüssel sind nur schreibbar. Keine API-Antwort, Konfigurationsexport oder Protokolldatei enthält sie; Exporte listen nur Kanal-IDs. Generische Webhooks erhalten die signierte Version-1-Nutzlast, die in docs/api/webhooks.md beschrieben ist."
+    },
+    "statusPages": {
+      "title": "Statusseiten",
+      "body": "Erstellen und veröffentlichen Sie Statusseiten im Dashboard. Eine veröffentlichte Seite bietet schreibgeschützte Projektionen ohne API-Schlüssel: status.json, history.json, badge.svg, feed.rss und feed.atom. Entwürfe liefern 404, jede Client-Adresse darf {{limit}} Anfragen pro Minute stellen, und die Projektionen enthalten nie URLs, Zugangsdaten, Abonnenten oder interne Notizen.",
+      "exampleLabel": "Veröffentlichte Statusseite lesen"
     }
   },
   "endpoint": {
@@ -104,7 +145,8 @@
       "id": "Die ID des Monitors.",
       "limit": "Elemente pro Seite (1–100, Standard 20).",
       "cursor": "Opaker Cursor aus dem nextCursor der vorherigen Antwort.",
-      "days": "Zeitfenster in Tagen für die Aggregation (1–366, Standard 30)."
+      "days": "Zeitfenster in Tagen für die Aggregation (1–366, Standard 30).",
+      "monitorIds": "Optionale Auswahl von 1–200 eigenen Monitor-IDs, durch Kommas getrennt. Ohne Auswahl höchstens 1.000 Monitore pro Abruf."
     },
     "bodyFields": {
       "name": "Eine Bezeichnung für den Monitor.",
@@ -112,10 +154,13 @@
       "method": "Zu verwendende HTTP-Methode. Standard GET.",
       "expectedStatus": "Erwarteter HTTP-Statuscode (100–599). Standard 200.",
       "timeout": "Anfrage-Timeout in Millisekunden (1000–60000). Standard 10000.",
-      "interval": "Sekunden zwischen den Prüfungen: 30, 60, 300, 600, 1800 oder 3600. Niedrigere Werte erfordern möglicherweise einen höheren Tarif. Standard 300.",
+      "interval": "Sekunden zwischen Prüfungen: 30, 60, 300, 600, 1800 oder 3600. Standard: 300.",
       "failureThreshold": "Aufeinanderfolgende Fehlschläge, bevor ein Vorfall geöffnet wird (1–10). Standard 3.",
       "active": "Ob der Monitor läuft. Standard true.",
-      "tags": "Bis zu 10 String-Tags."
+      "tags": "Bis zu 10 String-Tags.",
+      "latencyPolicy": "Optionale Regeln: thresholdMs/recoveryThresholdMs (beide null deaktivieren Latenz), slowCount/recoveryCount (1–10), importance (critical/warning/informational), cooldownSeconds (0–3600). Die Erholungsschwelle darf die Langsamkeitsschwelle nicht überschreiten. Null erhält bisheriges Verhalten; Weglassen behält gespeicherte Regeln bei Änderungen.",
+      "expectedStatuses": "Optionale akzeptierte Statuscodes: 200,204; 2xx; oder 200–299. Hat Vorrang vor expectedStatus. Null stellt die numerische Regel wieder her.",
+      "tlsMonitoringEnabled": "Ablauf des HTTPS-Zertifikats überwachen. Standardmäßig aktiviert; das Deaktivieren schaltet die HTTPS-Zertifikatsprüfung nicht aus."
     }
   },
   "endpointDocs": {
@@ -154,6 +199,28 @@
     "getStats": {
       "summary": "Monitor-Statistiken abrufen",
       "description": "Gibt aggregierte Verfügbarkeits- und Antwortzeit-Statistiken über das angeforderte Zeitfenster zurück."
+    },
+    "metrics": {
+      "summary": "Prometheus-Metriken",
+      "description": "Gespeicherten Kontostatus mit bestehendem API-Lesezugriff abrufen. Der Abruf führt keine Prüfungen aus. Status: -1 unbekannt, 0 ausgefallen, 1 erreichbar, 2 eingeschränkt. Fresh ist nur 1, wenn der Monitor aktiv ist und die letzte Prüfung höchstens zwei Intervalle plus Timeout zurückliegt. Fehlende Werte sind NaN; Dauer in Sekunden, Zeitstempel in Unix-Sekunden. Labels enthalten nur Monitor-IDs; Namen, URLs und Tags bleiben privat. Open incident ist 1, solange ein gemessener Vorfall offen ist. TLS expiry ist der zuletzt beobachtete Zertifikatsablauf oder NaN. Konfiguration und Aktualitätsabfrage stehen im Prometheus-Leitfaden. Die Dauer beschreibt HTTP-Anfragen, DNS-Auflösung und TCP-Verbindungen; Heartbeats haben die Dauer NaN. TLS gilt nur für HTTP. Unbekannte Zustände, pausierte Monitore und Beobachtungen aus der Zukunft haben Aktualität null. Heartbeats benötigen zudem einen gespeicherten Fristeintrag; eine vorhandene nächste Frist darf höchstens zehn Sekunden überschritten sein."
+    },
+    "exportConfiguration": {
+      "summary": "Konfiguration exportieren",
+      "description": "Liefert ein portables Manifest für die ausgewählten Monitore. Geheimnisse sind nie enthalten; Einträge, die sie benötigen, führen needsReentry auf."
+    },
+    "previewConfiguration": {
+      "summary": "Manifest-Vorschau",
+      "description": "Validiert ein Manifest beliebiger Monitor-Typen gegen Ihr Konto und meldet, was das Anwenden erstellen, aktualisieren oder ablehnen würde. Ändert nichts. Senden Sie das Manifest als JSON-String in text."
+    },
+    "applyConfiguration": {
+      "summary": "Manifest anwenden",
+      "description": "Wendet genau den geprüften Plan an. Senden Sie denselben text und die Revision der Vorschau; hat sich Ihr Konto zwischenzeitlich geändert, antwortet die Anfrage mit 409 und nichts wird angewendet."
     }
+  },
+  "ux": {
+    "loadError": "Der API-Zugriff konnte nicht geladen werden. Prüfen Sie Ihren aktuellen Zugriff erneut.",
+    "retry": "Erneut versuchen",
+    "allowed": "Erlaubt",
+    "copyFailed": "Kopieren fehlgeschlagen. Markieren und kopieren Sie den Code manuell."
   }
 }

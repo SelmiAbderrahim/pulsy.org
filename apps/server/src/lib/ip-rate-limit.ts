@@ -1,3 +1,4 @@
+import { clientRateLimitKey } from "./client-ip";
 import type { NextFunction, Request, Response } from "express";
 
 // ---------------------------------------------------------------------------
@@ -5,7 +6,7 @@ import type { NextFunction, Request, Response } from "express";
 // including the public status/share procedures).
 //
 // In-memory and single-replica by design — the same model as the per-key
-// limiter in `api/rate-limit.ts`. `app.set("trust proxy", 1)` in index.ts
+// limiter in `api/rate-limit.ts`. The configured trusted proxy hops in index.ts
 // makes `req.ip` the real client address behind the nginx proxy.
 // ---------------------------------------------------------------------------
 
@@ -53,6 +54,12 @@ export interface IpRateLimiterOptions {
 	limit?: number;
 	windowMs?: number;
 	maxBuckets?: number;
+	/** Reject new addresses when all bounded slots are occupied. */
+	failClosed?: boolean;
+	/** Public reads may evict the oldest bucket instead of allowing uncounted traffic. */
+	evictOldest?: boolean;
+	/** Public capability surfaces may use a narrower response contract. */
+	onLimited?: (res: Response, retryAfter: number) => void;
 	/** Injectable clock for deterministic tests. */
 	now?: () => number;
 }
@@ -68,9 +75,15 @@ export function createIpRateLimiter(opts: IpRateLimiterOptions = {}) {
 	const maxBuckets = opts.maxBuckets ?? MAX_BUCKETS;
 	const now = opts.now ?? (() => Date.now());
 	const buckets = new Map<string, Bucket>();
+	const reject = (res: Response, retryAfter: number): void => {
+		res.setHeader("Retry-After", String(retryAfter));
+		res.status(429);
+		if (opts.onLimited) opts.onLimited(res, retryAfter);
+		else res.json({ error: "rate_limited", retryAfter });
+	};
 
 	return (req: Request, res: Response, next: NextFunction): void => {
-		const id = req.ip ?? "unknown";
+		const id = clientRateLimitKey(req.ip ?? "unknown");
 		const ts = now();
 
 		if (!buckets.has(id) && buckets.size >= maxBuckets) {
@@ -82,8 +95,14 @@ export function createIpRateLimiter(opts: IpRateLimiterOptions = {}) {
 				}
 			}
 			if (buckets.size >= maxBuckets) {
-				next();
-				return;
+				if (opts.evictOldest) {
+					const oldest = buckets.keys().next().value;
+					if (oldest !== undefined) buckets.delete(oldest);
+				} else if (opts.failClosed) {
+					reject(res, Math.ceil(windowMs / 1000));
+					return;
+				}
+				else { next(); return; }
 			}
 		}
 
@@ -103,8 +122,7 @@ export function createIpRateLimiter(opts: IpRateLimiterOptions = {}) {
 
 		if (bucket.count > limit) {
 			const retryAfter = Math.ceil((bucket.resetAt - ts) / 1000);
-			res.setHeader("Retry-After", String(retryAfter));
-			res.status(429).json({ error: "rate_limited", retryAfter });
+			reject(res, retryAfter);
 			return;
 		}
 

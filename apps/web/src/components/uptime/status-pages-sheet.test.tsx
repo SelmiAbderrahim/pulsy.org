@@ -1,3 +1,6 @@
+vi.mock("@/lib/auth-client", () => ({ useSession: () => ({ data: { user: { id: "u1" } } }) }));
+import { registerConfirmationHandler } from "@/lib/confirmation";
+import { afterEach as afterConfirmationTest } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -35,7 +38,7 @@ const h = vi.hoisted(() => ({
 }));
 
 vi.mock("react-i18next", () => reactI18nextMock());
-vi.mock("sonner", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
+vi.mock("@/lib/toast", () => ({ toast: { success: vi.fn(), error: vi.fn() } }));
 vi.mock("@/hooks/uptime", () => ({
   useStatusPages: () => h.pages,
   useStatusPage: () => h.detail,
@@ -50,10 +53,11 @@ vi.mock("@/hooks/uptime", () => ({
   useStatusPageDomainStatus: () => h.domainStatus,
 }));
 vi.mock("@tanstack/react-query", () => ({
+ useMutation: () => ({ mutate: vi.fn(), isPending: false }),
   useQueryClient: () => ({ invalidateQueries: vi.fn() }),
 }));
 
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 const toastMock = vi.mocked(toast);
 
 function makePage(overrides: Partial<StatusPage> = {}): StatusPage {
@@ -76,6 +80,14 @@ function makePage(overrides: Partial<StatusPage> = {}): StatusPage {
     ...overrides,
   };
 }
+
+const confirmationDecision = vi.fn().mockResolvedValue(true);
+let unregisterConfirmation: (() => void) | undefined;
+beforeEach(() => {
+  confirmationDecision.mockResolvedValue(true);
+  unregisterConfirmation = registerConfirmationHandler(confirmationDecision);
+});
+afterConfirmationTest(() => unregisterConfirmation?.());
 
 beforeEach(() => {
   vi.clearAllMocks();
@@ -133,7 +145,7 @@ describe("StatusPagesSheet", () => {
     render(<StatusPagesSheet open onOpenChange={vi.fn()} />);
     expect(screen.getByText("Published")).toBeInTheDocument();
     expect(screen.getByText("Draft")).toBeInTheDocument();
-    expect(screen.getByText(/\/status\/u1\/status · s\.acme\.com/)).toBeInTheDocument();
+    expect(screen.getByText(/status · s\.acme\.com/)).toBeInTheDocument();
   });
 
   it("opens the create form", async () => {
@@ -144,11 +156,11 @@ describe("StatusPagesSheet", () => {
     expect(screen.getByLabelText("Title")).toBeInTheDocument();
   });
 
-  it("opens the edit form for a page", async () => {
+  it("opens the page editor from the overflow menu", async () => {
     h.pages = { data: [makePage()], isLoading: false };
     render(<StatusPagesSheet open onOpenChange={vi.fn()} />);
-    await userEvent.click(screen.getByLabelText("Edit"));
-    expect(screen.getByLabelText("Title")).toBeInTheDocument();
+    await userEvent.click(screen.getByLabelText("statusUX.moreNamed"));
+    expect(screen.getByRole("menuitem", { name: "Edit" })).toHaveAttribute("href", "/dashboard/status-pages/p1?tab=general");
   });
 
   it("closes the create form on cancel", async () => {
@@ -162,19 +174,19 @@ describe("StatusPagesSheet", () => {
     ).toBeInTheDocument();
   });
 
-  it("closes the edit form on cancel", async () => {
-    h.pages = { data: [makePage()], isLoading: false };
-    render(<StatusPagesSheet open onOpenChange={vi.fn()} />);
-    await userEvent.click(screen.getByLabelText("Edit"));
+  it("closes the embedded general form on cancel", async () => {
+    const close = vi.fn();
+    render(<StatusPageForm page={makePage()} onClose={close} />);
     await userEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(screen.getByLabelText("Edit")).toBeInTheDocument();
+    expect(close).toHaveBeenCalledOnce();
   });
 
   it("deletes a page after confirmation", async () => {
     h.pages = { data: [makePage()], isLoading: false };
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+    confirmationDecision.mockResolvedValue(true);
     render(<StatusPagesSheet open onOpenChange={vi.fn()} />);
-    await userEvent.click(screen.getByLabelText("Delete"));
+    await userEvent.click(screen.getByLabelText("statusUX.moreNamed"));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     await waitFor(() =>
       expect(h.del).toHaveBeenCalledWith({ statusPageId: "p1" }),
     );
@@ -183,18 +195,20 @@ describe("StatusPagesSheet", () => {
 
   it("does nothing when delete is not confirmed", async () => {
     h.pages = { data: [makePage()], isLoading: false };
-    vi.spyOn(window, "confirm").mockReturnValue(false);
+    confirmationDecision.mockResolvedValue(false);
     render(<StatusPagesSheet open onOpenChange={vi.fn()} />);
-    await userEvent.click(screen.getByLabelText("Delete"));
+    await userEvent.click(screen.getByLabelText("statusUX.moreNamed"));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     expect(h.del).not.toHaveBeenCalled();
   });
 
   it("shows an error toast when delete fails", async () => {
     h.pages = { data: [makePage()], isLoading: false };
     h.del.mockRejectedValue(new Error("nope"));
-    vi.spyOn(window, "confirm").mockReturnValue(true);
+    confirmationDecision.mockResolvedValue(true);
     render(<StatusPagesSheet open onOpenChange={vi.fn()} />);
-    await userEvent.click(screen.getByLabelText("Delete"));
+    await userEvent.click(screen.getByLabelText("statusUX.moreNamed"));
+    await userEvent.click(screen.getByRole("menuitem", { name: "Delete" }));
     await waitFor(() => expect(toastMock.error).toHaveBeenCalled());
   });
 });
@@ -216,11 +230,9 @@ describe("StatusPageForm", () => {
       title: "My Page",
       description: "desc",
       isPublished: true,
-    });
-    expect(h.setMon).toHaveBeenCalledWith({
-      statusPageId: "new",
       uptimeMonitorIds: ["m1"],
     });
+    expect(h.setMon).not.toHaveBeenCalled();
     expect(onClose).toHaveBeenCalled();
   });
 
@@ -236,28 +248,19 @@ describe("StatusPageForm", () => {
       title: "T",
       description: null,
       isPublished: false,
+      uptimeMonitorIds: [],
     });
   });
 
-  it("edits an existing page and hydrates its monitors", async () => {
-    h.monitors = { data: [{ uptimeMonitorId: "m1", name: "Mon 1" }] };
-    h.detail = { data: { monitorIds: ["m1"] } };
-    const onClose = vi.fn();
-    render(<StatusPageForm page={makePage()} onClose={onClose} />);
-    // Pre-selected from detail; un-check then save with empty set.
-    await waitFor(() =>
-      expect(screen.getByRole("checkbox")).toBeInTheDocument(),
-    );
-    await userEvent.click(screen.getByRole("checkbox"));
+  it("edits existing page fields while preserving separately reviewed membership", async () => {
+    const page = makePage(), onClose = vi.fn();
+    render(<StatusPageForm page={page} onClose={onClose} />);
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument();
+    await userEvent.clear(screen.getByLabelText("Title"));
+    await userEvent.type(screen.getByLabelText("Title"), "Changed status");
     await userEvent.click(screen.getByRole("button", { name: "Save" }));
-    await waitFor(() => expect(h.update).toHaveBeenCalled());
-    expect(h.update).toHaveBeenCalledWith(
-      expect.objectContaining({ statusPageId: "p1" }),
-    );
-    expect(h.setMon).toHaveBeenCalledWith({
-      statusPageId: "p1",
-      uptimeMonitorIds: [],
-    });
+    await waitFor(() => expect(h.update).toHaveBeenCalledWith(expect.objectContaining({ statusPageId: "p1", title: "Changed status", expected: expect.objectContaining({ title: page.title }) })));
+    expect(h.setMon).not.toHaveBeenCalled(); expect(onClose).toHaveBeenCalled();
   });
 
   it("shows an error toast when save fails", async () => {
@@ -309,7 +312,7 @@ describe("DomainSection", () => {
 
   it("attaches a domain and shows the TXT record", async () => {
     render(<DomainSection page={makePage()} />);
-    const input = screen.getByLabelText("Custom domain");
+    const input = screen.getByRole("textbox", { name: "Custom domain" });
     await userEvent.type(input, "status.example.com");
     await userEvent.click(screen.getByRole("button", { name: "Attach" }));
     await waitFor(() =>
@@ -326,7 +329,7 @@ describe("DomainSection", () => {
     h.attach.mockRejectedValue(new Error("bad"));
     render(<DomainSection page={makePage()} />);
     await userEvent.type(
-      screen.getByLabelText("Custom domain"),
+      screen.getByRole("textbox", { name: "Custom domain" }),
       "status.example.com",
     );
     await userEvent.click(screen.getByRole("button", { name: "Attach" }));

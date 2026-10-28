@@ -10,13 +10,13 @@ describe("MonitorEmptyState", () => {
 	it("renders the title, features, and CTA", () => {
 		render(<MonitorEmptyState onCreateMonitor={vi.fn()} />);
 		expect(
-			screen.getByText("Start Monitoring Your Services"),
+			screen.getByText("Start monitoring your services"),
 		).toBeInTheDocument();
 		expect(
-			screen.getByText("HTTP & HTTPS health checks"),
+			screen.getByText("emptyState.steps.monitor"),
 		).toBeInTheDocument();
 		expect(
-			screen.getByRole("button", { name: "Add Your First Monitor" }),
+			screen.getByRole("button", { name: "Add your first monitor" }),
 		).toBeInTheDocument();
 	});
 
@@ -24,7 +24,7 @@ describe("MonitorEmptyState", () => {
 		const onCreate = vi.fn();
 		render(<MonitorEmptyState onCreateMonitor={onCreate} />);
 		await userEvent.click(
-			screen.getByRole("button", { name: "Add Your First Monitor" }),
+			screen.getByRole("button", { name: "Add your first monitor" }),
 		);
 		expect(onCreate).toHaveBeenCalledOnce();
 	});

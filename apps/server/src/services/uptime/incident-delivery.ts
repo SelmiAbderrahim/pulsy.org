@@ -1,0 +1,9 @@
+import { db, uptimeIncident, uptimeIncidentEscalation, uptimeMonitor, type UptimeMonitorRow } from "@pulsy/db";
+import { and, desc, eq } from "drizzle-orm";
+/** Bounded provenance for the measured incident recovered by this transition. */
+export async function incidentRecoveryDelivery(monitor: UptimeMonitorRow, before: string) {
+  const [incident] = await db.select({ id: uptimeIncident.incidentId }).from(uptimeIncident).innerJoin(uptimeMonitor, eq(uptimeMonitor.uptimeMonitorId, uptimeIncident.uptimeMonitorId)).where(and(eq(uptimeMonitor.userId, monitor.userId), eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId), eq(uptimeIncident.status, "resolved"), eq(uptimeIncident.resolvedAt, before))).orderBy(desc(uptimeIncident.startedAt), desc(uptimeIncident.incidentId)).limit(1);
+  if (!incident) return { targets: [] as string[], channelIds: [] as string[], processing: false };
+  const jobs = await db.select({ deliveredTargets: uptimeIncidentEscalation.deliveredTargets, channelId: uptimeIncidentEscalation.channelId, state: uptimeIncidentEscalation.state, leaseToken: uptimeIncidentEscalation.leaseToken, leaseUntil: uptimeIncidentEscalation.leaseUntil }).from(uptimeIncidentEscalation).innerJoin(uptimeMonitor, eq(uptimeMonitor.uptimeMonitorId, uptimeIncidentEscalation.monitorId)).where(and(eq(uptimeIncidentEscalation.incidentId, incident.id), eq(uptimeIncidentEscalation.userId, monitor.userId), eq(uptimeMonitor.userId, monitor.userId), eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId))).limit(2);
+  return { targets: [...new Set(jobs.flatMap(job => job.deliveredTargets))], channelIds: [...new Set(jobs.filter(job => job.deliveredTargets.length > 0).map(job => job.channelId))], processing: jobs.some(job => job.state === "processing" || Boolean(job.leaseToken && job.leaseUntil && Date.parse(job.leaseUntil) > Date.now())) };
+}

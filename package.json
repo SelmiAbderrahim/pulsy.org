@@ -2,7 +2,7 @@
   "name": "pulsy",
   "version": "0.1.0",
   "private": true,
-  "description": "Pulsy — a self-hosted, open-source website uptime & downtime monitor.",
+  "description": "Pulsy \u2014 a self-hosted, open-source website uptime & downtime monitor.",
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
@@ -22,13 +22,15 @@
     "dev": "pnpm --parallel -r dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm --filter @pulsy/server typecheck && pnpm --filter @pulsy/db typecheck",
-    "lint": "pnpm --filter @pulsy/server lint && pnpm --filter @pulsy/db typecheck",
+    "lint": "eslint . --max-warnings 0 && node --test scripts/check-eslint.test.mjs",
     "test": "pnpm --filter @pulsy/server test && pnpm --filter @pulsy/db test",
     "db:generate": "pnpm --filter @pulsy/db generate",
     "db:migrate": "pnpm --filter @pulsy/db migrate",
     "db:seed": "pnpm --filter @pulsy/server seed"
   },
   "devDependencies": {
-    "typescript": "5.9.3"
+    "typescript": "5.9.3",
+    "eslint": "9.39.5",
+    "@typescript-eslint/parser": "8.71.2"
   }
 }

@@ -7,7 +7,7 @@
 import { Ban, Loader2, ShieldOff, Trash2, Undo2 } from "lucide-react";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 import {
 	AlertDialog,
@@ -21,6 +21,7 @@ import {
 } from "@/components/ui/alert-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { FormField } from "@/components/ui/form-field";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -54,7 +55,7 @@ import { formatDate } from "./format";
 const LIMIT = 25;
 
 export function AdminUsers() {
-	const { t } = useTranslation("admin");
+	const { t, i18n } = useTranslation("admin");
 	const [search, setSearch] = useState("");
 	const [roleFilter, setRoleFilter] = useState<"all" | PlatformRole>("all");
 	const [bannedOnly, setBannedOnly] = useState(false);
@@ -145,7 +146,7 @@ export function AdminUsers() {
 						resetPage();
 					}}
 				>
-					<SelectTrigger className="sm:w-44">
+					<SelectTrigger className="sm:w-44" aria-label={t("users.filters.role")}>
 						<SelectValue placeholder={t("users.filters.role")} />
 					</SelectTrigger>
 					<SelectContent>
@@ -249,7 +250,7 @@ export function AdminUsers() {
 											handleRoleChange(user.id, v as PlatformRole)
 										}
 									>
-										<SelectTrigger className="w-36">
+										<SelectTrigger className="w-36" aria-label={`${t("users.columns.role")}: ${user.email}`}>
 											<SelectValue />
 										</SelectTrigger>
 										<SelectContent>
@@ -266,7 +267,7 @@ export function AdminUsers() {
 									{user.monitorCount}
 								</TableCell>
 								<TableCell className="text-start hidden lg:table-cell text-sm text-muted-foreground">
-									{formatDate(user.createdAt)}
+									{formatDate(user.createdAt, i18n.language)}
 								</TableCell>
 								<TableCell className="text-end">
 									<div className="flex items-center justify-end gap-1">
@@ -342,7 +343,7 @@ export function AdminUsers() {
 							{t("users.ban.description")}
 						</AlertDialogDescription>
 					</AlertDialogHeader>
-					<div className="flex flex-col gap-2">
+					<FormField className="flex flex-col gap-2">
 						<Label htmlFor="ban-reason">{t("users.ban.reason")}</Label>
 						<Textarea
 							id="ban-reason"
@@ -350,7 +351,7 @@ export function AdminUsers() {
 							onChange={(e) => setBanReason(e.target.value)}
 							placeholder={t("users.ban.reasonPlaceholder")}
 						/>
-					</div>
+					</FormField>
 					<AlertDialogFooter>
 						<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
 						<AlertDialogAction
@@ -387,7 +388,7 @@ export function AdminUsers() {
 							{t("users.delete.description")}
 						</AlertDialogDescription>
 					</AlertDialogHeader>
-					<div className="flex flex-col gap-2">
+					<FormField className="flex flex-col gap-2">
 						<Label htmlFor="delete-confirm">
 							{t("users.delete.confirmLabel")}
 						</Label>
@@ -397,7 +398,7 @@ export function AdminUsers() {
 							onChange={(e) => setDeleteConfirm(e.target.value)}
 							placeholder={t("users.delete.confirmWord")}
 						/>
-					</div>
+					</FormField>
 					<AlertDialogFooter>
 						<AlertDialogCancel>{t("common.cancel")}</AlertDialogCancel>
 						<AlertDialogAction

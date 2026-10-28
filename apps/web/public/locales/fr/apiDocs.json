@@ -11,7 +11,11 @@
       "pagination": "Pagination",
       "endpoints": "Points de terminaison",
       "monitor-object": "L'objet moniteur",
-      "openapi": "Spécification OpenAPI"
+      "openapi": "Spécification OpenAPI",
+      "access": "Portées des clés",
+      "monitor-types": "Types de moniteurs",
+      "channels": "Canaux de notification",
+      "status-pages": "Pages de statut"
     }
   },
   "copy": {
@@ -28,12 +32,12 @@
       "title": "Authentification",
       "body": "Chaque requête s'authentifie avec une clé API Bearer. Créez une clé dans le tableau de bord — le secret n'est affiché qu'une seule fois, copiez-le donc à ce moment-là. Pulsy ne stocke qu'un hachage et ne peut plus jamais l'afficher ; si vous perdez une clé, révoquez-la et créez-en une nouvelle.",
       "headerLabel": "Envoyez votre clé dans l'en-tête Authorization",
-      "note": "Les clés API authentifient uniquement l'API REST — jamais la session du tableau de bord — et peuvent être révoquées à tout moment.",
+      "note": "Les nouvelles clés sont en lecture seule par défaut. Choisissez la portée full pour les écritures et, si nécessaire, une date d’expiration (23:59:59 UTC). Les clés expirées ou révoquées ne peuvent pas s’authentifier. Le secret n’est affiché qu’une fois et seul son hachage est stocké.",
       "createCta": "Créer une clé API"
     },
     "rateLimit": {
       "title": "Limitation du débit",
-      "body": "Les requêtes sont limitées par clé dans une fenêtre fixe d'une minute (60 requêtes/minute par défaut). Chaque réponse comporte des en-têtes de limitation de débit pour vous permettre de cadencer vos appels.",
+      "body": "Les requêtes sont limitées par clé dans une fenêtre fixe d’une minute (60 requêtes/minute par défaut). Chaque réponse à une requête authentifiée contient des en-têtes de limite pour cadencer vos appels ; une réponse 401 n’en contient pas.",
       "tableHeaders": {
         "header": "En-tête",
         "meaning": "Signification"
@@ -50,17 +54,20 @@
       "body": "Chaque erreur partage une même forme. Les messages sont localisés à partir de l'en-tête Accept-Language de la requête (en, ar, fr, de, es).",
       "tableHeaders": {
         "status": "HTTP",
-        "code": "Code",
+        "code": "Code d’erreur",
         "when": "Quand"
       },
       "rows": {
         "unauthorized": "Clé manquante, mal formée, invalide ou révoquée.",
-        "forbidden": "Votre forfait est en dessous du niveau d'accès requis.",
-        "notFound": "Le moniteur n'existe pas ou ne vous appartient pas.",
-        "validation": "Corps ou requête invalide, ou une limite du forfait (par ex. intervalle trop fréquent, plafond de moniteurs atteint).",
+        "forbidden": "Une clé en lecture seule ne peut pas appeler un point de terminaison d’écriture.",
+        "notFound": "Le moniteur (ou un canal référencé) n’existe pas ou ne vous appartient pas.",
+        "validation": "Corps ou paramètres de requête invalides. Un JSON mal formé ou un corps trop volumineux renvoie HTTP 400/413/415 avec le même code.",
         "rateLimited": "Fenêtre de limitation de débit par clé dépassée.",
-        "internal": "Erreur serveur inattendue."
-      }
+        "internal": "Erreur serveur inattendue.",
+        "conflict": "Application de configuration uniquement : votre compte a changé après l’aperçu. Lancez un nouvel aperçu."
+      },
+      "rateLimitedExample": "Réponse en cas de limitation de débit",
+      "retryNote": "Après un 429, attendez le nombre de secondes indiqué dans Retry-After avant de réessayer."
     },
     "pagination": {
       "title": "Pagination",
@@ -70,7 +77,8 @@
       "title": "Points de terminaison",
       "groups": {
         "monitors": "Moniteurs",
-        "data": "Vérifications, incidents et statistiques"
+        "data": "Vérifications, incidents et statistiques",
+        "configuration": "Configuration (tous les types de moniteurs)"
       }
     },
     "monitorObject": {
@@ -79,7 +87,40 @@
     },
     "openapi": {
       "title": "Spécification OpenAPI",
-      "body": "Vous préférez une documentation lisible par machine ? Le contrat complet est fourni sous forme de spécification OpenAPI 3.1 dans le dépôt — importez-le dans Postman ou Insomnia, ou générez un client avec openapi-generator."
+      "body": "Vous préférez une documentation lisible par machine ? Le contrat complet est une spécification OpenAPI 3.1 correspondant à la version de ce déploiement. Importez-la dans Postman ou Insomnia, ou générez un client avec openapi-generator. Elle couvre aussi les points de terminaison de disponibilité observée, d’annotations et d’export/aperçu/application de configuration, non détaillés ci-dessus.",
+      "download": "Télécharger openapi.yaml"
+    },
+    "access": {
+      "title": "Portées des clés",
+      "body": "Chaque clé API possède une portée read ou full. Les deux permettent de lire les données de votre compte ; la portée full est nécessaire pour les créer ou les modifier.",
+      "ossNote": "Chaque compte peut utiliser toute l’API. Choisissez la portée read (lecture seule) ou full (lecture et écriture) de chaque clé selon ses besoins.",
+      "tableHeaders": {
+        "level": "Portée de la clé",
+        "read": "Points de terminaison de lecture",
+        "write": "Points de terminaison d'écriture"
+      }
+    },
+    "monitorTypes": {
+      "title": "Moniteurs DNS, TCP, heartbeat et serveur",
+      "body": "POST /monitors crée des moniteurs HTTP. Créez et mettez à jour tous les autres types avec un manifeste de configuration : prévisualisez-le, examinez les entrées prévues, puis appliquez-le avec la révision renvoyée. Les moniteurs sont rapprochés par votre clé : le même manifeste peut donc être réappliqué pour les mettre à jour.",
+      "items": {
+        "http": "url, method, statut attendu, délai d’expiration et assertions de réponse facultatives.",
+        "dns": "configuration.hostname et recordType (A, AAAA, CNAME, MX ou TXT). Le mode exists exige au moins une réponse ; matches exige l’ensemble exact attendu, sans tenir compte de l’ordre ni des doublons.",
+        "tcp": "configuration.hostname et port. Le contrôle réussit si la connexion s’ouvre dans le délai imparti.",
+        "heartbeat": "interval est la période de ping attendue et graceSeconds le délai avant le passage en panne. Les nouveaux moniteurs heartbeat restent en pause tant que vous n’avez pas renouvelé leur jeton de ping dans le tableau de bord.",
+        "server": "Seuils de CPU, de mémoire et de disque, plus les systèmes de fichiers exclus. Les nouveaux moniteurs de serveur restent en pause tant que vous n’avez pas créé l’identifiant de l’agent dans le tableau de bord."
+      },
+      "exampleLabel": "manifest.json — un moniteur de chaque type"
+    },
+    "channels": {
+      "title": "Canaux de notification",
+      "body": "Créez des canaux E-mail, Webhook, Slack, Discord et Telegram dans le tableau de bord. L’API les désigne uniquement par leur id : passez channelIds lors de la création d’un moniteur HTTP ou dans un manifeste. Les id inconnus et les canaux qui ne vous appartiennent pas renvoient 404.",
+      "secrets": "Les destinations des canaux, en-têtes personnalisés, identifiants de fournisseur et secrets de signature des Webhooks sont en écriture seule. Aucune réponse d’API, aucun export de configuration ni aucun journal ne les inclut ; les exports ne listent que les ids de canaux. Les Webhooks génériques reçoivent la charge utile signée en version 1 décrite dans docs/api/webhooks.md."
+    },
+    "statusPages": {
+      "title": "Pages de statut",
+      "body": "Créez et publiez des pages de statut dans le tableau de bord. Une page publiée propose des projections en lecture seule sans clé API : status.json, history.json, badge.svg, feed.rss et feed.atom. Les brouillons renvoient 404, chaque adresse cliente peut effectuer {{limit}} requêtes par minute, et les projections n’incluent jamais d’URL, d’identifiants, d’abonnés ni de notes internes.",
+      "exampleLabel": "Lire une page de statut publiée"
     }
   },
   "endpoint": {
@@ -104,7 +145,8 @@
       "id": "L'ID du moniteur.",
       "limit": "Éléments par page (1–100, par défaut 20).",
       "cursor": "Curseur opaque issu du nextCursor de la réponse précédente.",
-      "days": "Fenêtre en jours pour l'agrégat (1–366, par défaut 30)."
+      "days": "Fenêtre en jours pour l'agrégat (1–366, par défaut 30).",
+      "monitorIds": "Sélection facultative de 1 à 200 identifiants de moniteurs vous appartenant, séparés par des virgules. Sans sélection, 1 000 moniteurs maximum par collecte."
     },
     "bodyFields": {
       "name": "Une étiquette pour le moniteur.",
@@ -112,10 +154,13 @@
       "method": "Méthode HTTP à utiliser. Par défaut GET.",
       "expectedStatus": "Code de statut HTTP attendu (100–599). Par défaut 200.",
       "timeout": "Délai d'expiration de la requête en millisecondes (1000–60000). Par défaut 10000.",
-      "interval": "Secondes entre les vérifications : 30, 60, 300, 600, 1800 ou 3600. Des valeurs plus faibles peuvent nécessiter un forfait supérieur. Par défaut 300.",
+      "interval": "Secondes entre les vérifications : 30, 60, 300, 600, 1800 ou 3600. Valeur par défaut : 300.",
       "failureThreshold": "Échecs consécutifs avant l'ouverture d'un incident (1–10). Par défaut 3.",
       "active": "Indique si le moniteur s'exécute. Par défaut true.",
-      "tags": "Jusqu'à 10 étiquettes de chaîne."
+      "tags": "Jusqu'à 10 étiquettes de chaîne.",
+      "latencyPolicy": "Politique facultative : thresholdMs/recoveryThresholdMs (deux null désactivent la latence), slowCount/recoveryCount (1–10), importance (critical/warning/informational), cooldownSeconds (0–3600). Le seuil de reprise ne dépasse pas le seuil lent. Null conserve le comportement antérieur ; omission conserve la politique lors d’une mise à jour.",
+      "expectedStatuses": "Statuts acceptés facultatifs : 200,204 ; 2xx ; ou 200–299. Remplace expectedStatus. Null rétablit la règle numérique.",
+      "tlsMonitoringEnabled": "Surveiller l’expiration du certificat HTTPS. Activé par défaut ; la désactivation ne supprime pas la vérification du certificat HTTPS."
     }
   },
   "endpointDocs": {
@@ -154,6 +199,28 @@
     "getStats": {
       "summary": "Obtenir les statistiques d'un moniteur",
       "description": "Renvoie les statistiques agrégées de disponibilité et de temps de réponse sur la fenêtre demandée."
+    },
+    "metrics": {
+      "summary": "Métriques Prometheus",
+      "description": "Lire l'état enregistré du compte avec l'accès API en lecture existant. La collecte ne lance aucun contrôle. État : -1 inconnu, 0 indisponible, 1 disponible, 2 dégradé. Fresh vaut 1 seulement si le moniteur est actif et l'âge du dernier contrôle ne dépasse pas deux intervalles plus le délai. Valeurs absentes : NaN ; durées en secondes, horodatages en secondes Unix. Les labels contiennent uniquement les identifiants ; noms, URL et tags restent privés. Open incident vaut 1 lorsqu'un incident mesuré est ouvert. TLS expiry indique la dernière expiration de certificat observée, ou NaN. Voir le guide Prometheus pour la configuration et une requête tenant compte de la fraîcheur. Les durées concernent les requêtes HTTP, la résolution DNS et les connexions TCP ; les heartbeats ont une durée NaN. TLS concerne uniquement HTTP. La fraîcheur vaut zéro pour un état inconnu, un moniteur en pause ou une observation future. Les heartbeats nécessitent aussi un enregistrement d'échéance, dont la prochaine échéance éventuelle ne doit pas être dépassée de plus de dix secondes."
+    },
+    "exportConfiguration": {
+      "summary": "Exporter la configuration",
+      "description": "Renvoie un manifeste portable pour les moniteurs sélectionnés. Les secrets n’y figurent jamais ; les entrées qui en ont besoin listent needsReentry."
+    },
+    "previewConfiguration": {
+      "summary": "Prévisualiser un manifeste",
+      "description": "Valide un manifeste de n’importe quels types de moniteurs par rapport à votre compte et indique ce que son application créerait, mettrait à jour ou rejetterait. Ne modifie rien. Envoyez le manifeste sous forme de chaîne JSON dans text."
+    },
+    "applyConfiguration": {
+      "summary": "Appliquer un manifeste",
+      "description": "Applique exactement le plan prévisualisé. Envoyez le même text et la révision de l’aperçu ; si votre compte a changé entre-temps, la requête renvoie 409 et rien n’est appliqué."
     }
+  },
+  "ux": {
+    "loadError": "Impossible de charger les informations sur les clés API. Réessayez.",
+    "retry": "Réessayer",
+    "allowed": "Autorisé",
+    "copyFailed": "Copie impossible. Sélectionnez et copiez le code manuellement."
   }
 }

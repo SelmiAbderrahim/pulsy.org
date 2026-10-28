@@ -23,10 +23,10 @@ describe("IncidentsTab", () => {
 		expect(useUptimeIncidents).toHaveBeenCalledWith("m1", 50);
 	});
 
-	it("treats undefined incidents as empty", () => {
+	it("announces loading while incident data is unavailable", () => {
 		useUptimeIncidents.mockReturnValue({ data: undefined });
 		render(<IncidentsTab monitorId="m1" />);
-		expect(screen.getByText("No incidents recorded")).toBeInTheDocument();
+		expect(screen.getByRole("status")).toHaveTextContent("workspace.loading");
 	});
 
 	it("renders ongoing and resolved incidents with formatted durations", () => {
@@ -75,19 +75,17 @@ describe("IncidentsTab", () => {
 			],
 		});
 		render(<IncidentsTab monitorId="m1" />);
-		expect(screen.getByText("incidents.status.ongoing")).toBeInTheDocument();
+		expect(screen.getAllByText("incidents.status.ongoing")).toHaveLength(2);
 		expect(
 			screen.getAllByText("incidents.status.resolved").length,
-		).toBe(4);
-		expect(screen.getByText("5xx errors")).toBeInTheDocument();
+		).toBe(8);
+		expect(screen.getAllByText(/5xx errors/)).toHaveLength(2);
 		// duration translation keys per branch
-		expect(
-			screen.getByText("incidents.duration.seconds"),
-		).toBeInTheDocument();
-		expect(
-			screen.getByText("incidents.duration.minutes"),
-		).toBeInTheDocument();
-		expect(screen.getByText("incidents.duration.hours")).toBeInTheDocument();
-		expect(screen.getByText("incidents.duration.days")).toBeInTheDocument();
+		expect(screen.getAllByText("45s")).toHaveLength(2);
+		expect(screen.getAllByText("5m")).toHaveLength(2);
+		expect(screen.getAllByText("2h")).toHaveLength(2);
+		expect(screen.getAllByText("2d")).toHaveLength(2);
 	});
 });
+
+vi.mock("@tanstack/react-router", () => ({ Link: ({ children }: { children: React.ReactNode }) => <a href="/dashboard/incidents">{children}</a> }));

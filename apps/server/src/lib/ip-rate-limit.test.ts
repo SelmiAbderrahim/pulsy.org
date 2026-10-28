@@ -83,6 +83,33 @@ describe("authRateLimitFromEnv", () => {
 });
 
 describe("createIpRateLimiter", () => {
+	it("supports a surface-specific limited response without counting a request twice", () => {
+		const limiter = createIpRateLimiter({ limit: 2, now: () => 0,
+			onLimited: (res: Response) => { res.json({ outcome: "limited" }); },
+		});
+		const next = vi.fn();
+		runOnce(limiter, mockReq("10.0.0.1"), next);
+		runOnce(limiter, mockReq("10.0.0.1"), next);
+		const { state } = runOnce(limiter, mockReq("10.0.0.1"), next);
+		expect(next).toHaveBeenCalledTimes(2);
+		expect(state).toMatchObject({ statusCode: 429, body: { outcome: "limited" }, headers: { "Retry-After": "60" } });
+	});
+
+	it("can reject new addresses at capacity while retaining existing windows and admitting expired buckets", () => {
+		let ts = 0;
+		const limiter = createIpRateLimiter({ limit: 2, maxBuckets: 1, failClosed: true, now: () => ts,
+			onLimited: (res: Response) => { res.json({ outcome: "limited" }); },
+		});
+		const next = vi.fn();
+		runOnce(limiter, mockReq("10.0.0.1"), next);
+		expect(runOnce(limiter, mockReq("10.0.0.2"), next).state).toMatchObject({ statusCode: 429, body: { outcome: "limited" } });
+		expect(runOnce(limiter, mockReq("10.0.0.1"), next).state.statusCode).toBe(0);
+		expect(runOnce(limiter, mockReq("10.0.0.1"), next).state.statusCode).toBe(429);
+		ts = 60_001;
+		expect(runOnce(limiter, mockReq("10.0.0.2"), next).state.statusCode).toBe(0);
+		expect(next).toHaveBeenCalledTimes(3);
+	});
+
 	it("allows up to the limit then 429s with Retry-After", () => {
 		const limiter = createIpRateLimiter({ limit: 2, now: () => 1_000 });
 		const next = vi.fn() as unknown as NextFunction;
@@ -199,3 +226,12 @@ function runOnce(
 	limiter(req, res, next);
 	return { res, state };
 }
+
+it("can retain bounded public-read counters by evicting the oldest live bucket", () => {
+  const limiter = createIpRateLimiter({ limit: 1, maxBuckets: 1, evictOldest: true, now: () => 0 });
+  const next = vi.fn();
+  runOnce(limiter, mockReq("198.51.100.1"), next);
+  runOnce(limiter, mockReq("198.51.100.2"), next);
+  const { state } = runOnce(limiter, mockReq("198.51.100.2"), next);
+  expect(next).toHaveBeenCalledTimes(2); expect(state.statusCode).toBe(429);
+});

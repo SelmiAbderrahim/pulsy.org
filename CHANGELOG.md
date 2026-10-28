@@ -7,6 +7,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- HTTP request configuration, expected-status rules, response assertions, latency
+  hysteresis, degraded alerts and configuration probes.
+- DNS/TCP checks, cron heartbeats and the version 1.0.0 Linux server-health agent.
+- Maintenance and snooze schedules, deferred delivery, incident acknowledgement,
+  notes, runbooks, severity, grouping, timelines and two-step escalation.
+- Reliability objectives, duration-weighted daily history and private annotations.
+- Status-page component editing, announcements, duplicate/selection previews,
+  optional public history, double opt-in email, RSS/Atom, JSON feeds and SVG badges.
+- Configuration manifests with export/preview/reconcile, saved views, reusable
+  templates and channel bindings; bulk deletion and spread first checks.
+- Read/full API keys with expiry and removal, configuration/reliability REST
+  routes and authenticated Prometheus metrics.
+- Share preview and optional attribution, account timezone preferences, bundled
+  localized Help, and five-locale translation integrity tooling.
+- Agent, installer, Compose, retained-asset and real browser lifecycle checks;
+  dedicated ESLint, translation, agent and acceptance CI jobs.
+
+### Changed
+
+- Responsive dashboard shell, status-page editor and canonical monitor tabs:
+  Overview, Incidents, History, Alerts, Reports and Settings.
+- Accessible shared form/dialog controls, keyboard navigation, draft guards,
+  pre-paint theme/locale startup and Arabic RTL across phone and desktop widths.
+- PostgreSQL advisory-lock scheduler leadership and periodic reconciliation;
+  daily check aggregates and server/reliability retention use the operator setting.
+- Source containers remain snapshots; Docker web builds enforce translations,
+  types and tests, and non-root nginx retains immutable assets between deployments.
+- Added OSS migrations `0012_lethal_ser_duncan`, `0013_wet_dracula` and
+  `0014_useful_ares`; existing migration history is preserved.
+
+### Security
+
+- DNS-pinned egress and per-redirect validation with private/LAN targets allowed
+  by default through `MONITOR_ALLOW_PRIVATE_NETWORKS=true`; metadata/link-local
+  remain blocked. The old `BLOCK_PRIVATE_TARGETS` setting is deprecated.
+- Signed webhook contract v1 with stable delivery IDs and encrypted signing keys.
+  Browser-generated keys preserve one-time setup while server responses stay masked.
+- Configurable trusted proxy depth, IPv6 /64 rate keys, bounded JSON ingress,
+  token-keyed heartbeat/agent routes and published-only public projections.
+- Owner locking, technical abuse ceilings, diagnostic redaction, single ongoing
+  incident enforcement and verified-domain uniqueness.
+
 ## [0.1.0] - 2026-08-01
 
 ### Changed
@@ -67,20 +111,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   can set `VITE_SOURCE_CODE_URL`, while release images link to their exact Git
   commit automatically.
 
-- **Superadmin invitation links** — a new `Invitations` tab on `/superadmin` mints single-use
-  links (`/invite/<token>`) that comp a chosen paid plan for **1 month or 1 year**. Each link
-  carries an admin-only `label` for attribution, expires after 7/30/60/90 days if unclaimed,
-  and can be soft-revoked (never deleted) while pending. Recipients claim through signup if
-  needed — the auth flow carries only the token, never a redirect path. Claiming writes a
-  time-boxed `subscription` row (`providerSubscriptionId = invite-grant-<id>`); when the grant
-  lapses the account falls back to `free` at read time and the existing pricing/upgrade UI
-  takes over. A real Polar purchase supersedes a live grant, a nightly job retires elapsed
-  ones, and every claim notifies `SUPPORT_INBOX_ADDRESS` (silently skipped when unconfigured;
-  a mail failure never blocks the grant). Adds the `plan_invitation` table, the
-  `admin.invitations` sub-router, and one new `publicProcedure`,
-  `billing.invitation.resolve`, whose payload is limited to
-  `{ plan, grantDuration, expiresAt, status }`. No new environment variables.
-
 - **Custom-domain status pages** — public status pages are now a first-class entity: create
   named pages (each with a per-user `slug`, title, description, optional logo), pick exactly
   which monitors each one shows, and publish independently. Reachable on the app host at
@@ -91,9 +121,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   that domain by `Host`. TLS for custom domains is the operator's reverse proxy (CNAME +
   cert; no in-app ACME). The public resolve exposes only the sanitized aggregate (monitor
   name/status/uptime/response-time, overall status, last-7-day incidents) — never URLs, TLS,
-  channels, credentials, or owner identity. Tier-gated: `maxStatusPages` now counts **pages**
-  (not public monitors) and custom domains need the `customDomainStatusPages` entitlement —
-  both **unrestricted by plan for self-hosters** when payments are off.
+  channels, credentials, or owner identity. Page creation and custom domains are
+  available to every account.
   Adds the `uptime_status_page` and `uptime_status_page_monitor` tables, the
   `uptimeMonitor.statusPage.*` sub-router (list/one/create/update/delete/setMonitors/
   attachDomain/verifyDomain/detachDomain) and the `public.statusPageBySlug` /
@@ -109,11 +138,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   PDF attachment on the 1st of each month through your configured email provider; a "Send now"
   control exercises the flow on demand. The PDF is generated with pure-JS `pdfkit` (no headless
   browser), every user value is HTML-escaped in the email body, and links derive from
-  `PUBLIC_WEB_URL`. Tier-gated to the Team plan when payments are on, and **free for
-  self-hosters** because payments-off bypasses the plan guard. Adds the
+  `PUBLIC_WEB_URL`. Available to every account. Adds the
   `uptime_sla_report_subscription` table, the `slaReport.*` tRPC sub-router
   (`data` + `subscription.list/upsert/remove/sendNow`), and a monthly `0 6 1 * *` cron job
-  that re-checks each owner's entitlements before sending. **Breaking (internal tRPC):** the
+  that checks the owner's configured sender before sending. **Breaking (internal tRPC):** the
   former `uptimeMonitor.monitor.slaReport` query moved to `uptimeMonitor.slaReport.data`.
 
 - **Public REST API + API keys** — a first-party, versioned REST surface at `/api/v1` for
@@ -122,24 +150,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   scoped to the key owner). Authentication is a Bearer API key (`Authorization: Bearer
   pul_…`) created and revoked in the dashboard; the plaintext is shown exactly once and only
   its SHA-256 hash is stored, so a lost key is revoked and regenerated rather than recovered.
-  Access is plan-gated — reads need `limited`, writes need `full` API access — so on a
-  self-hosted instance with payments off the whole API works out of the box.
+  Access is scoped to the key owner and available to every account.
   Requests are rate-limited per key (`API_RATE_LIMIT_PER_MIN`, default 60/min,
-  with `X-RateLimit-*` and `Retry-After` headers) and write paths reuse the same monitor-count
-  and check-interval tier guards as the dashboard. Adds the `api_key` table, the custom Bearer
+  with `X-RateLimit-*` and `Retry-After` headers); writes reuse the validated,
+  owner-scoped dashboard services. Adds the `api_key` table, the custom Bearer
   auth middleware, the `apiKey.*` tRPC router (list/create/revoke/access) for the dashboard
   key manager, and an OpenAPI spec + reference under `docs/api/`. The surface can be disabled
   with `API_V1_ENABLED=false`.
-
-- **Priority support** — an in-app Contact-support flow (header entry point) that captures
-  a category + message, persists it to the new `support_request` table, and emails it to a
-  configurable operator inbox (`SUPPORT_INBOX_ADDRESS`) via the operator's Resend
-  credentials. Requests from plans with the `prioritySupport` entitlement (Pro/Team, and
-  every self-hosted user through the compatibility entitlement row) are flagged, routed
-  to an optional `SUPPORT_PRIORITY_INBOX_ADDRESS`, and subject-prefixed `[PRIORITY]`; the
-  dialog and billing overview surface the tier and its stated response-time target (priority
-  24h / standard 72h). Delivery is best-effort: with no inbox configured the request is
-  still recorded and the UI says so. Adds the `support.*` tRPC router (`submit` + `info`).
 
 - **Monitor sharing** — select monitors in the dashboard and generate an expiring share
   link (7 / 30 / 90 days). Anyone opening the link clones the monitor configurations into
@@ -180,5 +197,5 @@ snapshot also includes:
 - **Docker deployment** — Compose stack (postgres + server + web) with a `Makefile` for
   common workflows, plus a seed for a demo user and example monitors.
 
-[Unreleased]: https://github.com/SelmiAbderrahim/pulsy.org/compare/v0.1.0...master
-[0.1.0]: https://github.com/SelmiAbderrahim/pulsy.org/releases/tag/v0.1.0
+[Unreleased]: https://github.com/SelmiAbderrahim/pulsy/compare/v0.1.0...master
+[0.1.0]: https://github.com/SelmiAbderrahim/pulsy/releases/tag/v0.1.0

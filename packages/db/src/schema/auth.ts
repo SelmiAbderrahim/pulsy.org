@@ -12,6 +12,8 @@ export const user = pgTable("user", {
 	email: text("email").notNull().unique(),
 	emailVerified: boolean("emailVerified").notNull().default(false),
 	image: text("image"),
+	// Null follows the browser until an account selects an IANA timezone.
+	timezone: text("timezone"),
 	// Platform role. "user" for everyone; "superadmin" for operators who can
 	// reach the /superadmin panel. Exposed on the better-auth session via
 	// `additionalFields` (input:false — never settable by the account itself).

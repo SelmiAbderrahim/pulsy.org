@@ -1,4 +1,6 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { renderWithQueryClient as render } from "@/test/query-wrapper";
+vi.mock("@/components/account-timezone", () => ({ useAccountTimezone: () => "UTC" }));
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -28,7 +30,7 @@ vi.mock("@/hooks/apiKeys/useApiKeys", () => ({
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
-vi.mock("sonner", () => ({
+vi.mock("@/lib/toast", () => ({
 	toast: {
 		success: (m: unknown) => toastSuccess(m),
 		error: (m: unknown) => toastError(m),
@@ -49,7 +51,7 @@ beforeEach(() => {
 
 const createdKey = {
 	apiKeyId: "k1",
-	userId: "u1",
+	scope: "full",
 	name: "CI",
 	keyPrefix: "pul_abcd",
 	lastUsedAt: null,
@@ -60,13 +62,16 @@ const createdKey = {
 };
 
 describe("CreateApiKeyDialog — name form", () => {
-	it("disables create until a name is entered, then creates and reveals the key", async () => {
+	it("validates the required name, then creates and reveals the key", async () => {
 		const user = userEvent.setup();
 		createMutateAsync.mockResolvedValue(createdKey);
 		render(<CreateApiKeyDialog open onOpenChange={vi.fn()} />);
 
 		const createButton = screen.getByRole("button", { name: "Create key" });
-		expect(createButton).toBeDisabled();
+		expect(createButton).toBeEnabled();
+    await user.click(createButton);
+    expect(createMutateAsync).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("Name")).toHaveFocus();
 
 		await user.type(screen.getByLabelText("Name"), "CI");
 		expect(createButton).toBeEnabled();
@@ -74,7 +79,7 @@ describe("CreateApiKeyDialog — name form", () => {
 		await user.click(createButton);
 
 		await waitFor(() =>
-			expect(createMutateAsync).toHaveBeenCalledWith({ name: "CI" }),
+			expect(createMutateAsync).toHaveBeenCalledWith({ name: "CI", scope: "read", expiresAt: null }),
 		);
 		// The plaintext is now revealed once.
 		expect(screen.getByLabelText("Your API key")).toHaveValue(
@@ -139,7 +144,8 @@ describe("CreateApiKeyDialog — name form", () => {
 		await user.type(screen.getByLabelText("Name"), "CI");
 		await user.click(screen.getByRole("button", { name: "Create key" }));
 		await screen.findByLabelText("Your API key");
-		await user.click(screen.getByRole("button", { name: "Done" }));
+		await user.click(screen.getByRole("button", { name: "Copy" }));
+    await user.click(screen.getByRole("button", { name: "Done" }));
 		expect(onOpenChange).toHaveBeenCalledWith(false);
 	});
 });

@@ -24,7 +24,6 @@ export default defineConfig({
 				"src/index.ts", // Express + scheduler bootstrap (entry point)
 				"src/seed.ts", // dev seeding script
 				"src/seed-superadmin.ts", // superadmin seed runner (thin wrapper)
-				"src/backfill-orders.ts", // one-time order backfill runner
 				"src/auth/auth.ts", // better-auth declarative wiring
 				"src/**/*.test.ts",
 				"src/**/index.ts", // barrel re-exports

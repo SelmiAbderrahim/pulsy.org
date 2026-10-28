@@ -1,5 +1,6 @@
+import { formatLatencyReason } from "@/lib/uptime/format";
 /**
- * Global command palette (⌘K / Ctrl+K) for the dashboard. Searches monitors
+ * Global search (⌘K / Ctrl+K) for the dashboard. Searches monitors
  * (client-side, from the cached list) and incidents (server-side, scoped to the
  * user) and jumps to the relevant monitor detail page.
  *
@@ -7,8 +8,8 @@
  */
 
 import { useNavigate } from "@tanstack/react-router";
-import { AlertTriangle, Activity, Loader2, Search } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { AlertTriangle, Activity, Loader2, Search, X, ArrowRight } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -16,19 +17,23 @@ import {
 	DialogContent,
 	DialogTitle,
 } from "@/components/ui/dialog";
+import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useUptimeMonitors, useIncidentSearch } from "@/hooks/uptime";
 import { useDebouncedValue } from "@/hooks/useDebouncedValue";
 import { filterMonitors } from "@/lib/uptime/search";
+import { isStaleObservation } from "@/lib/uptime/format";
 import { cn } from "@/lib/utils";
 
 const MAX_PER_GROUP = 6;
 
 interface SearchItem {
 	key: string;
-	monitorId: string;
+	monitorId?: string;
+	navigate?: () => void;
 	label: string;
 	sublabel: string;
+	context?: string;
 	tab?: "incidents";
 }
 
@@ -45,10 +50,12 @@ export function GlobalSearchDialog({
 	const navigate = useNavigate();
 	const [query, setQuery] = useState("");
 	const [activeIndex, setActiveIndex] = useState(0);
+	const inputRef = useRef<HTMLInputElement>(null);
 	const debouncedQuery = useDebouncedValue(query, 200);
+	const queryPending = query.trim() !== debouncedQuery.trim();
 
-	const { data: monitors } = useUptimeMonitors({ enabled: open });
-	const { data: incidents, isFetching: incidentsFetching } = useIncidentSearch(
+	const { data: monitors, isPending: monitorsPending, error: monitorError, refetch: retryMonitors } = useUptimeMonitors({ enabled: open });
+	const { data: incidents, isFetching: incidentsFetching, error: incidentError, refetch: retryIncidents } = useIncidentSearch(
 		debouncedQuery,
 		{ enabled: open },
 	);
@@ -63,32 +70,61 @@ export function GlobalSearchDialog({
 
 	const monitorItems = useMemo<SearchItem[]>(() => {
 		const trimmed = debouncedQuery.trim();
-		if (!trimmed) return [];
+		if (!trimmed || queryPending) return [];
 		return filterMonitors(monitors ?? [], trimmed)
 			.slice(0, MAX_PER_GROUP)
 			.map((m) => ({
 				key: `monitor:${m.uptimeMonitorId}`,
 				monitorId: m.uptimeMonitorId,
 				label: m.name,
-				sublabel: m.url,
+				sublabel: m.networkConfig ? `${m.networkConfig.hostname}${m.networkConfig.type === "tcp" ? `:${m.networkConfig.port}` : ` · ${m.networkConfig.recordType}`}` : m.monitorType === "server" ? t("server.title") : m.monitorType === "heartbeat" ? t("heartbeat.title") : m.url,
+				context: [
+					m.monitorType === "server" ? t("server.title") : m.monitorType === "heartbeat" ? t("heartbeat.title") : (m.monitorType ?? "http").toUpperCase(),
+					!m.active ? t("status.paused") : m.monitorType === "heartbeat" ? t(`heartbeat.${m.status === "pending" ? "new" : m.status === "degraded" ? "late" : m.status}`) : t(`status.${m.status}`),
+					isStaleObservation(m) ? t("metrics.stale") : null,
+				].filter(Boolean).join(" · "),
 			}));
-	}, [monitors, debouncedQuery]);
+	}, [monitors, debouncedQuery, queryPending, t]);
 
 	const incidentItems = useMemo<SearchItem[]>(() => {
+		if (!debouncedQuery.trim() || queryPending) return [];
 		return (incidents ?? []).slice(0, MAX_PER_GROUP).map((inc) => ({
 			key: `incident:${inc.incidentId}`,
 			monitorId: inc.uptimeMonitorId,
 			label: inc.monitorName,
+			context: t(`incidents.status.${inc.status}`),
 			sublabel:
-				inc.cause ??
-				t("search.incidentFallback", "Incident"),
+				inc.cause ? formatLatencyReason(inc.cause, t) : t("search.incidentFallback", "Incident"),
 			tab: "incidents",
 		}));
-	}, [incidents, t]);
+	}, [incidents, debouncedQuery, queryPending, t]);
 
-	const items = useMemo(
-		() => [...monitorItems, ...incidentItems],
-		[monitorItems, incidentItems],
+	const navigationItems = useMemo<SearchItem[]>(() => {
+    const entries = [
+      { key: "addMonitor", navigate: () => navigate({ to: "/dashboard", search: { panel: "create" } }) },
+      { key: "createStatusPage", navigate: () => navigate({ to: "/dashboard", search: { panel: "status-pages" } }) },
+      { key: "addChannel", navigate: () => navigate({ to: "/dashboard", search: { panel: "notifications" } }) },
+      { key: "createApiKey", navigate: () => navigate({ to: "/dashboard/api-keys" }) },
+      { key: "monitors", navigate: () => navigate({ to: "/dashboard" }) },
+      { key: "incidents", navigate: () => navigate({ to: "/dashboard/incidents" }) },
+      { key: "templates", navigate: () => navigate({ to: "/dashboard", search: { panel: "templates" } }) },
+      { key: "apiDocs", navigate: () => navigate({ to: "/dashboard/api-docs" }) },
+      { key: "portability", navigate: () => navigate({ to: "/dashboard/import-export" }) },
+      { key: "apiKeys", navigate: () => navigate({ to: "/dashboard/api-keys" }) },
+      { key: "statusPages", navigate: () => navigate({ to: "/dashboard", search: { panel: "status-pages" } }) },
+      { key: "notifications", navigate: () => navigate({ to: "/dashboard", search: { panel: "notifications" } }) },
+      { key: "help", navigate: () => navigate({ to: "/dashboard/help" }) },
+    ];
+    return entries.map(entry => {
+      const labelKey = ["addMonitor", "createStatusPage", "addChannel", "createApiKey"].includes(entry.key) ? `search.action.${entry.key}` : `common:nav.${entry.key}`;
+      return { ...entry, key: `navigation:${entry.key}`, label: t(labelKey, labelKey), sublabel: "" };
+    })
+      .filter(item => !query.trim() || item.label.toLocaleLowerCase().includes(query.trim().toLocaleLowerCase()));
+  }, [navigate, query, t]);
+
+  const items = useMemo(
+		() => [...monitorItems, ...incidentItems, ...navigationItems],
+		[monitorItems, incidentItems, navigationItems],
 	);
 
 	// Keep the active index in range as results change.
@@ -96,9 +132,19 @@ export function GlobalSearchDialog({
 		setActiveIndex((i) => (i >= items.length ? 0 : i));
 	}, [items.length]);
 
+	useEffect(() => { document.getElementById(`search-${items[activeIndex]?.key}`)?.scrollIntoView?.({ block: "nearest" }); }, [activeIndex, items]);
+
+	const clearQuery = () => {
+		setQuery("");
+		setActiveIndex(0);
+		inputRef.current?.focus();
+	};
+
 	const select = (item: SearchItem | undefined) => {
 		if (!item) return;
 		onOpenChange(false);
+    if (item.navigate) { item.navigate(); return; }
+    if (!item.monitorId) return;
 		navigate({
 			to: "/dashboard/uptime/$monitorId",
 			params: { monitorId: item.monitorId },
@@ -121,22 +167,28 @@ export function GlobalSearchDialog({
 		}
 	};
 
-	const hasQuery = debouncedQuery.trim().length > 0;
+	const hasQuery = query.trim().length > 0;
+	const searching = hasQuery && (queryPending || incidentsFetching || monitorsPending);
 	const showEmpty =
-		hasQuery && items.length === 0 && !incidentsFetching;
+		hasQuery && items.length === 0 && !searching && !monitorError && !incidentError;
 
 	return (
 		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="max-w-xl gap-0 p-0" aria-describedby={undefined}>
+			<DialogContent
+				showClose={false}
+				className="max-w-[var(--dialog-standard)] gap-0 p-0"
+				aria-describedby={undefined}
+        onOpenAutoFocus={event => { event.preventDefault(); inputRef.current?.focus({ preventScroll: true }); }}
+			>
 				<DialogTitle className="sr-only">
 					{t("search.paletteTitle", "Search")}
 				</DialogTitle>
-				<div className="flex items-center gap-2 border-b px-3">
-					<Search className="h-4 w-4 shrink-0 text-muted-foreground" />
-					{/** biome-ignore lint/a11y/noAutofocus: command palette focuses its input on open by design */}
+				<div className="flex min-h-14 items-center gap-2 border-b px-3">
+					<Search aria-hidden className="h-4 w-4 shrink-0 text-muted-foreground" />
 					<Input
-						autoFocus
+						ref={inputRef}
 						type="search"
+            role="combobox" aria-autocomplete="list" aria-expanded={open} aria-controls="global-search-results" aria-activedescendant={items[activeIndex] ? `search-${items[activeIndex].key}` : undefined}
 						value={query}
 						onChange={(e) => setQuery(e.target.value)}
 						onKeyDown={onKeyDown}
@@ -145,11 +197,25 @@ export function GlobalSearchDialog({
 							"Search monitors and incidents...",
 						)}
 						aria-label={t("search.paletteTitle", "Search")}
-						className="border-0 px-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+						// Use one explicitly labeled Clear button across browsers.
+						className="min-w-0 flex-1 border-0 bg-transparent px-0 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0 [&::-webkit-search-cancel-button]:hidden [&::-webkit-search-cancel-button]:appearance-none"
 					/>
+					{query && (
+						<Button
+							type="button"
+							variant="ghost"
+							size="icon"
+							className="size-11 shrink-0"
+							onClick={clearQuery}
+							aria-label={t("search.clear", "Clear search")}
+						>
+							<X aria-hidden className="h-4 w-4" />
+						</Button>
+					)}
 				</div>
 
-				<div className="max-h-[60vh] overflow-y-auto p-2">
+				<div className="max-h-[60dvh] overflow-y-auto p-2">
+					<p role="status" aria-atomic="true" className="sr-only">{searching ? t("metrics.loading") : hasQuery ? showEmpty ? t("search.paletteNoResults") : t("search.resultsSummary", { monitors: monitorItems.length, incidents: incidentItems.length }) : ""}</p>
 					{!hasQuery && (
 						<p className="px-2 py-6 text-center text-sm text-muted-foreground">
 							{t(
@@ -165,7 +231,8 @@ export function GlobalSearchDialog({
 						</p>
 					)}
 
-					{monitorItems.length > 0 && (
+					<div id="global-search-results" role="listbox" aria-label={t("search.paletteTitle")}>
+          {monitorItems.length > 0 && (
 						<SearchGroup
 							heading={t("search.groupMonitors", "Monitors")}
 							items={monitorItems}
@@ -189,8 +256,11 @@ export function GlobalSearchDialog({
 						/>
 					)}
 
-					{hasQuery && incidentsFetching && incidentItems.length === 0 && (
-						<div className="flex items-center justify-center py-6">
+          {navigationItems.length > 0 && <SearchGroup heading={t("search.groupNavigation")} items={navigationItems} icon={ArrowRight} activeIndex={activeIndex} offset={monitorItems.length + incidentItems.length} onHover={setActiveIndex} onSelect={select} />}
+					</div>
+          {(monitorError || incidentError) && <div role="alert" className="p-3 text-sm"><p className="text-destructive">{t("search.partialError")}</p><Button variant="outline" onClick={() => { if (monitorError) void retryMonitors(); if (incidentError) void retryIncidents(); }}>{t("common:actions.retry")}</Button></div>}
+          {searching && (
+						<div aria-hidden="true" className="flex items-center justify-center gap-2 py-6">
 							<Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
 						</div>
 					)}
@@ -220,7 +290,7 @@ function SearchGroup({
 	onSelect,
 }: SearchGroupProps) {
 	return (
-		<div className="mb-1">
+		<div className="mb-1" role="group" aria-label={heading}>
 			<p className="px-2 py-1.5 text-xs font-medium text-muted-foreground">
 				{heading}
 			</p>
@@ -229,23 +299,25 @@ function SearchGroup({
 				return (
 					<button
 						key={item.key}
+            id={`search-${item.key}`} role="option" aria-selected={index === activeIndex} tabIndex={-1}
 						type="button"
 						onClick={() => onSelect(item)}
 						onMouseMove={() => onHover(index)}
 						className={cn(
-							"flex w-full items-center gap-3 rounded-md px-2 py-2 text-start transition-colors duration-150",
+							"flex min-h-11 w-full items-center gap-3 rounded-md px-2 py-2 text-start transition-colors duration-150",
 							index === activeIndex
 								? "bg-accent text-accent-foreground"
 								: "hover:bg-muted/50",
 						)}
 					>
-						<Icon className="h-4 w-4 shrink-0 text-muted-foreground" />
+						<Icon className={cn("h-4 w-4 shrink-0 text-muted-foreground", Icon === ArrowRight && "rtl:scale-x-[-1]")} />
 						<span className="min-w-0 flex-1">
-							<span className="block truncate text-sm font-medium">
-								{item.label}
+							<span className="block break-words text-sm font-medium">
+								<bdi>{item.label}</bdi>
 							</span>
-							<span className="block truncate text-xs text-muted-foreground">
-								{item.sublabel}
+							{item.context && <span className="block text-xs text-muted-foreground">{item.context}</span>}
+							<span className="block break-words text-xs text-muted-foreground">
+								<bdi className="[overflow-wrap:anywhere]">{item.sublabel}</bdi>
 							</span>
 						</span>
 					</button>

@@ -41,7 +41,7 @@ describe("sendSlackNotification — unknown status emoji", () => {
 		try {
 			const channel = await createTestChannel(monitor.uptimeMonitorId, {
 				channelType: "slack",
-				webhookUrl: "https://hooks.slack.test/in",
+				webhookUrl: "https://hooks.slack.com/services/T/B/token",
 			});
 
 			await sendSlackNotification(channel, monitor, {
@@ -78,7 +78,7 @@ describe("dispatchTlsExpiryNotifications — discord channel", () => {
 		try {
 			const channel = await createTestChannel(monitor.uptimeMonitorId, {
 				channelType: "discord",
-				webhookUrl: "https://discord.test/webhooks/abc",
+				webhookUrl: "https://discord.com/api/webhooks/123/token",
 				notifyOnTlsExpiry: true,
 				tlsExpiryThresholdDays: 14,
 			});
@@ -113,7 +113,7 @@ describe("dispatchTlsExpiryNotifications — slack channel succeeds", () => {
 		try {
 			const channel = await createTestChannel(monitor.uptimeMonitorId, {
 				channelType: "slack",
-				webhookUrl: "https://hooks.slack.test/incoming",
+				webhookUrl: "https://hooks.slack.com/services/T/B/token",
 				notifyOnTlsExpiry: true,
 				tlsExpiryThresholdDays: 14,
 			});

@@ -1,3 +1,4 @@
+import { changeCachedMonitors } from "./optimistic-cache";
 /**
  * Bulk Uptime Actions Hook
  *
@@ -28,14 +29,20 @@ export function useBulkUptimeActions() {
 				failed: [] as { id: string; error: unknown }[],
 			};
 
-			for (const id of ids) {
-				try {
-					await UptimeService.deleteMonitor(id);
-					results.successful.push(id);
-				} catch (error) {
-					results.failed.push({ id, error });
-				}
-			}
+      const rollback = await changeCachedMonitors(queryClient, ids, () => null);
+      try {
+        const response = await UptimeService.deleteMonitorsBulk(ids);
+        for(const item of response) {
+          if(item.status === "deleted") {
+            results.successful.push(item.id);
+            queryClient.removeQueries({queryKey:uptimeKeys.monitors.detail(item.id)});
+          } else results.failed.push({id:item.id,error:new Error(item.reason)});
+        }
+        rollback(results.failed.map(item=>item.id));
+      } catch(error) {
+        rollback();
+        results.failed = ids.map(id=>({id,error}));
+      }
 
 			queryClient.invalidateQueries({
 				queryKey: uptimeKeys.monitors.lists(),
@@ -57,6 +64,7 @@ export function useBulkUptimeActions() {
 				failed: [] as { id: string; error: unknown }[],
 			};
 
+      const rollback = await changeCachedMonitors(queryClient, items.map(item=>item.uptimeMonitorId), row=>({...row,active}));
 			for (const item of items) {
 				try {
 					if (item.active !== active) {
@@ -67,6 +75,9 @@ export function useBulkUptimeActions() {
 					results.failed.push({ id: item.uptimeMonitorId, error });
 				}
 			}
+
+      rollback(results.failed.map(item=>item.id));
+      for (const id of results.successful) void queryClient.invalidateQueries({queryKey:uptimeKeys.monitors.detail(id)});
 
 			queryClient.invalidateQueries({
 				queryKey: uptimeKeys.monitors.lists(),

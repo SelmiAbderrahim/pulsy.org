@@ -263,7 +263,7 @@ describe("public.sharedLink", () => {
 		});
 		const link = await createTestShareLink(owner.id, [
 			monitor.uptimeMonitorId,
-		]);
+		], { showSharerName: true });
 
 		const resolved = await publicCaller().uptimeMonitor.public.sharedLink({
 			token: link.token,
@@ -276,12 +276,14 @@ describe("public.sharedLink", () => {
 		// public endpoint.
 		expect(Object.keys(resolved.monitors[0]!).sort()).toEqual([
 			"expectedStatus",
+			"expectedStatuses",
 			"failureThreshold",
 			"interval",
 			"method",
 			"name",
 			"tags",
 			"timeout",
+			"tlsMonitoringEnabled",
 			"uptimeMonitorId",
 			"url",
 		]);
@@ -557,4 +559,49 @@ describe("share.clone", () => {
 			}),
 		).rejects.toMatchObject({ code: "UNAUTHORIZED" });
 	});
+});
+
+describe("share secret disclosure boundary", () => {
+  it("rejects private URLs, removes newly unsafe legacy members and redacts repeated stored request values", async () => {
+    const owner = await createTestUser(), caller = authedCaller(owner);
+    const { httpConfigPatch } = await import("../../../services/uptime/http-config");
+    const { getTranslator } = await import("../../../lib/i18n");
+    const secret = "private-share-fixture";
+    const monitor = await createTestMonitor(owner.id, { url: "https://example.invalid/health", name: `Service ${secret}`, tags: [secret], ...httpConfigPatch({ requestConfig: { headers: [{ name: "X-Private", value: secret }] } }, "GET", getTranslator("en")) });
+    const preview = await caller.uptimeMonitor.share.preview({ uptimeMonitorIds: [monitor.uptimeMonitorId] });
+    expect(JSON.stringify(preview)).not.toContain(secret); expect(preview).toHaveLength(1);
+    expect(await db.select().from(uptimeShareLink).where(eq(uptimeShareLink.userId, owner.id))).toHaveLength(0);
+    const link = await caller.uptimeMonitor.share.create({ uptimeMonitorIds: [monitor.uptimeMonitorId], expiresInDays: 7 });
+    const resolved = await caller.uptimeMonitor.public.sharedLink({ token: link.token });
+    expect(JSON.stringify(resolved)).not.toContain(secret); expect(resolved.monitors).toHaveLength(1);
+    await db.update(uptimeMonitor).set({ url: `https://example.invalid/health?token=${secret}` }).where(eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId));
+    await expect(caller.uptimeMonitor.share.create({ uptimeMonitorIds: [monitor.uptimeMonitorId], expiresInDays: 7 })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    expect((await caller.uptimeMonitor.public.sharedLink({ token: link.token })).monitors).toHaveLength(0);
+    await expect(caller.uptimeMonitor.share.clone({ token: link.token, uptimeMonitorIds: [monitor.uptimeMonitorId] })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  });
+});
+
+it("reveals the sharer's name only when explicitly included in the link", async () => {
+  const monitor = await createTestMonitor(owner.id);
+  for (const showSharerName of [false, true]) {
+    const link = await ownerCaller().uptimeMonitor.share.create({ uptimeMonitorIds: [monitor.uptimeMonitorId], showSharerName });
+    const shared = await publicCaller().uptimeMonitor.public.sharedLink({ token: link.token });
+    expect(shared.sharedBy).toBe(showSharerName ? owner.name : null);
+  }
+});
+
+it("enforces the same live-link abuse ceiling atomically without counting expired links or other owners", async () => {
+  const { and, count, gt } = await import("drizzle-orm");
+  const { uptimeShareLink } = await import("@pulsy/db");
+  const monitor = await createTestMonitor(owner.id);
+  const expiresAt = new Date(Date.now() + 86400000).toISOString();
+  const links = await db.insert(uptimeShareLink).values(Array.from({ length: 200 }, (_, index) => ({ userId: owner.id, token: `bounded-fixture-link-${index}`, monitorIds: [monitor.uptimeMonitorId], expiresAt }))).returning();
+  await expect(ownerCaller().uptimeMonitor.share.create({ uptimeMonitorIds: [monitor.uptimeMonitorId] })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+  await db.update(uptimeShareLink).set({ expiresAt: new Date(Date.now() - 1000).toISOString() }).where(and(eq(uptimeShareLink.userId, owner.id), eq(uptimeShareLink.shareLinkId, links[0]!.shareLinkId)));
+  const results = await Promise.allSettled([1, 2].map(() => ownerCaller().uptimeMonitor.share.create({ uptimeMonitorIds: [monitor.uptimeMonitorId] })));
+  expect(results.filter(result => result.status === "fulfilled")).toHaveLength(1);
+  const [total] = await db.select({ value: count() }).from(uptimeShareLink).where(and(eq(uptimeShareLink.userId, owner.id), gt(uptimeShareLink.expiresAt, new Date().toISOString())));
+  expect(total!.value).toBe(200);
+  const foreign = await createTestMonitor(recipient.id);
+  expect(await recipientCaller().uptimeMonitor.share.create({ uptimeMonitorIds: [foreign.uptimeMonitorId] })).toMatchObject({ userId: recipient.id });
 });

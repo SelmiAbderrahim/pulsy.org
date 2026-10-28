@@ -4,8 +4,13 @@ import { tanstackRouter } from "@tanstack/router-plugin/vite";
 import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
+import { helpMarkdown } from "./help-markdown";
+import { privateMetadata } from "./private-metadata";
+
 export default defineConfig({
 	plugins: [
+		helpMarkdown(),
+		privateMetadata(),
 		tanstackRouter({ target: "react", autoCodeSplitting: true }),
 		react(),
 		tailwindcss(),

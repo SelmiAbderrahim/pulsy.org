@@ -7,6 +7,7 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { uptimeKeys } from "@/hooks/uptime/queryKeys";
+import { removeCachedRows } from "@/hooks/uptime/optimistic-cache";
 import { ApiKeyService } from "@/services/apiKeys/apiKeyService";
 import type { CreateApiKeyInput } from "@/types/apiKey";
 
@@ -40,8 +41,30 @@ export function useRevokeApiKey() {
 	return useMutation({
 		mutationFn: ({ apiKeyId }: { apiKeyId: string }) =>
 			ApiKeyService.revokeApiKey(apiKeyId),
-		onSuccess: () => {
+		onMutate: async ({ apiKeyId }) => {
+			const key = uptimeKeys.apiKeys.lists();
+			await queryClient.cancelQueries({ queryKey: key });
+			type Keys = Awaited<ReturnType<typeof ApiKeyService.listApiKeys>>;
+			const previous = queryClient.getQueryData<Keys>(key)?.find(row => row.apiKeyId === apiKeyId);
+			queryClient.setQueryData<Keys>(key, rows => rows?.map(row => row.apiKeyId === apiKeyId ? { ...row, revokedAt: new Date().toISOString() } : row));
+			return () => {
+				if (previous) queryClient.setQueryData<Keys>(key, rows => rows?.map(row => row.apiKeyId === apiKeyId ? previous : row));
+			};
+		},
+		onError: (_error, _input, rollback) => rollback?.(),
+		onSettled: () => {
 			queryClient.invalidateQueries({ queryKey: uptimeKeys.apiKeys.lists() });
 		},
 	});
+}
+
+/** Remove an already revoked key from the owner's list. */
+export function useRemoveApiKey() {
+  const client = useQueryClient();
+  return useMutation({
+    mutationFn: (apiKeyId: string) => ApiKeyService.removeApiKey(apiKeyId),
+    onMutate: apiKeyId => removeCachedRows<Awaited<ReturnType<typeof ApiKeyService.listApiKeys>>[number]>(client, uptimeKeys.apiKeys.lists(), row => row.apiKeyId === apiKeyId),
+    onError: (_error, _id, rollback) => rollback?.(),
+    onSettled: () => client.invalidateQueries({ queryKey: uptimeKeys.apiKeys.lists() }),
+  });
 }

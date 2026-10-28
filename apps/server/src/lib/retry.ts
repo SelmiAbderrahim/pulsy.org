@@ -20,6 +20,8 @@ export class NotificationSendError extends Error {
 }
 
 const TRANSIENT_SOCKET_CODES = new Set([
+	"ESMTP_CONNECT",
+	"ESMTP_TEMPORARY",
 	"ECONNRESET",
 	"ETIMEDOUT",
 	"ECONNREFUSED",
@@ -126,4 +128,40 @@ export async function withRetry<T>(
 			await sleep(delayMs);
 		}
 	}
+}
+
+const AMBIGUOUS_SOCKET_CODES = new Set([
+	"ECONNRESET",
+	"EPIPE",
+	"ETIMEDOUT",
+	// Undici's SocketError ("other side closed") — connection dropped mid-flight.
+	"UND_ERR_SOCKET",
+]);
+
+function hasAmbiguousSignature(err: Error): boolean {
+	if (err.name === "TimeoutError" || err.name === "AbortError") {
+		return true;
+	}
+	const code = (err as NodeJS.ErrnoException).code;
+	return typeof code === "string" && AMBIGUOUS_SOCKET_CODES.has(code);
+}
+
+/**
+ * Ambiguous ⇒ the request may have reached the provider and the message may
+ * already be delivered: timeouts/aborts and mid-flight socket drops (the
+ * request was written before the connection died). NOT ambiguous:
+ * ECONNREFUSED / EAI_AGAIN / plain TypeError("fetch failed") — no connection
+ * was ever established — and any `NotificationSendError` (the provider
+ * responded). Mail sends with uncertain outcomes are not automatically retried.
+ */
+export function isAmbiguousDeliveryError(err: unknown): boolean {
+	if (!(err instanceof Error) || err instanceof NotificationSendError) {
+		return false;
+	}
+	if (hasAmbiguousSignature(err)) {
+		return true;
+	}
+	// fetch wraps the real network error in TypeError("fetch failed").cause.
+	const cause = (err as { cause?: unknown }).cause;
+	return cause instanceof Error && hasAmbiguousSignature(cause);
 }

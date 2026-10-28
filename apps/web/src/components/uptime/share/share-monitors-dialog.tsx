@@ -1,3 +1,11 @@
+import { useQueryClient } from "@tanstack/react-query";
+import { isSessionClientActive } from "@/lib/session-query-client";
+import { FormField } from "@/components/ui/form-field";
+import { formatCount } from "@/lib/count-format";
+import { formatInterval } from "@/lib/uptime/format";
+import { useAccountTimezone } from "@/components/account-timezone";
+import { formatDate } from "@/lib/date-format";
+import { formatMilliseconds } from "@/lib/uptime/number-format";
 /**
  * Share monitors dialog.
  *
@@ -8,9 +16,9 @@
  */
 
 import { Check, Copy, Loader2 } from "lucide-react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { toast } from "sonner";
+import { toast } from "@/lib/toast";
 
 import { Button } from "@/components/ui/button";
 import {
@@ -23,6 +31,7 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Switch } from "@/components/ui/switch";
 import {
 	Select,
 	SelectContent,
@@ -31,11 +40,11 @@ import {
 	SelectValue,
 } from "@/components/ui/select";
 import { useCreateUptimeShareLink } from "@/hooks/uptime";
+import { UptimeService } from "@/services/uptime/uptimeService";
 import { extractErrorMessage } from "@/lib/api/extractErrorMessage";
-import type { CreatedUptimeShareLink, UptimeMonitor } from "@/types/uptime";
+import type { CreatedUptimeShareLink, SharedMonitorConfig, UptimeMonitor } from "@/types/uptime";
 
 const EXPIRY_OPTIONS = ["7", "30", "90"] as const;
-const MAX_LISTED_MONITORS = 5;
 
 interface ShareMonitorsDialogProps {
 	open: boolean;
@@ -51,13 +60,24 @@ export function ShareMonitorsDialog({
 	monitors,
 	onCreated,
 }: ShareMonitorsDialogProps) {
-	const { t } = useTranslation("uptimeMonitor");
+  const client = useQueryClient();
+	const { t, i18n } = useTranslation("uptimeMonitor");
+  const accountTimezone = useAccountTimezone();
 	const createMutation = useCreateUptimeShareLink();
+  const creating = useRef(false);
 	const [expiresInDays, setExpiresInDays] = useState<string>("30");
+	const [showSharerName, setShowSharerName] = useState(false);
 	const [createdLink, setCreatedLink] = useState<CreatedUptimeShareLink | null>(
 		null,
 	);
 	const [copied, setCopied] = useState(false);
+  const [preview, setPreview] = useState<SharedMonitorConfig[] | null>(null), [error, setError] = useState("");
+  const ids = JSON.stringify([...new Set(monitors.map(monitor => monitor.uptimeMonitorId))]);
+  useEffect(() => {
+    let current = true; setPreview(null); setError("");
+    if (open && monitors.length) void UptimeService.previewShareLink(JSON.parse(ids) as string[]).then(value => { if (current) setPreview(value); }).catch(caught => { if (current) setError(extractErrorMessage(caught, t("share.dialog.error"))); });
+    return () => { current = false; };
+  }, [open, ids, t]);
 
 	const shareUrl = createdLink
 		? `${window.location.origin}/share/${createdLink.token}`
@@ -66,23 +86,28 @@ export function ShareMonitorsDialog({
 	// The dialog has no trigger of its own (the parent controls `open`), so any
 	// onOpenChange callback from Radix is a close request.
 	const handleClose = () => {
+    if (creating.current) return;
 		if (createdLink) {
 			onCreated?.();
 		}
 		setCreatedLink(null);
 		setCopied(false);
 		setExpiresInDays("30");
+		setShowSharerName(false);
 		onOpenChange(false);
 	};
 
 	const handleCreate = async () => {
+    if (creating.current || !preview || error) return;
+    creating.current = true;
 		try {
 			const link = await createMutation.mutateAsync({
-				uptimeMonitorIds: monitors.map((m) => m.uptimeMonitorId),
+				uptimeMonitorIds: JSON.parse(ids) as string[],
 				expiresInDays: Number(expiresInDays) as 7 | 30 | 90,
+				showSharerName,
 			});
-			setCreatedLink(link);
-		} catch (error) {
+			if (!isSessionClientActive(client)) return; setCreatedLink(link);
+		} catch (error) { if (!isSessionClientActive(client)) return;
 			toast.error(
 				extractErrorMessage(
 					error,
@@ -90,20 +115,22 @@ export function ShareMonitorsDialog({
 				),
 			);
 		}
+    finally { creating.current = false; }
 	};
 
 	const handleCopy = async () => {
-		await navigator.clipboard.writeText(shareUrl);
-		setCopied(true);
-		toast.success(t("share.dialog.copied", "Link copied"));
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+      if (!isSessionClientActive(client)) return; toast.success(t("share.dialog.copied", "Link copied"));
+    } catch { if (!isSessionClientActive(client)) return; toast.error(t("detailUX.copyFailed")); }
 	};
 
-	const listedMonitors = monitors.slice(0, MAX_LISTED_MONITORS);
-	const overflowCount = monitors.length - listedMonitors.length;
+	const listedMonitors = preview ?? monitors;
 
 	return (
 		<Dialog open={open} onOpenChange={handleClose}>
-			<DialogContent className="sm:max-w-md">
+			<DialogContent className="sm:max-w-[var(--dialog-simple)]">
 				<DialogHeader>
 					<DialogTitle>
 						{t("share.dialog.title", "Share {{count}} monitors", {
@@ -124,7 +151,7 @@ export function ShareMonitorsDialog({
 							{t("share.dialog.linkLabel", "Share link")}
 						</Label>
 						<div className="flex items-center gap-2">
-							<Input id="share-link-url" value={shareUrl} readOnly />
+							<Input id="share-link-url" dir="ltr" value={shareUrl} readOnly />
 							<Button
 								variant="outline"
 								size="icon"
@@ -140,28 +167,14 @@ export function ShareMonitorsDialog({
 							</Button>
 						</div>
 						<p className="text-xs text-muted-foreground">
-							{t("share.dialog.expiresOn", "Expires {{date}}", {
-								date: new Date(createdLink.expiresAt).toLocaleDateString(),
+							{t("share.dialog.expiresOn", "Expires on {{date}}", {
+								date: formatDate(createdLink.expiresAt, i18n.language, accountTimezone),
 							})}
 						</p>
 					</div>
 				) : (
 					<div className="flex flex-col gap-4">
-						<ul className="flex flex-col gap-1 rounded-lg border bg-muted/30 p-3 text-sm">
-							{listedMonitors.map((monitor) => (
-								<li key={monitor.uptimeMonitorId} className="truncate">
-									{monitor.name}
-								</li>
-							))}
-							{overflowCount > 0 && (
-								<li className="text-muted-foreground">
-									{t("share.dialog.moreItems", "+{{count}} more", {
-										count: overflowCount,
-									})}
-								</li>
-							)}
-						</ul>
-						<div className="grid gap-2">
+						<FormField className="form-field">
 							<Label htmlFor="share-expiry">
 								{t("share.dialog.expiry", "Link expires in")}
 							</Label>
@@ -172,12 +185,35 @@ export function ShareMonitorsDialog({
 								<SelectContent>
 									{EXPIRY_OPTIONS.map((days) => (
 										<SelectItem key={days} value={days}>
-											{t(`share.dialog.expiry${days}`, `${days} days`)}
+											{formatCount((key, options) => t(key, { ...options, defaultValue: `${days} days` }), "common:format.day", Number(days), i18n.language)}
 										</SelectItem>
 									))}
 								</SelectContent>
 							</Select>
+							<p className="text-xs text-muted-foreground">
+								{t("share.dialog.expiryPreview", "The link will expire on {{date}}.", {
+									date: formatDate(new Date(Date.now() + Number(expiresInDays) * 86_400_000).toISOString(), i18n.language, accountTimezone),
+								})}
+							</p>
+						</FormField>
+						<div className="flex min-h-[44px] items-center justify-between gap-3">
+							<Label htmlFor="share-show-name" className="grid gap-1 font-normal">
+								<span className="text-sm font-medium">{t("share.dialog.showName", "Show my name to recipients")}</span>
+								<span className="text-xs text-muted-foreground">{t("share.dialog.showNameHint", "Off by default. Recipients otherwise see “A Pulsy user”.")}</span>
+							</Label>
+							<Switch id="share-show-name" checked={showSharerName} onCheckedChange={setShowSharerName} />
 						</div>
+            {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
+            {!preview && !error && monitors.length > 0 && <p role="status">{t("common:states.loading")}</p>}
+            <ul className="flex max-h-80 flex-col gap-3 overflow-y-auto rounded-lg border bg-muted/30 p-3 text-sm">
+							{listedMonitors.map((monitor) => (
+								<li key={monitor.uptimeMonitorId} className="break-words">
+                  <p className="font-medium" dir="auto">{monitor.name}</p>
+                  {preview && <><p dir="ltr" className="break-all">{monitor.method} {monitor.url}</p><p>{t("shareUX.settings", { status: monitor.expectedStatuses ?? monitor.expectedStatus, interval: formatInterval(monitor.interval, t, i18n.language), timeout: formatMilliseconds(monitor.timeout, i18n.language) ?? "—", failures: monitor.failureThreshold })}</p><p dir="auto">{monitor.tags?.join(", ")}</p></>}
+								</li>
+							))}
+						</ul>
+
 					</div>
 				)}
 
@@ -197,7 +233,7 @@ export function ShareMonitorsDialog({
 							</Button>
 							<Button
 								onClick={handleCreate}
-								disabled={createMutation.isPending || monitors.length === 0}
+								disabled={createMutation.isPending || monitors.length === 0 || !preview || !!error}
 								className="h-[44px]"
 							>
 								{createMutation.isPending && (

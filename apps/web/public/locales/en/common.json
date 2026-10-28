@@ -9,8 +9,41 @@
     "signOut": "Sign out",
     "language": "Language",
     "search": "Search",
-    "apiKeys": "API Keys",
-    "apiDocs": "API Docs"
+    "apiKeys": "API keys",
+    "apiDocs": "API docs",
+    "monitorGroup": "Monitor",
+    "configureGroup": "Configure",
+    "developGroup": "Develop",
+    "accountGroup": "Account",
+    "monitors": "Monitors",
+    "incidents": "Incidents",
+    "statusPages": "Status pages",
+    "notifications": "Notifications",
+    "templates": "Templates",
+    "portability": "Import & export",
+    "help": "Help",
+    "preferences": "Preferences",
+    "navigation": "Navigation",
+    "skip": "Skip to content",
+    "home": "Home",
+    "addMonitor": "Add monitor",
+    "filters": "Filters",
+    "searchViews": "Search saved views",
+    "leaveWithoutSaving": "Leave without saving?",
+    "discard": "You have unsaved changes. Close without saving? Cancel to keep editing.",
+    "dataTable": "Data table",
+    "formErrors": "Check the following fields.",
+    "requiredField": "This field is required.",
+    "invalidField": "Enter a valid value.",
+    "fieldRange": "Enter a value between {{min}} and {{max}}.",
+    "admin": "Administration",
+    "timezone": "Account timezone",
+    "timezoneHint": "Search for an IANA timezone. The account timezone is saved across your devices.",
+    "timezoneInvalid": "Choose a valid IANA timezone, for example Africa/Tunis.",
+    "shareLinks": "Share links",
+    "savedViews": "Saved views",
+    "scrollTable": "Scroll horizontally to see all columns.",
+    "leaveDescription": "Changes on this page are not saved yet. Leave to discard them, or cancel to keep editing."
   },
   "languages": {
     "en": "English",
@@ -31,12 +64,19 @@
     "save": "Save",
     "delete": "Delete",
     "close": "Close",
-    "retry": "Retry"
+    "retry": "Retry",
+    "confirm": "Confirm",
+    "discard": "Discard changes",
+    "confirmName": "Type {{name}} to confirm",
+    "details": "Details"
   },
   "states": {
-    "loading": "Loading...",
+    "loading": "Loading…",
     "error": "Something went wrong",
-    "notFound": "Not found"
+    "notFound": "Not found",
+    "unreachable": "Could not reach Pulsy. Check your connection and try again.",
+    "serverProblem": "Pulsy had a problem processing this request. Nothing was changed. Try again.",
+    "serverProblemReference": "Pulsy could not process this request. Reference: {{requestId}}."
   },
   "bulkSelection": {
     "toolbar": "Selection toolbar",
@@ -55,19 +95,106 @@
       "channel": "channel",
       "channels": "channels",
       "account": "account",
-      "accounts": "accounts"
+      "accounts": "accounts",
+      "monitor_one": "monitor",
+      "monitor_other": "monitors",
+      "server_one": "server",
+      "server_other": "servers",
+      "user_one": "user",
+      "user_other": "users",
+      "channel_one": "channel",
+      "channel_other": "channels",
+      "account_one": "account",
+      "account_other": "accounts"
     },
     "confirmDelete": {
       "title": "Delete {{count}} {{type}}?",
       "warning": "This action cannot be undone.",
       "itemsLabel": "You are about to delete:",
       "moreItems": "+{{count}} more",
-      "inputLabel": "Type \"DELETE {{count}}\" to confirm:",
+      "inputLabel": "Type \"{{confirmation}}\" to confirm:",
       "cancel": "Cancel",
-      "confirm": "Delete {{count}} {{type}}"
+      "confirm": "Delete {{count}} {{type}}",
+      "moreItems_one": "+{{count}} more",
+      "moreItems_other": "+{{count}} more",
+      "title_one": "Delete {{count}} {{type}}?",
+      "title_other": "Delete {{count}} {{type}}?",
+      "confirm_one": "Delete {{count}} {{type}}",
+      "confirm_other": "Delete {{count}} {{type}}",
+      "listLabel": "Items to delete ({{count}})"
     },
     "warnings": {
-      "someItemsHaveConstraints": "{{count}} {{type}} have constraints that may require manual cleanup."
-    }
+      "someItemsHaveConstraints": "{{count}} {{type}} have constraints that may require manual cleanup.",
+      "someItemsHaveConstraints_one": "{{count}} {{type}} has constraints that may require manual cleanup.",
+      "someItemsHaveConstraints_other": "{{count}} {{type}} have constraints that may require manual cleanup."
+    },
+    "selected_one": "{{count}} selected item",
+    "selected_other": "{{count}} selected items"
+  },
+  "session": {
+    "unavailable": "Unable to verify your session",
+    "retryDescription": "The session request failed. Retry to continue at this address. No sign-out was requested.",
+    "signInAgain": "Sign in to continue to your requested page. Your previous session may have expired or ended.",
+    "signOutFailed": "Could not sign out. Your session is still open; try again."
+  },
+  "notFound": {
+    "title": "Page not found",
+    "home": "Back to home",
+    "retry": "This page could not load. Retry, or return home.",
+    "dashboard": "Back to monitors",
+    "description": "This page may have moved, or the address may be incorrect.",
+    "help": "Go to help"
+  },
+  "resource": {
+    "loadError": "This information could not load. Retry to restore it.",
+    "staleAt": "Refresh failed. Showing information loaded at {{time}}."
+  },
+  "formValidation": {
+    "required": "This field is required.",
+    "email": "Enter a valid email address, for example alerts@example.com.",
+    "url": "Enter a complete URL, for example https://example.com/webhook.",
+    "summary": "Review all fields below.",
+    "filterDescription": "Adjust filters, then show the results."
+  },
+  "controls": {
+    "choose": "Choose an option",
+    "search": "Search options",
+    "noResults": "No matching options",
+    "chooseDate": "Choose a date",
+    "clearDate": "Clear date",
+    "chooseFile": "Choose a file or drop it here",
+    "removeFile": "Remove file",
+    "fileType": "Choose a supported file type ({{types}}).",
+    "nextMonth": "Next month",
+    "previousMonth": "Previous month"
+  },
+  "format": {
+    "monitor_one": "{{formattedCount}} monitor",
+    "monitor_other": "{{formattedCount}} monitors",
+    "component_one": "{{formattedCount}} component",
+    "component_other": "{{formattedCount}} components",
+    "check_one": "{{formattedCount}} recorded check",
+    "check_other": "{{formattedCount}} recorded checks",
+    "assertionRule_one": "{{formattedCount}} assertion rule",
+    "assertionRule_other": "{{formattedCount}} assertion rules",
+    "overrideChannel_one": "{{formattedCount}} override channel",
+    "overrideChannel_other": "{{formattedCount}} override channels",
+    "selectedItem_one": "{{formattedCount}} selected item",
+    "selectedItem_other": "{{formattedCount}} selected items",
+    "second_one": "{{formattedCount}} second",
+    "second_other": "{{formattedCount}} seconds",
+    "minute_one": "{{formattedCount}} minute",
+    "minute_other": "{{formattedCount}} minutes",
+    "hour_one": "{{formattedCount}} hour",
+    "hour_other": "{{formattedCount}} hours",
+    "day_one": "{{formattedCount}} day",
+    "day_other": "{{formattedCount}} days"
+  },
+  "preferences": {
+    "accountMenu": "Account menu",
+    "description": "Choose your language and the timezone used for dates and times.",
+    "languageHint": "Language is saved in this browser.",
+    "useBrowserTimezone": "Use browser timezone",
+    "saveError": "Could not save preferences. Your changes are still here."
   }
 }

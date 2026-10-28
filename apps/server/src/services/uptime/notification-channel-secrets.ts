@@ -6,6 +6,23 @@ import {
 } from "@pulsy/db";
 import { and, eq } from "drizzle-orm";
 import { decrypt, encrypt } from "../../lib/crypto";
+import { randomBytes } from "node:crypto";
+
+export const newWebhookSecret = () => randomBytes(32).toString("hex");
+
+/** Existing OSS channels receive a signing key under their owned row lock. */
+export async function ensureWebhookSecret(channel: UptimeNotificationChannelRow): Promise<string> {
+	if (channel.signingSecretCipher) return decrypt(channel.signingSecretCipher);
+	return db.transaction(async tx => {
+		const scope = and(eq(uptimeNotificationChannel.channelId, channel.channelId), eq(uptimeNotificationChannel.userId, channel.userId));
+		const [current] = await tx.select().from(uptimeNotificationChannel).where(scope).for("update");
+		if (!current || current.channelType !== "webhook") throw new Error("Webhook channel unavailable");
+		if (current.signingSecretCipher) return decrypt(current.signingSecretCipher);
+		const secret = newWebhookSecret();
+		await tx.update(uptimeNotificationChannel).set({ signingSecretCipher: encrypt(secret) }).where(scope);
+		return secret;
+	});
+}
 
 /**
  * Stored secret format for notification channels.
@@ -24,7 +41,7 @@ type SecretFields = Pick<
 
 export type MaskedNotificationChannel = Omit<
 	UptimeNotificationChannelRow,
-	"webhookUrl" | "webhookHeaders" | "secretVersion"
+	"webhookUrl" | "webhookHeaders" | "secretVersion" | "signingSecretCipher" | "userId"
 > & {
 	hasWebhookUrl: boolean;
 	webhookUrlMasked: string | null;
@@ -140,7 +157,9 @@ export function maskNotificationChannel(
 	}
 
 	const headerNames = Object.keys(channel.webhookHeaders ?? {}).sort();
-	const { webhookUrl, webhookHeaders, secretVersion, ...safe } = channel;
+	const { webhookUrl, webhookHeaders, secretVersion, signingSecretCipher, userId, ...safe } = channel;
+	void userId;
+	void signingSecretCipher;
 	void webhookUrl;
 	void webhookHeaders;
 	void secretVersion;
@@ -196,4 +215,49 @@ export async function migrateLegacyNotificationChannelSecrets(
 
 		return migrated;
 	});
+}
+
+const PUBLIC_PATH_SEGMENTS = new Set(["api", "webhooks", "services"]);
+
+/** Never persist or log provider-echoed configured credentials. */
+export function safeChannelError(error: unknown, stored: UptimeNotificationChannelRow, options: { decrypted?: boolean } = {}): string {
+  const channel = options.decrypted ? stored : decryptNotificationChannelSecrets(stored);
+  const signingSecret = channel.signingSecretCipher ? decrypt(channel.signingSecretCipher) : null;
+  let message = error instanceof Error ? error.message : String(error);
+  const values = [signingSecret, channel.webhookUrl, ...Object.values(channel.webhookHeaders ?? {})].filter((value): value is string => Boolean(value));
+  const sensitive = new Set(values.flatMap(value => [value, ...value.split(/[\s/:?&#=]+/).filter(part => part.length >= 6)]));
+  // Providers can echo just a path token or a decoded query value. These are
+  // credentials even when shorter than the generic message-fragment threshold.
+  if (channel.webhookUrl) {
+    try {
+      const url = new URL(channel.webhookUrl);
+      const privatePath = url.pathname.split("/").filter(value => !PUBLIC_PATH_SEGMENTS.has(value));
+      for (const value of [...privatePath, ...url.searchParams.values(), url.username, url.password]) {
+        if (!value) continue;
+        sensitive.add(value);
+        try { sensitive.add(decodeURIComponent(value)); } catch { /* Keep the encoded value for malformed escapes. */ }
+      }
+    } catch { /* Non-URL destinations are covered by the full-value redaction. */ }
+  }
+  for (const value of [...sensitive].sort((a, b) => b.length - a.length)) {
+    for (const form of new Set([value, encodeURIComponent(value)])) {
+      // Short tokens only match whole tokens, so "in" never redacts inside "string".
+      message = form.length >= 6
+        ? message.split(form).join("[redacted]")
+        : message.replace(new RegExp(`(?<![A-Za-z0-9])${form.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?![A-Za-z0-9])`, "g"), "[redacted]");
+    }
+  }
+  return message.replace(/https?:\/\/[^\s<>"']+/g, "[destination]").slice(0, 500);
+}
+
+export function channelDisplayTarget(channel: Pick<UptimeNotificationChannelRow, "channelType" | "webhookUrl" | "recipientAddresses">): string | null {
+  if (channel.channelType === "email") return channel.recipientAddresses?.map(address => `***@${address.split("@").at(-1)}`).join(", ") ?? null;
+  if (!channel.webhookUrl) return null;
+  if (channel.channelType === "telegram") return "api.telegram.org/…***";
+  try {
+    const host = new URL(channel.webhookUrl).hostname;
+    if (channel.channelType === "slack") return host === "hooks.slack.com" ? `${host}/…***` : "••••";
+    if (channel.channelType === "discord") return ["discord.com", "discordapp.com"].includes(host) ? `${host}/…***` : "••••";
+    return host;
+  } catch { return "••••"; }
 }

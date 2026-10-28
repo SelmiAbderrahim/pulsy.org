@@ -131,12 +131,8 @@ describe("useUpdateStatusPage", () => {
     await act(async () => {
       await result.current.mutateAsync({ statusPageId: "p1", title: "t" });
     });
-    expect(spy).toHaveBeenCalledWith({
-      queryKey: uptimeKeys.statusPages.lists(),
-    });
-    expect(spy).toHaveBeenCalledWith({
-      queryKey: uptimeKeys.statusPages.detail("p1"),
-    });
+    // The collection prefix includes both list and detail observers.
+    expect(spy).toHaveBeenCalledWith({ queryKey: uptimeKeys.statusPages.all() });
   });
 });
 

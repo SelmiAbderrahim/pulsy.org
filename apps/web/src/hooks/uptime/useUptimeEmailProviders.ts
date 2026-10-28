@@ -89,8 +89,13 @@ export function useDeleteUptimeEmailProvider() {
  * Hook to test an email provider's configuration by sending a test email
  */
 export function useTestUptimeEmailProvider() {
+  const queryClient = useQueryClient();
   return useMutation({
     mutationFn: (emailProviderId: string) =>
       UptimeService.testEmailProvider(emailProviderId),
+    onSettled: () => {
+      queryClient.invalidateQueries({ queryKey: uptimeKeys.emailProviders.all() });
+      queryClient.invalidateQueries({ queryKey: uptimeKeys.statusPages.all() });
+    },
   });
 }

@@ -6,7 +6,29 @@
   "license": "AGPL-3.0-or-later",
   "exports": {
     ".": "./src/index.ts",
-    "./schema": "./src/schema/index.ts"
+    "./schema": "./src/schema/index.ts",
+    "./timezone": "./src/schema/timezone.ts",
+    "./monitor-url": "./src/schema/monitor-url.ts",
+    "./monitor-defaults": "./src/schema/monitor-defaults.ts",
+    "./http-status-rule": "./src/schema/http-status-rule.ts",
+    "./percent-format": "./src/schema/percent-format.ts",
+    "./monitor-counters": "./src/schema/monitor-counters.ts",
+    "./status-math": "./src/schema/status-math.ts",
+    "./status-page-slug": "./src/schema/status-page-slug.ts",
+    "./check-error": "./src/schema/check-error.ts",
+    "./api-key-expiry": "./src/schema/api-key-expiry.ts",
+    "./json-diagnostic": "./src/schema/json-diagnostic.ts",
+    "./monitor-manifest": "./src/schema/monitor-manifest.ts",
+    "./monitor-view": "./src/schema/monitor-view.ts",
+    "./monitor-template": "./src/schema/monitor-template.ts",
+    "./validation-http": "./src/schema/validation-http.ts",
+    "./validation-latency": "./src/schema/validation-latency.ts",
+    "./validation-network": "./src/schema/validation-network.ts",
+    "./validation-maintenance": "./src/schema/validation-maintenance.ts",
+    "./validation-reliability": "./src/schema/validation-reliability.ts",
+    "./validation-server-interval": "./src/schema/validation-server-interval.ts",
+    "./validation-server": "./src/schema/validation-server.ts",
+    "./validation-status-communication": "./src/schema/validation-status-communication.ts"
   },
   "main": "./src/index.ts",
   "types": "./src/index.ts",
@@ -21,16 +43,16 @@
   },
   "dependencies": {
     "drizzle-orm": "0.45.2",
-    "nanoid": "5.1.11",
+    "nanoid": "5.1.16",
     "postgres": "3.4.9",
-    "zod": "4.4.3"
+    "zod": "4.6.6"
   },
   "devDependencies": {
     "@testcontainers/postgresql": "12.0.4",
     "@types/node": "24.13.3",
-    "@vitest/coverage-v8": "4.1.10",
+    "@vitest/coverage-v8": "4.1.12",
     "drizzle-kit": "0.31.10",
     "typescript": "5.9.3",
-    "vitest": "4.1.10"
+    "vitest": "4.1.12"
   }
 }

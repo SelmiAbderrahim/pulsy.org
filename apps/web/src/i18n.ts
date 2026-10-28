@@ -12,6 +12,7 @@ import i18n from "i18next";
 import HttpBackend from "i18next-http-backend";
 import LanguageDetector from "i18next-browser-languagedetector";
 import { initReactI18next } from "react-i18next";
+import { numberFormatting, numberInterpolation } from "@/lib/number-interpolation";
 
 import {
 	RTL_LANGUAGES,
@@ -38,18 +39,18 @@ function applyDirection(lng: string): void {
 	document.documentElement.lang = base;
 }
 
-void i18n
+export const i18nReady = i18n
+	.use(numberFormatting)
 	.use(HttpBackend)
 	.use(LanguageDetector)
 	.use(initReactI18next)
 	.init({
+		lng: typeof document === "undefined" ? undefined : document.documentElement.dataset.initialLocale,
 		fallbackLng: "en",
 		supportedLngs: SUPPORTED_LANGUAGES as unknown as string[],
 		ns: NAMESPACES as unknown as string[],
 		defaultNS: "common",
-		interpolation: {
-			escapeValue: false,
-		},
+		interpolation: numberInterpolation,
 		backend: {
 			loadPath: "/locales/{{lng}}/{{ns}}.json",
 		},
@@ -61,11 +62,11 @@ void i18n
 			caches: ["localStorage"],
 		},
 		react: {
-			useSuspense: false,
+			useSuspense: true,
 		},
 	});
 
-applyDirection(i18n.resolvedLanguage ?? "en");
+applyDirection((typeof document !== "undefined" && document.documentElement.dataset.initialLocale) || i18n.language || "en");
 i18n.on("languageChanged", applyDirection);
 
 export default i18n;

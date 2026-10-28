@@ -1,4 +1,8 @@
-import { render, screen, waitFor } from "@testing-library/react";
+const preview = vi.hoisted(() => vi.fn());
+vi.mock("@/services/uptime/uptimeService", () => ({ UptimeService: { previewShareLink: preview } }));
+import { renderWithQueryClient as render } from "@/test/query-wrapper";
+vi.mock("@/components/account-timezone", () => ({ useAccountTimezone: () => "UTC" }));
+import { screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reactI18nextMock } from "@/test/i18n-mock";
@@ -19,7 +23,7 @@ vi.mock("@/hooks/uptime", () => ({
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
-vi.mock("sonner", () => ({
+vi.mock("@/lib/toast", () => ({
 	toast: {
 		success: (m: unknown) => toastSuccess(m),
 		error: (m: unknown) => toastError(m),
@@ -42,6 +46,7 @@ const clipboardWriteText = vi.fn();
 
 beforeEach(() => {
 	vi.clearAllMocks();
+  preview.mockImplementation(async (ids: string[]) => ids.map(id => ({ uptimeMonitorId: id, name: id, url: `https://${id}.com`, method: "GET", interval: 300, timeout: 10000, expectedStatus: 200, failureThreshold: 3, tags: [] })));
 	createState.isPending = false;
 	clipboardWriteText.mockResolvedValue(undefined);
 	Object.defineProperty(navigator, "clipboard", {
@@ -64,7 +69,7 @@ describe("ShareMonitorsDialog before creation", () => {
 		expect(screen.getByText("Share 2 monitors")).toBeInTheDocument();
 	});
 
-	it("collapses more than five monitors into an overflow row", () => {
+	it("keeps all selected monitors available for review", () => {
 		const monitors = Array.from({ length: 7 }, (_, i) =>
 			monitor(`m${i}`, `Monitor ${i}`),
 		);
@@ -72,8 +77,8 @@ describe("ShareMonitorsDialog before creation", () => {
 			<ShareMonitorsDialog open onOpenChange={vi.fn()} monitors={monitors} />,
 		);
 		expect(screen.getByText("Monitor 4")).toBeInTheDocument();
-		expect(screen.queryByText("Monitor 5")).not.toBeInTheDocument();
-		expect(screen.getByText("+2 more")).toBeInTheDocument();
+		expect(screen.getByText("Monitor 5")).toBeInTheDocument();
+    expect(screen.getByText("Monitor 6")).toBeInTheDocument();
 	});
 
 	it("disables the create button with no monitors", () => {
@@ -122,11 +127,13 @@ describe("ShareMonitorsDialog creation flow", () => {
 				monitors={[monitor("m1", "Alpha")]}
 			/>,
 		);
-		await userEvent.click(screen.getByRole("button", { name: "Create link" }));
+		await waitFor(() => expect(screen.getByRole("button", { name: "Create link" })).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", { name: "Create link" }));
 
 		expect(createMutateAsync).toHaveBeenCalledWith({
 			uptimeMonitorIds: ["m1"],
 			expiresInDays: 30,
+      showSharerName: false,
 		});
 		const input = await screen.findByLabelText("Share link");
 		expect((input as HTMLInputElement).value).toBe(
@@ -146,11 +153,13 @@ describe("ShareMonitorsDialog creation flow", () => {
 		);
 		await userEvent.click(screen.getByRole("combobox"));
 		await userEvent.click(screen.getByRole("option", { name: "7 days" }));
-		await userEvent.click(screen.getByRole("button", { name: "Create link" }));
+		await waitFor(() => expect(screen.getByRole("button", { name: "Create link" })).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", { name: "Create link" }));
 
 		expect(createMutateAsync).toHaveBeenCalledWith({
 			uptimeMonitorIds: ["m1"],
 			expiresInDays: 7,
+      showSharerName: false,
 		});
 	});
 
@@ -163,7 +172,8 @@ describe("ShareMonitorsDialog creation flow", () => {
 				monitors={[monitor("m1", "Alpha")]}
 			/>,
 		);
-		await userEvent.click(screen.getByRole("button", { name: "Create link" }));
+		await waitFor(() => expect(screen.getByRole("button", { name: "Create link" })).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", { name: "Create link" }));
 		await userEvent.click(screen.getByRole("button", { name: "Copy link" }));
 
 		expect(clipboardWriteText).toHaveBeenCalledWith(
@@ -184,7 +194,8 @@ describe("ShareMonitorsDialog creation flow", () => {
 				onCreated={onCreated}
 			/>,
 		);
-		await userEvent.click(screen.getByRole("button", { name: "Create link" }));
+		await waitFor(() => expect(screen.getByRole("button", { name: "Create link" })).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", { name: "Create link" }));
 		await userEvent.click(screen.getByRole("button", { name: "Done" }));
 
 		expect(onCreated).toHaveBeenCalledTimes(1);
@@ -201,7 +212,8 @@ describe("ShareMonitorsDialog creation flow", () => {
 				monitors={[monitor("m1", "Alpha")]}
 			/>,
 		);
-		await userEvent.click(screen.getByRole("button", { name: "Create link" }));
+		await waitFor(() => expect(screen.getByRole("button", { name: "Create link" })).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", { name: "Create link" }));
 		await userEvent.click(screen.getByRole("button", { name: "Done" }));
 		expect(onOpenChange).toHaveBeenCalledWith(false);
 	});
@@ -215,7 +227,8 @@ describe("ShareMonitorsDialog creation flow", () => {
 				monitors={[monitor("m1", "Alpha")]}
 			/>,
 		);
-		await userEvent.click(screen.getByRole("button", { name: "Create link" }));
+		await waitFor(() => expect(screen.getByRole("button", { name: "Create link" })).toBeEnabled());
+    await userEvent.click(screen.getByRole("button", { name: "Create link" }));
 		await waitFor(() => expect(toastError).toHaveBeenCalled());
 		expect(screen.queryByLabelText("Share link")).not.toBeInTheDocument();
 	});

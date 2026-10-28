@@ -12,6 +12,7 @@ import {
 	decryptNotificationChannelSecrets,
 	encryptNotificationChannelSecrets,
 	maskNotificationChannel,
+	safeChannelError,
 	migrateLegacyNotificationChannelSecrets,
 } from "../notification-channel-secrets";
 
@@ -217,4 +218,27 @@ describe("legacy notification-channel backfill", () => {
 			webhookHeaders: good.webhookHeaders,
 		});
 	});
+});
+
+
+describe("provider-error redaction on OSS ciphertext", () => {
+  it("removes full targets, decoded query values and short path tokens", async () => {
+    const owner = await createTestUser();
+    const monitor = await createTestMonitor(owner.id);
+    const channel = await createTestChannel(monitor.uptimeMonitorId, {
+      ...encryptNotificationChannelSecrets("https://hooks.example.invalid/api/a+b?key=xy", { Authorization: "Bearer private-auth" }),
+    });
+    const message = safeChannelError(new Error("Rejected a+b and xy: Bearer private-auth"), channel);
+    expect(message).toBe("Rejected [redacted] and [redacted]: [redacted]");
+    expect(maskNotificationChannel(channel)).not.toHaveProperty("signingSecretCipher");
+  });
+});
+
+it("redacts query secrets that match public vendor route words", async () => {
+  const owner = await createTestUser();
+  const monitor = await createTestMonitor(owner.id);
+  const channel = await createTestChannel(monitor.uptimeMonitorId, {
+    ...encryptNotificationChannelSecrets("https://hooks.example.invalid/api/token?key=api", null),
+  });
+  expect(safeChannelError(new Error("Rejected api"), channel)).toBe("Rejected [redacted]");
 });

@@ -8,36 +8,26 @@
  */
 
 import { useTranslation } from "react-i18next";
-import { Activity, CheckCircle } from "lucide-react";
+import { Activity } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 interface MonitorEmptyStateProps {
 	onCreateMonitor: () => void;
+	hideAction?: boolean;
 }
 
-export function MonitorEmptyState({ onCreateMonitor }: MonitorEmptyStateProps) {
+export function MonitorEmptyState({ onCreateMonitor, hideAction = false }: MonitorEmptyStateProps) {
 	const { t } = useTranslation("uptimeMonitor");
 
-	const features = [
-		t("emptyState.features.healthChecks", "HTTP & HTTPS health checks"),
-		t("emptyState.features.intervals", "Configurable check intervals"),
-		t(
-			"emptyState.features.alerts",
-			"Email, Slack, Discord & webhook alerts",
-		),
-		t(
-			"emptyState.features.statusPage",
-			"Public status page for your customers",
-		),
-	];
+	const steps = [t("emptyState.steps.monitor"), t("emptyState.steps.alerts"), t("emptyState.steps.status")];
 
 	return (
 		<div className="flex flex-col items-center justify-center rounded-lg border border-dashed p-8 sm:p-12 text-center">
 			<Activity className="h-12 w-12 text-muted-foreground mb-4" />
 
-			<h3 className="text-lg font-semibold mb-2">
-				{t("emptyState.title", "Start Monitoring Your Services")}
-			</h3>
+			<h2 className="text-lg font-semibold mb-2">
+				{t("emptyState.title", "Start monitoring your services")}
+			</h2>
 
 			<p className="text-sm text-muted-foreground max-w-md mb-6">
 				{t(
@@ -46,18 +36,13 @@ export function MonitorEmptyState({ onCreateMonitor }: MonitorEmptyStateProps) {
 				)}
 			</p>
 
-			<ul className="text-sm text-muted-foreground space-y-2 mb-8 text-start">
-				{features.map((feature) => (
-					<li key={feature} className="flex items-center gap-2">
-						<CheckCircle className="h-4 w-4 text-success shrink-0" />
-						<span>{feature}</span>
-					</li>
-				))}
-			</ul>
+			<ol className="max-w-md list-decimal space-y-3 ps-5 text-start text-sm text-muted-foreground">
+				{steps.map(step => <li key={step}>{step}</li>)}
+			</ol>
 
-			<Button onClick={onCreateMonitor} className="h-[44px] min-w-[44px]">
-				{t("emptyState.cta", "Add Your First Monitor")}
-			</Button>
+			{!hideAction && <Button onClick={onCreateMonitor} className="mt-6 h-[44px] min-w-[44px]">
+				{t("emptyState.cta", "Add your first monitor")}
+			</Button>}
 		</div>
 	);
 }

@@ -63,6 +63,9 @@ export interface BulkDeleteConfirmDialogProps<T> {
 	itemType: "server" | "monitor" | "channel" | "account" | "user";
 	getItemName: (item: T) => string;
 	getItemWarning?: (item: T) => string | null;
+ getItemId?: (item: T) => string;
+ constraints?: Array<{ key: string; message: string }>;
+ description?: string;
 	onConfirm: () => void | Promise<void>;
 	isDeleting?: boolean;
 }

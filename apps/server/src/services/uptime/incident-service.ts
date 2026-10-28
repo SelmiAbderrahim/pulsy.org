@@ -8,8 +8,10 @@ export const createIncident = async (
 	monitorId: string,
 	cause?: string | null,
 	dbc: DbExecutor = db,
+  severity: "critical" | "warning" | "informational" = "critical",
+  observedAt?: string,
 ): Promise<UptimeIncident> => {
-	const now = new Date().toISOString();
+	const now = observedAt ?? new Date().toISOString();
 
 	const [incident] = await dbc
 		.insert(uptimeIncident)
@@ -18,6 +20,7 @@ export const createIncident = async (
 			status: "ongoing",
 			startedAt: now,
 			cause: cause ?? null,
+      severity,
 		})
 		.returning();
 
@@ -35,6 +38,7 @@ export const createIncident = async (
 export const resolveIncident = async (
 	monitorId: string,
 	dbc: DbExecutor = db,
+  observedAt?: string,
 ): Promise<UptimeIncident | null> => {
 	const ongoing = await dbc.query.uptimeIncident.findFirst({
 		where: and(
@@ -47,11 +51,11 @@ export const resolveIncident = async (
 		return null;
 	}
 
-	const now = new Date();
+	const now = observedAt ? new Date(observedAt) : new Date();
 	const startedAt = new Date(ongoing.startedAt);
-	const durationSeconds = Math.round(
+	const durationSeconds = Math.max(0, Math.round(
 		(now.getTime() - startedAt.getTime()) / 1000,
-	);
+	));
 
 	const [resolved] = await dbc
 		.update(uptimeIncident)
@@ -60,7 +64,7 @@ export const resolveIncident = async (
 			resolvedAt: now.toISOString(),
 			durationSeconds,
 		})
-		.where(eq(uptimeIncident.incidentId, ongoing.incidentId))
+		.where(and(eq(uptimeIncident.incidentId, ongoing.incidentId), eq(uptimeIncident.uptimeMonitorId, monitorId), eq(uptimeIncident.status, "ongoing")))
 		.returning();
 
 	/* v8 ignore next -- UPDATE ... RETURNING on the found row always yields it */

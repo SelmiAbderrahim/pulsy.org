@@ -1,16 +1,27 @@
+// HTTP failures store classified codes and no fabricated response timing.
+import { matchesExpectedStatus } from "@pulsy/db/http-status-rule";
+import { performAdvancedHttpCheck } from "./http-request";
+import type { HttpAssertionOutcome } from "./http-assertions";
 import { safeFetch } from "../../lib/ssrf";
+import { classifyCheckError, classifyUnexpectedHttpStatus } from "./check-error";
 import type { UptimeMonitor } from "./monitor-service";
 
 export interface HttpCheckResult {
 	status: "up" | "down" | "degraded";
 	httpStatus: number | null;
-	responseTime: number;
+	/** Milliseconds until a response arrived; null when the check failed without one. */
+	responseTime: number | null;
+	/** A `CheckErrorCode` for classified failures; latency causes stay descriptive text. */
 	errorMessage?: string;
+	assertionOutcomes?: HttpAssertionOutcome[];
 }
 
 export const performHttpCheck = async (
 	monitor: UptimeMonitor,
 ): Promise<HttpCheckResult> => {
+	if (monitor.requestCipher || monitor.httpAssertions?.length || (monitor.redirectPolicy && monitor.redirectPolicy !== "follow")) {
+		return performAdvancedHttpCheck(monitor);
+	}
 	const controller = new AbortController();
 	const timeoutId = setTimeout(() => controller.abort(), monitor.timeout);
 
@@ -27,100 +38,31 @@ export const performHttpCheck = async (
 		};
 
 		const response = await safeFetch(monitor.url, requestInit);
-		const endTime = performance.now();
-		const responseTime = Math.round(endTime - startTime);
+		const responseTime = Math.round(performance.now() - startTime);
 
 		clearTimeout(timeoutId);
+		// Only the status line matters here; release the socket instead of leaving
+		// an unread body (and its connection) open until GC.
+		void response.body?.cancel().catch(() => undefined);
 
-		let redirectCount = 0;
-		if (response.redirected) {
-			redirectCount = 1;
-		}
-
-		/* v8 ignore next 8 -- defensive: fetch follows ≤ maxRedirects, so redirectCount never exceeds 1 */
-		if (redirectCount > 5) {
-			return {
-				status: "down",
-				httpStatus: response.status,
-				responseTime,
-				errorMessage: "Too many redirects (exceeded 5)",
-			};
-		}
-
-		if (response.status === monitor.expectedStatus) {
-			return {
-				status: "up",
-				httpStatus: response.status,
-				responseTime,
-			};
-		}
-
-		if (response.status >= 400) {
-			return {
-				status: "down",
-				httpStatus: response.status,
-				responseTime,
-				errorMessage: `Unexpected status: ${response.status} (expected ${monitor.expectedStatus})`,
-			};
+		if (matchesExpectedStatus(response.status, monitor)) {
+			return { status: "up", httpStatus: response.status, responseTime };
 		}
 
 		return {
-			status: "degraded",
+			status: classifyUnexpectedHttpStatus(response.status),
 			httpStatus: response.status,
 			responseTime,
-			errorMessage: `Unexpected status: ${response.status} (expected ${monitor.expectedStatus})`,
+			errorMessage: "unexpected_status",
 		};
 	} catch (error: unknown) {
-		const endTime = performance.now();
-		const responseTime = Math.round(endTime - startTime);
-
 		clearTimeout(timeoutId);
-
-		const errorMessage = getErrorMessage(error);
-
+		// Time-to-failure is not a response time: never store it as one.
 		return {
 			status: "down",
 			httpStatus: null,
-			responseTime,
-			errorMessage,
+			responseTime: null,
+			errorMessage: classifyCheckError(error, controller.signal.aborted),
 		};
 	}
 };
-
-function getErrorMessage(error: unknown): string {
-	if (error instanceof DOMException && error.name === "AbortError") {
-		return "Request timed out";
-	}
-
-	if (error instanceof TypeError) {
-		const message = error.message.toLowerCase();
-
-		if (message.includes("fetch failed") || message.includes("econnrefused")) {
-			return "Connection refused";
-		}
-
-		if (message.includes("enotfound") || message.includes("getaddrinfo")) {
-			return "DNS resolution failed";
-		}
-
-		if (message.includes("econnreset")) {
-			return "Connection reset by server";
-		}
-
-		if (message.includes("etimedout")) {
-			return "Connection timed out";
-		}
-
-		if (message.includes("cert") || message.includes("ssl") || message.includes("tls")) {
-			return "TLS/SSL certificate error";
-		}
-
-		return `Network error: ${error.message}`;
-	}
-
-	if (error instanceof Error) {
-		return error.message;
-	}
-
-	return "Unknown error occurred";
-}

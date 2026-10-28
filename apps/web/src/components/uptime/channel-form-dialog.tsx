@@ -1,6 +1,17 @@
+import { isSessionClientActive } from "@/lib/session-query-client";
+import { useDraftComparison } from "@/hooks/use-draft-comparison";
+import { FormField } from "@/components/ui/form-field";
+import { EmailProviderDialog } from "./monitor-detail/tabs/email-providers-section";
+import { UptimeService } from "@/services/uptime/uptimeService";
+import { useQueryClient } from "@tanstack/react-query";
+import { uptimeKeys } from "@/hooks/uptime/queryKeys";
+import { FormErrorSummary, useFormValidation, type FormIssue } from "@/components/ui/form-validation";
+import { parseRecipients } from "@/lib/uptime/recipients";
+import { useId, useState, useEffect } from "react";
 import { Loader2 } from "lucide-react";
 import { useTranslation } from "react-i18next";
 
+import { extractErrorMessage } from "@/lib/api/extractErrorMessage";
 import { Button } from "@/components/ui/button";
 import {
 	Dialog,
@@ -68,8 +79,14 @@ export function parseWebhookHeaders(
 
 export interface ChannelFormDialogProps {
 	open: boolean;
+ error?: unknown;
+ supportsTls?: boolean;
 	onOpenChange: (open: boolean) => void;
 	isEdit?: boolean;
+ storedChannelType?: UptimeNotificationChannelType;
+ hasStoredTarget?: boolean;
+ storedTargetLabel?: string | null;
+ storedHeaderNames?: string[];
 	channelType: UptimeNotificationChannelType;
 	setChannelType: (type: UptimeNotificationChannelType) => void;
 	emailProviders: UptimeEmailProvider[];
@@ -79,13 +96,11 @@ export interface ChannelFormDialogProps {
 	setWebhookUrl: (url: string) => void;
 	webhookHeaders: string;
 	setWebhookHeaders: (headers: string) => void;
-	hasStoredWebhookUrl?: boolean;
-	webhookUrlMasked?: string | null;
-	hasStoredWebhookHeaders?: boolean;
-	webhookHeaderNames?: string[];
 	recipients: string;
 	setRecipients: (r: string) => void;
 	notifyOnDown: boolean;
+	notifyOnDegraded: boolean;
+	setNotifyOnDegraded: (v: boolean) => void;
 	setNotifyOnDown: (v: boolean) => void;
 	notifyOnRecovery: boolean;
 	setNotifyOnRecovery: (v: boolean) => void;
@@ -114,13 +129,11 @@ export function ChannelFormDialog({
 	setWebhookUrl,
 	webhookHeaders,
 	setWebhookHeaders,
-	hasStoredWebhookUrl = false,
-	webhookUrlMasked = null,
-	hasStoredWebhookHeaders = false,
-	webhookHeaderNames = [],
 	recipients,
 	setRecipients,
 	notifyOnDown,
+	notifyOnDegraded,
+	setNotifyOnDegraded,
 	setNotifyOnDown,
 	notifyOnRecovery,
 	setNotifyOnRecovery,
@@ -130,40 +143,60 @@ export function ChannelFormDialog({
 	setTlsExpiryThresholdDays,
 	onSubmit,
 	isPending,
+ storedChannelType, hasStoredTarget, storedTargetLabel, storedHeaderNames = [], supportsTls = true, error,
 }: ChannelFormDialogProps) {
 	const { t } = useTranslation("uptimeMonitor");
-	const targetPlaceholder =
-		isEdit && hasStoredWebhookUrl
-			? (webhookUrlMasked ?? "••••••••")
-			: channelType === "telegram"
-				? t(
-						"notifications.fields.telegramTargetPlaceholder",
-						"123456:ABC:987654 or https://api.telegram.org/bot...",
-					)
-				: t("notifications.fields.webhookUrlPlaceholder");
-	const headersPlaceholder =
-		isEdit && hasStoredWebhookHeaders
-			? webhookHeaderNames.length > 0
-				? JSON.stringify(
-						Object.fromEntries(
-							webhookHeaderNames.map((headerName) => [
-								headerName,
-								"••••••••",
-							]),
-						),
-						null,
-						2,
-					)
-				: "••••••••"
-			: t(
-					"notifications.fields.webhookHeadersPlaceholder",
-					'{ "X-Pulsy-Test": "true" }',
-				);
+ const fieldId = useId();
+ const [providerOpen, setProviderOpen] = useState(false);
+ const canRetainTarget = Boolean(isEdit && hasStoredTarget && channelType === storedChannelType);
+ const [targetMode, setTargetMode] = useState(canRetainTarget ? "retain" : "replace");
+ const [headersMode, setHeadersMode] = useState(isEdit ? "retain" : "replace");
+ const [headersTouched, setHeadersTouched] = useState(false);
+ const draftValues = { targetMode, headersMode, channelType, emailProviderId, webhookUrl, webhookHeaders, recipients, notifyOnDown, notifyOnDegraded, notifyOnRecovery, notifyOnTlsExpiry, tlsExpiryThresholdDays };
+ const draft = useDraftComparison(draftValues, { ...draftValues, targetMode: canRetainTarget ? "retain" : "replace", headersMode: isEdit ? "retain" : "replace" }, open);
+ const invalidHeaders = channelType === "webhook" && (!isEdit || headersMode === "replace") && parseWebhookHeaders(webhookHeaders) === false;
+ useEffect(() => { if (open) { setTargetMode(canRetainTarget ? "retain" : "replace"); setHeadersMode(isEdit ? "retain" : "replace"); setRecipientsTouched(false); setHeadersTouched(false); } }, [open, canRetainTarget, isEdit]);
+ const [recipientsTouched, setRecipientsTouched] = useState(false);
+ const parsedRecipients = parseRecipients(recipients);
+ const noProvider = channelType === "email" && emailProviders.length === 0;
+ const chosenProvider = emailProviders.find(provider => provider.emailProviderId === emailProviderId);
+ const invalidRecipients = recipientsTouched ? parsedRecipients.invalid : [];
+ const validation = useFormValidation(() => {
+   if (canRetainTarget && targetMode === "retain") return [];
+   const issues: FormIssue[] = [];
+   if (channelType === "telegram") {
+     if (!/^\d+:[A-Za-z0-9_-]+$/.test(telegramBot)) issues.push({ id: "channel-target", message: t("notificationUX.telegramBotHelp") });
+     if (!/^(?:-?\d+|@[A-Za-z0-9_]+)$/.test(telegramChat)) issues.push({ id: "telegram-chat", message: t("notificationUX.telegramChatHelp") });
+   }
+   return issues;
+ }, { nonEmptyBlurOnly: true });
+ const [telegramBot, setTelegramBot] = useState("");
+ const [telegramChat, setTelegramChat] = useState("");
+ useEffect(() => { if (open) { setTelegramBot(""); setTelegramChat(""); } }, [open, channelType]);
+ useEffect(() => { if (!open) validation.clear(); }, [open]);
+ useEffect(() => { if (error) validation.server(error, { webhookUrl: "channel-target", webhookHeaders: `${fieldId}-headers`, recipientAddresses: `${fieldId}-recipients`, recipients: `${fieldId}-recipients`, emailProviderId: `${fieldId}-provider`, tlsExpiryThresholdDays: "tls-expiry-threshold" }); }, [error]);
 
 	return (
-		<Dialog open={open} onOpenChange={onOpenChange}>
-			<DialogContent className="sm:max-w-[420px]">
-				<form onSubmit={onSubmit}>
+		<><Dialog open={open} onOpenChange={onOpenChange}>
+			<DialogContent hasUnsavedChanges={draft.dirty} className="sm:max-w-[var(--dialog-standard)]">
+				<form {...draft.formProps} ref={validation.formRef} onChangeCapture={event => validation.clear((event.target as HTMLElement).id)} noValidate className="dialog-form" onSubmit={event => {
+ if (isPending) { event.preventDefault(); return; }
+ const extra: FormIssue[] = [];
+ if (!(canRetainTarget && targetMode === "retain")) {
+   if (channelType === "telegram") {
+     if (!/^\d+:[A-Za-z0-9_-]+$/.test(telegramBot)) extra.push({ id: "channel-target", message: t("notificationUX.telegramBotHelp") });
+     if (!/^(?:-?\d+|@[A-Za-z0-9_]+)$/.test(telegramChat)) extra.push({ id: "telegram-chat", message: t("notificationUX.telegramChatHelp") });
+   }
+ }
+ if (invalidHeaders) extra.push({ id: `${fieldId}-headers`, message: t("notifications.fields.webhookHeadersInvalid") });
+ if (channelType === "email") {
+   if (!emailProviderId) extra.push({ id: `${fieldId}-provider`, message: t("notificationUX.chooseProvider") });
+   if (parsedRecipients.invalid.length || !parsedRecipients.recipients.length) extra.push({ id: `${fieldId}-recipients`, message: t("notificationUX.emailExample") });
+ }
+ setHeadersTouched(true); setRecipientsTouched(true);
+ if (!validation.validate(extra)) { event.preventDefault(); return; }
+ void onSubmit(event);
+ }}>
 					<DialogHeader>
 						<DialogTitle>
 							{isEdit
@@ -175,40 +208,45 @@ export function ChannelFormDialog({
 						</DialogDescription>
 					</DialogHeader>
 
-					<div className="grid gap-4 py-4">
-						<div className="grid gap-2">
-							<Label>{t("notifications.fields.channelType")}</Label>
+					<div className="dialog-body grid gap-y-[var(--field-row-gap)]"><fieldset disabled={isPending} className="contents">
+ <div className="h-32 overflow-y-auto"><FormErrorSummary issues={validation.issues} />
+ {Boolean(error) && !validation.issues.length && <p role="alert" className="text-sm text-destructive">{typeof error === "string" ? error : extractErrorMessage(error, t("notifications.create.error"))}</p>}</div>
+ {isEdit && <p className="text-sm text-muted-foreground">{t("notificationUX.retainSecrets")}</p>}
+						<FormField className="form-field">
+							<Label htmlFor={`${fieldId}-type`}>{t("notifications.fields.channelType")}</Label>
 							<Select
 								value={channelType}
 								onValueChange={(v) =>
-									setChannelType(v as UptimeNotificationChannelType)
+									{ validation.clear(); setWebhookUrl(""); setWebhookHeaders(""); setChannelType(v as UptimeNotificationChannelType); }
 								}
 							>
-								<SelectTrigger>
+								<SelectTrigger id={`${fieldId}-type`}>
 									<SelectValue />
 								</SelectTrigger>
 								<SelectContent>
 									{CHANNEL_TYPES.map((ct) => (
 										<SelectItem key={ct} value={ct}>
-											{t(`notifications.channelTypes.${ct}`, ct)}
+											<span className="flex items-center gap-2">
+												{t(`notifications.channelTypes.${ct}`, ct)}
+											</span>
 										</SelectItem>
 									))}
 								</SelectContent>
 							</Select>
-						</div>
+						</FormField>
 
 						{channelType === "email" ? (
 							<>
-								<div className="grid gap-2">
-									<Label>{t("notifications.fields.emailProvider")}</Label>
+								<FormField className="form-field">
+									<Label htmlFor={`${fieldId}-provider`}>{t("notifications.fields.emailProvider")}</Label>
 									<Select
 										value={emailProviderId}
 										onValueChange={setEmailProviderId}
 									>
-										<SelectTrigger>
+										<SelectTrigger {...validation.field(`${fieldId}-provider`)} id={`${fieldId}-provider`}>
 											<SelectValue
 												placeholder={t(
-													"notifications.fields.emailProvider",
+													emailProviders.length ? "notificationUX.chooseProvider" : "notificationUX.noProviderOption",
 												)}
 											/>
 										</SelectTrigger>
@@ -223,70 +261,96 @@ export function ChannelFormDialog({
 											))}
 										</SelectContent>
 									</Select>
-								</div>
+									{noProvider && <div id={`${fieldId}-provider-help`} className="grid gap-1 rounded-md border bg-muted/50 p-3 text-sm"><p className="font-medium">{t("notificationUX.noProviderTitle")}</p><p className="text-muted-foreground">{t("notificationUX.noProviderBody")}</p></div>}
+									<Button type="button" variant="outline" onClick={() => setProviderOpen(true)}>{t("actions.addProvider")}</Button>
+									{chosenProvider && !chosenProvider.verified && <p className="text-sm text-muted-foreground">{t("notificationUX.providerUntestedHint")}</p>}
+								</FormField>
 
-								<div className="grid gap-2">
-									<Label>{t("notifications.fields.recipients")}</Label>
-									<Input
+								<FormField className="form-field">
+									<Label htmlFor={`${fieldId}-recipients`}>{t("notifications.fields.recipients")}</Label>
+									<Input id={`${fieldId}-recipients`}
 										value={recipients}
 										onChange={(e) => setRecipients(e.target.value)}
+ dir="ltr" inputMode="email" autoComplete="off" onBlur={() => setRecipientsTouched(true)}
+ {...validation.field(`${fieldId}-recipients`, `${fieldId}-recipients-help`)} aria-invalid={invalidRecipients.length > 0 || validation.field(`${fieldId}-recipients`)["aria-invalid"]}
 										placeholder={t(
 											"notifications.fields.recipientsPlaceholder",
 										)}
 										required
 									/>
-								</div>
+ <div id={`${fieldId}-recipients-help`} className="text-sm"><p className="text-muted-foreground">{t("notificationUX.recipientsHint")}</p>{invalidRecipients.length > 0 && <ul role="alert" className="text-destructive">{invalidRecipients.map((value, index) => <li key={index}>{t("notificationUX.invalidRecipient", { address: value })}</li>)}</ul>}</div>
+								</FormField>
 							</>
 						) : (
-							<div className="grid gap-2">
+							<FormField className="form-field">
 								<Label htmlFor="channel-target">
-									{channelType === "telegram"
-										? t(
-												"notifications.fields.telegramTarget",
-												"Telegram Target",
-											)
-										: t("notifications.fields.webhookUrl")}
+									{ channelType === "telegram"
+											? t(
+													"notificationUX.telegramBotToken",
+												)
+											: t("notifications.fields.webhookUrl")}
 								</Label>
-								<Input
-									id="channel-target"
-									type={channelType === "telegram" ? "text" : "url"}
-									value={webhookUrl}
-									onChange={(e) => setWebhookUrl(e.target.value)}
-									placeholder={targetPlaceholder}
-									required={!isEdit || !hasStoredWebhookUrl}
+								{canRetainTarget && <Select value={targetMode} onValueChange={value => { setTargetMode(value); setWebhookUrl(""); setTelegramBot(""); setTelegramChat(""); validation.clear("channel-target"); validation.clear("telegram-chat"); }}><SelectTrigger aria-label={t("notificationUX.targetAction")}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="retain">{t("notificationUX.retain")}</SelectItem><SelectItem value="replace">{t("notificationUX.replace")}</SelectItem></SelectContent></Select>}
+ <Input
+									{...validation.field("channel-target", validation.issues.some(issue => issue.id === "channel-target") ? "channel-target-inline-error" : undefined)} id="channel-target"
+									type={
+										 channelType === "telegram"
+												? "password"
+												: "url"
+									}
+									inputMode={
+										 undefined
+									}
+									dir="ltr" autoComplete="off" disabled={canRetainTarget && targetMode === "retain"}
+									value={channelType === "telegram" ? telegramBot : webhookUrl}
+									onChange={(e) => { if (channelType === "telegram") { setTelegramBot(e.target.value); setWebhookUrl(`${e.target.value}:${telegramChat}`); } else setWebhookUrl(e.target.value); }}
+									placeholder={isEdit && targetMode === "retain" && storedTargetLabel ? storedTargetLabel : (
+										 channelType === "telegram"
+												? "123456:ABC"
+												: channelType === "slack" ? "https://hooks.slack.com/services/…"
+                      : channelType === "discord" ? "https://discord.com/api/webhooks/…"
+                      : t("notifications.fields.webhookUrlPlaceholder")
+									)}
+ required={!canRetainTarget || targetMode === "replace"}
 								/>
-							</div>
+                <p id="channel-target-inline-error" className="min-h-10 text-sm text-destructive">{validation.issues.find(issue => issue.id === "channel-target")?.message}</p>
+                {channelType === "telegram" && <>
+                  <Label htmlFor="telegram-chat">{t("notificationUX.telegramChatId")}</Label>
+                  <Input id="telegram-chat" {...validation.field("telegram-chat")} dir="ltr" autoComplete="off" disabled={canRetainTarget && targetMode === "retain"} value={telegramChat} required={!canRetainTarget || targetMode === "replace"} onChange={event => { setTelegramChat(event.target.value); setWebhookUrl(`${telegramBot}:${event.target.value}`); }} placeholder="-100123456789 / @channel" />
+                  <p className="min-h-10 text-sm text-muted-foreground">{t("notificationUX.telegramChatHelp")}</p>
+                </>}
+							</FormField>
 						)}
 
-						{channelType !== "email" && (
-							<div className="grid gap-2">
-								<Label htmlFor="webhook-headers">
+						{channelType === "webhook" && (
+							<FormField className="form-field">
+								<Label htmlFor={`${fieldId}-headers`}>
 									{t(
 										"notifications.fields.webhookHeaders",
-										"Headers / Options (JSON)",
+										"Headers / options (JSON)",
 									)}
 								</Label>
-								<Textarea
-									id="webhook-headers"
+								{isEdit && <Select value={headersMode} onValueChange={value => { validation.clear(`${fieldId}-headers`); setHeadersTouched(false); setHeadersMode(value); setWebhookHeaders(value === "clear" ? "{}" : ""); }}><SelectTrigger aria-label={t("notificationUX.headersAction")}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="retain">{t("notificationUX.retain")}</SelectItem><SelectItem value="replace">{t("notificationUX.replace")}</SelectItem><SelectItem value="clear">{t("notificationUX.clear")}</SelectItem></SelectContent></Select>}
+ <Textarea disabled={isEdit && headersMode !== "replace"} dir="ltr"
+									id={`${fieldId}-headers`}
 									value={webhookHeaders}
-									onChange={(e) => setWebhookHeaders(e.target.value)}
-									placeholder={headersPlaceholder}
+									onChange={(e) => { setWebhookHeaders(e.target.value); setHeadersTouched(false); }}
+                  onBlur={() => setHeadersTouched(true)}
+                  {...validation.field(`${fieldId}-headers`, `${fieldId}-headers-help${headersTouched && invalidHeaders ? ` ${fieldId}-headers-error` : ""}`)} aria-invalid={headersTouched && invalidHeaders || validation.field(`${fieldId}-headers`)["aria-invalid"]}
+									placeholder={isEdit && headersMode === "retain" && storedHeaderNames.length ? JSON.stringify(Object.fromEntries(storedHeaderNames.map(name => [name, "••••••••"])), null, 2) : t(
+										"notifications.fields.webhookHeadersPlaceholder",
+										'{ "X-Pulsy-Test": "true" }',
+									)}
 									className="min-h-[88px] resize-y font-mono text-xs"
 								/>
-								<p className="text-xs text-muted-foreground">
-									{channelType === "telegram"
-										? t(
-												"notifications.fields.telegramHeadersHint",
-												'Use { "chat_id": "123456" } when the Telegram API URL does not include chat_id.',
-											)
-										: t(
-												"notifications.fields.webhookHeadersHint",
-												"Optional JSON object. Values must be strings.",
-											)}
+								<p id={`${fieldId}-headers-help`} className="text-xs text-muted-foreground">
+									{t("notifications.fields.webhookHeadersHint")}
 								</p>
-							</div>
+                <p id={`${fieldId}-headers-error`} role={headersTouched && invalidHeaders ? "alert" : undefined} className="min-h-10 text-sm text-destructive">{headersTouched && invalidHeaders ? t("notifications.fields.webhookHeadersInvalid") : null}</p>
+							</FormField>
 						)}
 
+<fieldset className="grid min-w-0 gap-3"><legend className="mb-3 text-sm font-medium">{t("notificationUX.events")}</legend>
 						<div className="flex items-center justify-between p-3 rounded-md bg-muted/50">
 							<Label htmlFor="notifyDown">
 								{t("notifications.fields.notifyOnDown")}
@@ -297,6 +361,11 @@ export function ChannelFormDialog({
 								onCheckedChange={setNotifyOnDown}
 							/>
 						</div>
+
+                        <div className="flex min-h-11 items-center justify-between gap-3 rounded-md bg-muted/50 p-3">
+                            <Label htmlFor="notifyDegraded">{t("notifications.fields.notifyOnDegraded")}</Label>
+                            <Switch id="notifyDegraded" checked={notifyOnDegraded} onCheckedChange={setNotifyOnDegraded} />
+                        </div>
 
 						<div className="flex items-center justify-between p-3 rounded-md bg-muted/50">
 							<Label htmlFor="notifyRecovery">
@@ -309,7 +378,8 @@ export function ChannelFormDialog({
 							/>
 						</div>
 
-						<div className="flex items-center justify-between p-3 rounded-md bg-muted/50">
+						{!supportsTls && <p className="text-sm text-muted-foreground">{t("notificationUX.tlsUnavailable")}</p>}
+						{supportsTls && <><div className="flex items-center justify-between p-3 rounded-md bg-muted/50">
 							<Label htmlFor="notifyTlsExpiry">
 								{t("notifications.fields.notifyOnTlsExpiry")}
 							</Label>
@@ -321,35 +391,37 @@ export function ChannelFormDialog({
 						</div>
 
 						{notifyOnTlsExpiry && (
-							<div className="grid gap-2">
+							<FormField className="form-field">
 								<Label htmlFor="tls-expiry-threshold">
 									{t("notifications.fields.tlsExpiryThresholdDays")}
 								</Label>
 								<Input
-									id="tls-expiry-threshold"
+									{...validation.field("tls-expiry-threshold")} id="tls-expiry-threshold"
 									type="number"
 									min={1}
-									max={365}
+									max={90}
 									value={tlsExpiryThresholdDays}
 									onChange={(e) => setTlsExpiryThresholdDays(e.target.value)}
 									required
 								/>
-							</div>
-						)}
+							</FormField>
+						)}</>}
+</fieldset></fieldset>
 					</div>
 
 					<DialogFooter className="border-t pt-3">
 						<Button
 							type="button"
 							variant="outline"
-							onClick={() => onOpenChange(false)}
+							data-dialog-discard onClick={() => onOpenChange(false)}
 							className="h-[44px] w-full sm:w-auto"
 						>
 							{t("actions.cancel")}
 						</Button>
 						<Button
 							type="submit"
-							disabled={isPending}
+							disabled={isPending || noProvider}
+							aria-describedby={noProvider ? `${fieldId}-provider-help` : undefined}
 							className="h-[44px] w-full sm:w-auto"
 						>
 							{isPending && <Loader2 className="h-4 w-4 me-2 animate-spin" />}
@@ -358,6 +430,11 @@ export function ChannelFormDialog({
 					</DialogFooter>
 				</form>
 			</DialogContent>
-		</Dialog>
+		</Dialog>{providerOpen && <InlineProvider onClose={() => setProviderOpen(false)} onCreated={setEmailProviderId} />}</>
 	);
+}
+
+function InlineProvider({ onClose, onCreated }: { onClose: () => void; onCreated: (id: string) => void }) {
+  const client = useQueryClient(); const [busy, setBusy] = useState(false);
+  return <EmailProviderDialog open onOpenChange={open => { if (!open) onClose(); }} isPending={busy} onSubmit={async input => { setBusy(true); try { const provider = await UptimeService.createEmailProvider(input); await client.invalidateQueries({ queryKey: uptimeKeys.emailProviders.all() }); if (!isSessionClientActive(client)) return; onCreated(provider.emailProviderId); onClose(); } finally { setBusy(false); } }} />;
 }

@@ -1,0 +1,17 @@
+# Wartungsfenster und Alarmunterbrechung
+
+## Schritte
+
+Wählen Sie Monitore und dann Wartung und Alarmunterbrechung oder öffnen Sie die Einstellungen eines Monitors. Diese Funktionen stehen jedem Konto zur Verfügung. Sie ändern nur Benachrichtigungen: Prüfungen, gemessene Gesundheit, rohe Verfügbarkeit und gemessene Vorfälle laufen weiter. Ein ausgefallener Monitor kann zusätzlich die Wartungsmarkierung tragen. Alarmunterbrechung pausiert keine Prüfungen.
+
+Wählen Sie 15 Minuten, eine Stunde, vier Stunden oder ein eigenes Ende innerhalb von 30 Tagen. Der private Grund und die Fortsetzungszeit bleiben in Ihren Einstellungen sichtbar. Alarmunterbrechung beenden entfernt nur die ausgewählten Monitore aus Unterbrechungen; Wartungspläne bleiben bestehen. Das Beenden eines Plans betrifft seine gesamte ausdrückliche Auswahl und verlangt Bestätigung. Später ergänzte Monitore werden nicht automatisch aufgenommen.
+
+Erweiterte Wartungspläne enthalten Name, privaten Grund, Anfang und Ende, IANA-Zeitzone und einmalige, tägliche oder wöchentliche Wiederholung. Datumsfelder verwenden die lokale Browserzeitzone. Die gewählte IANA-Zeitzone bestimmt die lokalen Anfangszeiten späterer Wiederholungen. Prüfen Sie die angezeigten Ausführungen vor dem Speichern; jede Feldänderung verlangt eine neue Vorschau. Wiederholte Fenster dauern bis zu 24 Stunden verstrichener Zeit, einmalige bis zu 30 Tage. Nicht existente lokale Anfangszeiten beim Wechsel zur Sommerzeit werden übersprungen. Tägliche und wöchentliche Zeiten folgen dem lokalen Offset. Speichern und Vorschau prüfen keinen Kundenendpunkt.
+
+Unterdrückung beginnt einschließlich des Anfangs und endet ausschließlich des Endes. Alle passenden Pläne und Unterbrechungen werden kombiniert; das Ende eines Fensters beendet kein anderes. Ein dauerhafter Worker prüft aktive Fenster unmittelbar vor Zustellung erneut. Nach dem letzten Fenster erhält ein aktiver Monitor im selben fortdauernden Ausfall einen verzögerten Alarm je zulässigem Ziel. Erholte, pausierte, gelöschte oder durch neue Ausfälle ersetzte Episoden erzeugen keinen verzögerten Ausfallalarm. Die Erholungsmeldung eines unterdrückten Ausfalls geht nur an genau die Ziele mit gespeichertem erfolgreichem Ausfallversand. Neue oder geänderte Ziele erhalten dadurch keine Erholungsmeldung.
+
+Der Versandverlauf unterscheidet Versuche, Annahme, Fehler und Unterdrückung anhand vorhandener Nachweise. Die Annahme durch den Anbieter belegt keinen Eingang im Postfach. Prüfen Sie Fehler vor einem erneuten Versuch; unklare Ergebnisse können zu doppelten Nachrichten führen.
+
+Die technische Grenze liegt bei 200 aktiven Plänen je Konto. Abgelaufene einmalige Pläne verschwinden sofort aus der aktiven Liste. Tägliche Bereinigung entfernt abgelaufene oder beendete Planhistorie und abgeschlossene Zustellhistorie nach 30 Tagen in begrenzten Blöcken. Ein minimaler aktueller Ausfallbeleg je Monitor überlebt die Prüfhistorienaufbewahrung, damit Erholung korrekt bleibt; historische Antwortzeiten, Zustände und Gründe werden daraus entfernt.
+
+Gründe bleiben privat. Zum Veröffentlichen öffnen Sie die Mitteilungen der gewünschten Statusseite, wählen bewusst eine Planausführung und betroffene öffentliche Komponenten, verfassen getrennten öffentlichen Text, prüfen die Vorschau und veröffentlichen. Spätere Wiederholungen erfordern eine neue Veröffentlichung. Siehe die Anleitung zu Statusmitteilungen. Wartung ändert weder rohe Verfügbarkeit noch SLA-Ausschlüsse.

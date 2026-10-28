@@ -1,0 +1,17 @@
+# Disposable systemd fixture only. The installed service has no capabilities.
+FROM debian:bookworm-slim@sha256:7c7b2c966bc9ee8cedfeef67e0e279108992c77681fa595db4a9d65c06ccc587 AS systemd-fixture
+RUN apt-get update && apt-get install -y --no-install-recommends systemd systemd-sysv dbus curl python3 openssl ca-certificates procps qemu-user && rm -rf /var/lib/apt/lists/*
+COPY agent/install.sh /test/install.sh
+COPY agent/test/installer_test.py /test/installer_test.py
+COPY agent/test/verify_compose.py /test/verify_compose.py
+COPY agent/test/init.sh /test/init.sh
+COPY --chmod=0755 agent/test/docker-shim.sh /usr/local/bin/docker
+STOPSIGNAL SIGRTMIN+3
+ENTRYPOINT ["bash", "/test/init.sh"]
+
+FROM systemd-fixture AS e2e
+COPY tests/server-health-e2e/fixture.py /test/e2e.py
+RUN mkdir -p /fixture && chown 1000:1000 /fixture
+
+# Keep the default installer fixture independent of acceptance files.
+FROM systemd-fixture AS installer

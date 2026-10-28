@@ -44,11 +44,12 @@ describe("updateUptimeMonitor", () => {
 		expect(updated.url).toBe(m.url);
 	});
 
-	it("recomputes nextCheckAt when the interval changes", async () => {
+	it("makes the next check due immediately when the interval changes", async () => {
 		const m = await createTestMonitor(userId, {
 			interval: 300,
 			nextCheckAt: "2000-01-01T00:00:00.000Z",
 		});
+		const before = Date.now();
 		const updated = await updateUptimeMonitor(
 			{
 				uptimeMonitorId: m.uptimeMonitorId,
@@ -57,11 +58,31 @@ describe("updateUptimeMonitor", () => {
 			userId,
 		);
 		expect(updated.interval).toBe(600);
-		const delta =
-			new Date(updated.nextCheckAt as string).getTime() - Date.now();
-		expect(delta).toBeGreaterThan(590_000);
-		expect(delta).toBeLessThan(610_000);
-	});
+    const next = Date.parse(updated.nextCheckAt!);
+    expect(next).toBeGreaterThanOrEqual(before);
+    expect(next).toBeLessThanOrEqual(Date.now());
+  });
+
+  it("checks an active changed target immediately and keeps a paused target unscheduled", async () => {
+    for (const active of [true, false]) {
+      const m = await createTestMonitor(userId, { active, nextCheckAt: "2000-01-01T00:00:00.000Z" });
+      const before = Date.now();
+      const updated = await updateUptimeMonitor({ uptimeMonitorId: m.uptimeMonitorId, url: "https://changed.example.com/" }, userId);
+      expect(updated.url).toBe("https://changed.example.com/");
+      if (active) {
+        expect(Date.parse(updated.nextCheckAt!)).toBeGreaterThanOrEqual(before);
+        expect(Date.parse(updated.nextCheckAt!)).toBeLessThanOrEqual(Date.now());
+      } else expect(updated.nextCheckAt).toBe(m.nextCheckAt);
+    }
+  });
+  it("makes the next check due immediately when resuming a paused monitor", async () => {
+    const m = await createTestMonitor(userId, { active: false, nextCheckAt: "2000-01-01T00:00:00.000Z" });
+    const before = Date.now();
+    const updated = await updateUptimeMonitor({ uptimeMonitorId: m.uptimeMonitorId, active: true }, userId);
+    expect(updated.active).toBe(true);
+    expect(Date.parse(updated.nextCheckAt!)).toBeGreaterThanOrEqual(before);
+    expect(Date.parse(updated.nextCheckAt!)).toBeLessThanOrEqual(Date.now());
+  });
 
 	it("leaves nextCheckAt untouched when the interval is unchanged", async () => {
 		const m = await createTestMonitor(userId, {

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { db, uptimeIncident } from "@pulsy/db";
+import { db, uptimeCheckLog, uptimeIncident } from "@pulsy/db";
 import {
 	createTestMonitor,
 	createTestStatusPage,
@@ -130,6 +130,7 @@ describe("uptimeMonitor.statusPage.create", () => {
 			slug: "live",
 			title: "Live",
 			isPublished: true,
+      confirmEmptyPublication: true,
 		});
 		expect(created.isPublished).toBe(true);
 	});
@@ -168,6 +169,7 @@ describe("uptimeMonitor.statusPage.update", () => {
 			title: "Renamed",
 			description: "now described",
 			isPublished: true,
+      confirmEmptyPublication: true,
 		});
 		expect(updated.title).toBe("Renamed");
 		expect(updated.description).toBe("now described");
@@ -334,13 +336,15 @@ describe("uptimeMonitor.statusPage.attachDomain", () => {
 		expect(one.domainVerified).toBe(false);
 	});
 
-	it("rejects a domain already used by another page", async () => {
+	it("rejects a domain already verified by another page", async () => {
 		const a = await createTestStatusPage(owner.id, { slug: "a" });
 		const b = await createTestStatusPage(owner.id, { slug: "b" });
-		await ownerCaller().uptimeMonitor.statusPage.attachDomain({
+		const attached = await ownerCaller().uptimeMonitor.statusPage.attachDomain({
 			statusPageId: a.statusPageId,
 			customDomain: "status.example.com",
 		});
+    resolveTxt.mockResolvedValue([[attached.recordValue]]);
+    await ownerCaller().uptimeMonitor.statusPage.verifyDomain({ statusPageId: a.statusPageId });
 		await expect(
 			ownerCaller().uptimeMonitor.statusPage.attachDomain({
 				statusPageId: b.statusPageId,
@@ -518,6 +522,7 @@ describe("uptimeMonitor.public.statusPageBySlug", () => {
 		expect(res.logoUrl).toBe("https://cdn.example.com/logo.png");
 		expect(res.monitors).toHaveLength(1);
 		expect(res.monitors[0]).not.toHaveProperty("url");
+    expect(Object.keys(res.monitors[0]!).sort()).toEqual(["componentId", "description", "group", "lastCheckedAt", "maintenance", "monitorType", "name", "responseTime", "slowPercentage", "status", "uptimePercentage"]);
 		expect(res.overallStatus).toBe("operational");
 	});
 
@@ -563,6 +568,7 @@ describe("uptimeMonitor.public.statusPageByDomain", () => {
 		expect(res.monitors).toHaveLength(1);
 		expect(res.overallStatus).toBe("degraded");
 		expect(res.monitors[0]).not.toHaveProperty("url");
+    expect(Object.keys(res.monitors[0]!).sort()).toEqual(["componentId", "description", "group", "lastCheckedAt", "maintenance", "monitorType", "name", "responseTime", "slowPercentage", "status", "uptimePercentage"]);
 	});
 
 	it("returns NOT_FOUND when the domain is attached but unverified", async () => {
@@ -609,15 +615,9 @@ describe("uptimeMonitor.public.statusPageByDomain", () => {
 // ---------------------------------------------------------------------------
 
 describe("uptimeMonitor.public.status (legacy default-page delegation)", () => {
-	it("returns an empty aggregate when the user has no default page", async () => {
-		const res = await publicCaller().uptimeMonitor.public.status({
-			userId: owner.id,
-		});
-		expect(res.title).toBeNull();
-		expect(res.monitors).toHaveLength(0);
-		expect(res.overallStatus).toBe("operational");
-		expect(res.recentIncidents).toHaveLength(0);
-	});
+  it("returns NOT_FOUND when the user has no default page", async () => {
+    await expect(publicCaller().uptimeMonitor.public.status({ userId: owner.id })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
 
 	it("treats an unpublished default page as absent without exposing its data", async () => {
 		const page = await createTestStatusPage(owner.id, {
@@ -642,19 +642,8 @@ describe("uptimeMonitor.public.status (legacy default-page delegation)", () => {
 			cause: "Private incident detail",
 		});
 
-		const res = await publicCaller().uptimeMonitor.public.status({
-			userId: owner.id,
-		});
-
-		expect(res).toEqual({
-			title: null,
-			description: null,
-			logoUrl: null,
-			monitors: [],
-			overallStatus: "operational",
-			recentIncidents: [],
-		});
-	});
+    await expect(publicCaller().uptimeMonitor.public.status({ userId: owner.id })).rejects.toMatchObject({ code: "NOT_FOUND" });
+  });
 
 	it("delegates to the user's default page and drops inactive monitors", async () => {
 		const page = await createTestStatusPage(owner.id, {
@@ -709,3 +698,126 @@ describe("uptimeMonitor.public.status (legacy default-page delegation)", () => {
 		expect(res.recentIncidents[0]?.durationSeconds).toBe(86_400);
 	});
 });
+
+  it("requires explicit confirmation for creating or publishing an empty page", async () => {
+    const api = ownerCaller().uptimeMonitor.statusPage;
+    await expect(api.create({ slug: "empty", title: "Empty", isPublished: true })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    const page = await api.create({ slug: "empty", title: "Empty" });
+    await expect(api.update({ statusPageId: page.statusPageId, isPublished: true })).rejects.toMatchObject({ code: "BAD_REQUEST" });
+    await expect(attackerCaller().uptimeMonitor.statusPage.update({ statusPageId: page.statusPageId, isPublished: true, confirmEmptyPublication: true })).rejects.toMatchObject({ code: "NOT_FOUND" });
+    expect((await api.one({ statusPageId: page.statusPageId })).isPublished).toBe(false);
+    expect((await api.update({ statusPageId: page.statusPageId, isPublished: true, confirmEmptyPublication: true })).isPublished).toBe(true);
+  });
+
+	it("an unverified claim cannot squat a domain: the real owner can still attach and verify it", async () => {
+		const squatPage = await createTestStatusPage(attacker.id, { slug: "squat" });
+		const ownerPage = await createTestStatusPage(owner.id, { slug: "real" });
+		const squat = await attackerCaller().uptimeMonitor.statusPage.attachDomain({ statusPageId: squatPage.statusPageId, customDomain: "status.example.com" });
+		// No CONFLICT, and nothing tells the owner whether anyone else has claimed the name.
+		const real = await ownerCaller().uptimeMonitor.statusPage.attachDomain({ statusPageId: ownerPage.statusPageId, customDomain: "status.example.com" });
+		resolveTxt.mockResolvedValue([[real.recordValue]]);
+		const verified = await ownerCaller().uptimeMonitor.statusPage.verifyDomain({ statusPageId: ownerPage.statusPageId });
+		expect(verified.domainVerified).toBe(true);
+		// The squatter's token does not match DNS, and even a matching one loses to the verified owner.
+		resolveTxt.mockResolvedValue([[squat.recordValue]]);
+		await expect(attackerCaller().uptimeMonitor.statusPage.verifyDomain({ statusPageId: squatPage.statusPageId })).rejects.toMatchObject({ code: "CONFLICT" });
+		const again = await attackerCaller().uptimeMonitor.statusPage.one({ statusPageId: squatPage.statusPageId });
+		expect(again.domainVerified).toBe(false);
+	});
+
+
+	it("shows rolling check success from recorded checks (the stored monitor column is never written), neutral when none", async () => {
+		const page = await createTestStatusPage(owner.id, { slug: "ratio", title: "Ratio", isPublished: true });
+		const checked = await createTestMonitor(owner.id, { name: "Checked", status: "up", uptimePercentage: 12.3 });
+		const fresh = await createTestMonitor(owner.id, { name: "Fresh", status: "pending" });
+		await createTestStatusPageMonitor(page.statusPageId, checked.uptimeMonitorId);
+		await createTestStatusPageMonitor(page.statusPageId, fresh.uptimeMonitorId);
+		await db.insert(uptimeCheckLog).values([
+			{ uptimeMonitorId: checked.uptimeMonitorId, status: "up", httpStatus: 200, responseTime: 5 },
+			{ uptimeMonitorId: checked.uptimeMonitorId, status: "down", httpStatus: null, responseTime: null },
+		]);
+		const res = await publicCaller().uptimeMonitor.public.statusPageBySlug({ userId: owner.id, slug: "ratio" });
+		const byName = new Map(res.monitors.map((m) => [m.name, m.uptimePercentage]));
+		expect(byName.get("Checked")).toBe(50);
+		expect(byName.get("Fresh")).toBeNull();
+	});
+
+	it("reports 100 HTTP-200 checks of which 60 are degraded as 100% available and 60% slow, never 0%", async () => {
+		const page = await createTestStatusPage(owner.id, { slug: "slow", title: "Slow", isPublished: true });
+		const slow = await createTestMonitor(owner.id, { name: "Slow upstream", status: "degraded" });
+		await createTestStatusPageMonitor(page.statusPageId, slow.uptimeMonitorId);
+		await db.insert(uptimeCheckLog).values(Array.from({ length: 100 }, (_, i) => ({
+			uptimeMonitorId: slow.uptimeMonitorId, status: i < 60 ? "degraded" as const : "up" as const, httpStatus: 200, responseTime: i < 60 ? 4000 : 80,
+		})));
+		const res = await publicCaller().uptimeMonitor.public.statusPageBySlug({ userId: owner.id, slug: "slow" });
+		expect(res.monitors[0]).toMatchObject({ uptimePercentage: 100, slowPercentage: 60, status: "degraded" });
+		expect(res.overallStatus).toBe("degraded");
+	});
+
+	it.each([
+		[0, "operational"],
+		[1, "partial"],
+		[2, "partial"],
+		[3, "partial"],
+		[5, "outage"],
+	] as const)("publishes %i of 5 down components as overall status %s", async (down, expected) => {
+		const slug = `overall-${down}`;
+		const page = await createTestStatusPage(owner.id, { slug, title: "Overall", isPublished: true });
+		for (let index = 0; index < 5; index++) {
+			const monitor = await createTestMonitor(owner.id, { name: `Component ${index}`, status: index < down ? "down" : "up" });
+			await createTestStatusPageMonitor(page.statusPageId, monitor.uptimeMonitorId);
+		}
+		const res = await publicCaller().uptimeMonitor.public.statusPageBySlug({ userId: owner.id, slug });
+		expect(res.overallStatus).toBe(expected);
+		expect(res.monitors.filter((m) => m.status === "down")).toHaveLength(down);
+	});
+
+	it("isolates exact page monitors/incidents across accounts and matches domains", async () => {
+		for (const account of [owner, attacker]) {
+			for (const slug of ["default", "second"]) {
+				const mon = await createTestMonitor(account.id, { name: `${account.id}-${slug}` });
+				const page = await createTestStatusPage(account.id, {
+					slug, title: `${account.id} ${slug}`, isPublished: true,
+					customDomain: `${account.id === owner.id ? "owner" : "attacker"}-${slug}.fixtures.invalid`, domainVerified: true,
+				});
+				await createTestStatusPageMonitor(page.statusPageId, mon.uptimeMonitorId);
+				await db.insert(uptimeIncident).values({ uptimeMonitorId: mon.uptimeMonitorId,
+					status: "ongoing", startedAt: new Date().toISOString(), cause: "Private internal cause" });
+			}
+		}
+		for (const account of [owner, attacker]) {
+			for (const slug of ["default", "second"]) {
+				const canonical = await publicCaller().uptimeMonitor.public.statusPageBySlug({ userId: account.id, slug });
+				const domain = await publicCaller().uptimeMonitor.public.statusPageByDomain({ host: `${account.id === owner.id ? "owner" : "attacker"}-${slug}.fixtures.invalid` });
+				expect(domain).toEqual({ ...canonical, asOf: domain.asOf });
+        expect(Date.parse(domain.asOf)).toBeGreaterThanOrEqual(Date.parse(canonical.asOf));
+				expect(canonical.title).toBe(`${account.id} ${slug}`);
+				expect(canonical.monitors.map(m => m.name)).toEqual([`${account.id}-${slug}`]);
+				expect(canonical.recentIncidents.map(i => i.monitorName)).toEqual([`${account.id}-${slug}`]);
+				expect(JSON.stringify(canonical)).not.toContain("Private internal cause");
+			}
+		}
+	});
+
+	it("drops foreign-owner monitor links even if a corrupted membership exists", async () => {
+		const page = await createTestStatusPage(owner.id, { slug: "isolation" });
+		const own = await createTestMonitor(owner.id, { name: "Own" });
+		const foreign = await createTestMonitor(attacker.id, { name: "Foreign private" });
+		await createTestStatusPageMonitor(page.statusPageId, own.uptimeMonitorId);
+		await createTestStatusPageMonitor(page.statusPageId, foreign.uptimeMonitorId);
+		await db.insert(uptimeIncident).values({ uptimeMonitorId: foreign.uptimeMonitorId,
+			status: "ongoing", startedAt: new Date().toISOString() });
+		const result = await publicCaller().uptimeMonitor.public.statusPageBySlug({ userId: owner.id, slug: "isolation" });
+		expect(result.monitors.map(m => m.name)).toEqual(["Own"]);
+		expect(result.recentIncidents).toEqual([]);
+	});
+
+	it("returns NOT_FOUND for an unpublished page", async () => {
+		await createTestStatusPage(owner.id, { slug: "draft", isPublished: false });
+		await expect(
+			publicCaller().uptimeMonitor.public.statusPageBySlug({
+				userId: owner.id,
+				slug: "draft",
+			}),
+		).rejects.toMatchObject({ code: "NOT_FOUND" });
+	});

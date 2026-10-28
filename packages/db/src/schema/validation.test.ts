@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+	apiCreateApiKey,
 	apiCloneUptimeShareLink,
 	apiCreateUptimeEmailProvider,
 	apiCreateUptimeMonitor,
@@ -73,8 +74,8 @@ describe("apiCreateUptimeMonitor", () => {
 		expect(parsed.tags).toEqual([]);
 	});
 
-	it("rejects an empty or over-long name", () => {
-		expect(() => apiCreateUptimeMonitor.parse({ ...valid, name: "" })).toThrow();
+	it("permits a derived name and rejects an over-long name", () => {
+		expect(apiCreateUptimeMonitor.parse({ ...valid, name: "" }).name).toBe("");
 		expect(() =>
 			apiCreateUptimeMonitor.parse({ ...valid, name: "x".repeat(256) }),
 		).toThrow();
@@ -553,5 +554,21 @@ describe("apiSearchUptimeIncidents", () => {
 		expect(() =>
 			apiSearchUptimeIncidents.parse({ query: "x", limit: 51 }),
 		).toThrow();
+	});
+});
+
+describe("apiCreateApiKey", () => {
+	it("trims the name and rejects blank, whitespace-only and over-long names", () => {
+		expect(apiCreateApiKey.parse({ name: "  CI pipeline  " }).name).toBe("CI pipeline");
+		for (const name of ["", "   ", "\t\n", "x".repeat(101)]) expect(apiCreateApiKey.safeParse({ name }).success, JSON.stringify(name)).toBe(false);
+		expect(apiCreateApiKey.safeParse({ name: "x".repeat(100) }).success).toBe(true);
+	});
+	it("accepts explicit scope and expiry while rejecting unknown privileges", () => {
+    expect(apiCreateApiKey.safeParse({ name: "CI", scope: "admin", apiAccess: "full", expiresAt: "2099-01-01" }).success).toBe(false);
+    expect(apiCreateApiKey.parse({ name: "CI", scope: "read", expiresAt: "2099-01-01T00:00:00.000Z" })).toMatchObject({ scope: "read", expiresAt: "2099-01-01T00:00:00.000Z" });
+    expect(apiCreateApiKey.parse({ name: "CI" }).scope).toBe("read");
+	});
+	it("keeps markup characters as plain text for the UI to escape", () => {
+		expect(apiCreateApiKey.parse({ name: "<img src=x onerror=alert(1)>" }).name).toBe("<img src=x onerror=alert(1)>");
 	});
 });

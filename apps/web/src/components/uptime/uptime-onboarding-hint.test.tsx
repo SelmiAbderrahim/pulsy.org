@@ -20,7 +20,7 @@ afterEach(() => {
 describe("UptimeOnboardingHint", () => {
 	it("renders when not previously dismissed", () => {
 		render(<UptimeOnboardingHint onGetStarted={vi.fn()} />);
-		expect(screen.getByText("New: Uptime Monitoring")).toBeInTheDocument();
+		expect(screen.getByText("New: uptime monitoring")).toBeInTheDocument();
 	});
 
 	it("does not render when localStorage has the dismissed flag", () => {
@@ -36,14 +36,14 @@ describe("UptimeOnboardingHint", () => {
 			throw new Error("blocked");
 		});
 		render(<UptimeOnboardingHint onGetStarted={vi.fn()} />);
-		expect(screen.getByText("New: Uptime Monitoring")).toBeInTheDocument();
+		expect(screen.getByText("New: uptime monitoring")).toBeInTheDocument();
 	});
 
 	it("calls onGetStarted when Get Started is clicked", async () => {
 		const onGetStarted = vi.fn();
 		render(<UptimeOnboardingHint onGetStarted={onGetStarted} />);
 		await userEvent.click(
-			screen.getByRole("button", { name: "Get Started" }),
+			screen.getByRole("button", { name: "Get started" }),
 		);
 		expect(onGetStarted).toHaveBeenCalledOnce();
 	});
@@ -52,7 +52,7 @@ describe("UptimeOnboardingHint", () => {
 		render(<UptimeOnboardingHint onGetStarted={vi.fn()} />);
 		await userEvent.click(screen.getByRole("button", { name: /Dismiss/ }));
 		expect(
-			screen.queryByText("New: Uptime Monitoring"),
+			screen.queryByText("New: uptime monitoring"),
 		).not.toBeInTheDocument();
 		expect(localStorage.getItem(STORAGE_KEY)).toBe("true");
 	});
@@ -64,7 +64,7 @@ describe("UptimeOnboardingHint", () => {
 		render(<UptimeOnboardingHint onGetStarted={vi.fn()} />);
 		await userEvent.click(screen.getByRole("button", { name: /Dismiss/ }));
 		expect(
-			screen.queryByText("New: Uptime Monitoring"),
+			screen.queryByText("New: uptime monitoring"),
 		).not.toBeInTheDocument();
 	});
 });

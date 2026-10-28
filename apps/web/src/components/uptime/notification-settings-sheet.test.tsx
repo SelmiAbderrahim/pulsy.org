@@ -42,18 +42,20 @@ beforeEach(() => {
 });
 
 describe("NotificationSettingsSheet", () => {
-	it("renders the email providers section and an empty monitor state", () => {
+	it("renders the email providers section and an empty monitor state", async () => {
 		render(
 			<NotificationSettingsSheet open onOpenChange={vi.fn()} monitors={[]} />,
 		);
 		expect(screen.getByTestId("email-providers")).toBeInTheDocument();
-		expect(screen.getByTestId("default-channels")).toBeInTheDocument();
+		await userEvent.click(screen.getByRole("tab", { name: "notificationSettings.defaults.title" }));
+ expect(screen.getByTestId("default-channels")).toBeInTheDocument();
+ await userEvent.click(screen.getByRole("tab", { name: "notificationUX.overrides" }));
 		expect(
 			screen.getByText("Create a monitor first to configure alerts."),
 		).toBeInTheDocument();
 	});
 
-	it("lists each monitor with a configure link", () => {
+	it("lists each monitor with a configure link", async () => {
 		render(
 			<NotificationSettingsSheet
 				open
@@ -64,10 +66,11 @@ describe("NotificationSettingsSheet", () => {
 				]}
 			/>,
 		);
+ await userEvent.click(screen.getByRole("tab", { name: "notificationUX.overrides" }));
 		expect(screen.getByText("Alpha")).toBeInTheDocument();
 		expect(screen.getByText("Beta")).toBeInTheDocument();
 		expect(
-			screen.getAllByText("Configure"),
+			screen.getAllByText("notificationSettings.openAlerts"),
 		).toHaveLength(2);
 	});
 
@@ -80,8 +83,9 @@ describe("NotificationSettingsSheet", () => {
 				monitors={[monitor()]}
 			/>,
 		);
+ await userEvent.click(screen.getByRole("tab", { name: "notificationUX.overrides" }));
 		await userEvent.click(
-			screen.getByText("Configure"),
+			screen.getByText("notificationSettings.openAlerts"),
 		);
 		expect(onOpenChange).toHaveBeenCalledWith(false);
 	});

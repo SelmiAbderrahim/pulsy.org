@@ -1,27 +1,22 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from "vitest";
+import { createServer, type Server } from "node:http";
+import type { AddressInfo } from "node:net";
 
 // ---------------------------------------------------------------------------
 // Integration tests for the uptime services.
 //
 // These exercise the REAL services against a REAL Postgres (via @pulsy/db) and
-// make REAL outbound HTTP checks. They are gated behind DATABASE_URL so they
-// no-op when no database is configured:
+// make REAL outbound HTTP checks against a disposable local server:
 //
 //   make start            # brings up postgres + sets DATABASE_URL in the server
 //   make test             # runs this suite inside the server container
 //
-// or, locally:
-//
-//   DATABASE_URL=postgres://pulsy:pulsy@localhost:5432/pulsy pnpm -r test
-//
-// @pulsy/db throws at import time if DATABASE_URL is unset, so every import of
-// the db/services is dynamic and happens INSIDE the gated blocks below.
+// Shared global setup provisions the database before these lazy imports.
+// A missing configuration must never silently skip integration coverage.
 // ---------------------------------------------------------------------------
 
-const HAS_DB = Boolean(process.env.DATABASE_URL);
-
-describe.skipIf(!HAS_DB)("uptime integration", () => {
-	// Lazily-loaded modules (populated in beforeAll once we know DATABASE_URL exists).
+describe("uptime integration", () => {
+	// Lazily-loaded modules populated after shared database setup.
 	let dbMod: typeof import("@pulsy/db");
 	let monitorSvc: typeof import("../services/uptime/monitor-service");
 	let monitorOpsSvc: typeof import("../services/uptime/monitor-operations");
@@ -148,7 +143,7 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 			const monitor = await createIntegrationMonitor(
 				{
 					name: "Incident Monitor",
-					url: "https://example.com",
+					url: "https://example.com/incident",
 					method: "GET",
 					expectedStatus: 200,
 					timeout: 10_000,
@@ -200,14 +195,30 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 	});
 
 	// -----------------------------------------------------------------------
-	// (c) Real HTTP checks (network — assertions are tolerant)
+	// (c) Real HTTP checks against a deterministic local server
 	// -----------------------------------------------------------------------
-	describe("performHttpCheck (live network)", () => {
+	describe("performHttpCheck (local network)", () => {
+		let server: Server;
+		let origin: string;
+		beforeAll(async () => {
+			vi.stubEnv("MONITOR_ALLOW_PRIVATE_NETWORKS", "true");
+			server = createServer((request, response) => {
+				response.statusCode = request.url === "/down" ? 503 : 200;
+				response.end("local uptime fixture");
+			});
+			await new Promise<void>(resolve => server.listen(0, "127.0.0.1", resolve));
+			origin = `http://127.0.0.1:${(server.address() as AddressInfo).port}`;
+		});
+		afterAll(async () => {
+			server?.closeAllConnections();
+			if (server?.listening) await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
+			vi.unstubAllEnvs();
+		});
 		it("reports a known-up URL as up", async () => {
 			const monitor = await createIntegrationMonitor(
 				{
 					name: "Up Check",
-					url: "https://example.com",
+					url: `${origin}/up`,
 					method: "GET",
 					expectedStatus: 200,
 					timeout: 15_000,
@@ -221,23 +232,16 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 			createdMonitorIds.push(monitor.uptimeMonitorId);
 
 			const result = await checkerSvc.performHttpCheck(monitor);
-			// Tolerate transient network flakiness: if we reached the server it
-			// should be "up"; only fail loudly when we got a definitive answer.
-			if (result.httpStatus !== null) {
-				expect(result.status).toBe("up");
-				expect(result.responseTime).toBeGreaterThanOrEqual(0);
-			} else {
-				// Network unreachable in this environment — don't fail the suite.
-				expect(result.status).toBe("down");
-			}
+			expect(result.status).toBe("up");
+			expect(result.httpStatus).toBe(200);
+			expect(result.responseTime).toBeGreaterThanOrEqual(0);
 		});
 
-		it("reports an unroutable URL as not up", async () => {
+		it("reports a local unavailable endpoint as down", async () => {
 			const monitor = await createIntegrationMonitor(
 				{
 					name: "Down Check",
-					// Port 1 on loopback is virtually never listening -> connection refused.
-					url: "http://127.0.0.1:1",
+					url: `${origin}/down`,
 					method: "GET",
 					expectedStatus: 200,
 					timeout: 5_000,
@@ -251,7 +255,8 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 			createdMonitorIds.push(monitor.uptimeMonitorId);
 
 			const result = await checkerSvc.performHttpCheck(monitor);
-			expect(result.status).not.toBe("up");
+			expect(result.status).toBe("down");
+			expect(result.httpStatus).toBe(503);
 		});
 	});
 
@@ -301,7 +306,7 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 			const monitor = await createIntegrationMonitor(
 				{
 					name: "Email Notify Monitor",
-					url: "https://example.com",
+					url: "https://example.com/email-notify",
 					method: "GET",
 					expectedStatus: 200,
 					timeout: 10_000,
@@ -639,7 +644,7 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 			const monitor = await createIntegrationMonitor(
 				{
 					name: "Notify Monitor",
-					url: "https://example.com",
+					url: "https://example.com/webhook-notify",
 					method: "GET",
 					expectedStatus: 200,
 					timeout: 10_000,
@@ -693,8 +698,8 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 			expect(calls[0]?.init?.method).toBe("POST");
 
 			const body = JSON.parse(String(calls[0]?.init?.body ?? "{}"));
-			expect(body.statusAfter).toBe("down");
-			expect(body.url).toBe("https://example.com");
+			expect(body.event).toBe("monitor.down");
+			expect(body.monitor.url).toBe("https://example.com/webhook-notify");
 		});
 
 		it("formats Slack, Discord, and Telegram alert payloads", async () => {
@@ -719,7 +724,7 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 					uptimeMonitorId: monitor.uptimeMonitorId,
 					userId: testUserId,
 					channelType: "slack",
-					webhookUrl: "https://hooks.slack.test/incoming",
+					webhookUrl: "https://hooks.slack.com/services/T/B/token",
 					notifyOnDown: true,
 					notifyOnRecovery: true,
 				},
@@ -727,7 +732,7 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 					uptimeMonitorId: monitor.uptimeMonitorId,
 					userId: testUserId,
 					channelType: "discord",
-					webhookUrl: "https://discord.test/incoming",
+					webhookUrl: "https://discord.com/api/webhooks/123/token",
 					notifyOnDown: true,
 					notifyOnRecovery: true,
 				},
@@ -769,8 +774,8 @@ describe.skipIf(!HAS_DB)("uptime integration", () => {
 
 			expect(calls.map((call) => call.url).sort()).toEqual([
 				"https://api.telegram.org/bot123456:abcDEF/sendMessage",
-				"https://discord.test/incoming",
-				"https://hooks.slack.test/incoming",
+				"https://discord.com/api/webhooks/123/token",
+				"https://hooks.slack.com/services/T/B/token",
 			]);
 
 			const slack = calls.find((call) => call.url.includes("slack"));

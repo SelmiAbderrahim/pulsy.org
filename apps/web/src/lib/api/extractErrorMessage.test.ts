@@ -1,5 +1,6 @@
+import i18n from "i18next";
 import { describe, expect, it } from "vitest";
-import { extractErrorMessage } from "./extractErrorMessage";
+import { extractFieldErrors, extractErrorMessage } from "./extractErrorMessage";
 
 describe("extractErrorMessage()", () => {
 	const fallback = "Something went wrong";
@@ -37,4 +38,31 @@ describe("extractErrorMessage()", () => {
 		expect(extractErrorMessage("string error", fallback)).toBe(fallback);
 		expect(extractErrorMessage(123, fallback)).toBe(fallback);
 	});
+});
+
+describe("safe API errors", () => {
+	it.each(['[{"code":"invalid_string","message":"secret","path":["slug"]}]', '{"issues":["secret"]}', "Error\n    at internal.ts:1", "ZodError: private issues", "x".repeat(501)])("does not render serialized issues or stack details", message => {
+		expect(extractErrorMessage(new Error(message), "Localized fallback")).toBe("Localized fallback");
+	});
+	it("uses the caller's localized validation fallback even if message looks safe", () => {
+		expect(extractErrorMessage({ message: "Review fields", data: { validationErrors: { fieldErrors: {}, formErrors: ["Invalid"] } } }, "Localized fallback")).toBe("Localized fallback");
+	});
+	it.each([["TIMEOUT", 408], ["BAD_GATEWAY", 502], ["SERVICE_UNAVAILABLE", 503]])("treats %s (%i) as a server problem and hides its message", (code, httpStatus) => {
+		expect(extractErrorMessage({ message: "upstream detail", data: { code, httpStatus } }, "Fallback")).toBe(i18n.t("common:states.serverProblem"));
+	});
+	it("masks internal failure details and preserves useful non-validation errors", () => {
+		expect(extractErrorMessage({ message: "DB credentials", data: { code: "INTERNAL_SERVER_ERROR" } }, "Fallback")).toBe(i18n.t("common:states.serverProblem"));
+		expect(extractErrorMessage({ message: "Reload before saving", data: { code: "CONFLICT", validationErrors: null } }, "Fallback")).toBe("Reload before saving");
+	});
+});
+
+
+describe("structured field mapping", () => {
+  it("maps only known fields with safe human-readable messages", () => {
+    const error = { data: { validationErrors: { fieldErrors: { slug: ["Choose another slug"], title: ['[{"secret":"value"}]', "Title required"], private: ["Do not show"] }, formErrors: ["Review fields"] } } };
+    expect(extractFieldErrors(error, ["slug", "title", "description"] as const)).toEqual({ slug: "Choose another slug", title: "Title required" });
+  });
+  it.each([null, undefined, "error", {}, { data: null }, { data: { validationErrors: {} } }, { data: { validationErrors: { fieldErrors: { slug: 123, title: [null, {}, ""] } } } }])("ignores malformed data", error => {
+    expect(extractFieldErrors(error, ["slug", "title"])).toEqual({});
+  });
 });

@@ -1,40 +1,55 @@
+import { isToastInteraction } from "@/lib/toast-interaction";
 import * as React from "react";
+import { useModalBackdrop } from "./modal-backdrop";
 import * as SheetPrimitive from "@radix-ui/react-dialog";
 import { cva, type VariantProps } from "class-variance-authority";
 import { X } from "lucide-react";
+import { useTranslation } from "react-i18next";
 import { cn } from "@/lib/utils";
+import { focusOverlayStart, useOverlayFocusReturn } from "./overlay-focus";
+import { useReadyTriggerProps } from "./control-readiness";
 
 const Sheet = SheetPrimitive.Root;
-const SheetTrigger = SheetPrimitive.Trigger;
+const SheetTrigger = React.forwardRef<
+  React.ElementRef<typeof SheetPrimitive.Trigger>,
+  React.ComponentPropsWithoutRef<typeof SheetPrimitive.Trigger>
+>((props, ref) => {
+  const readiness = useReadyTriggerProps(props);
+  return <SheetPrimitive.Trigger {...props} {...readiness} ref={ref} />;
+});
+SheetTrigger.displayName = SheetPrimitive.Trigger.displayName;
 const SheetClose = SheetPrimitive.Close;
 const SheetPortal = SheetPrimitive.Portal;
 
 const SheetOverlay = React.forwardRef<
 	React.ElementRef<typeof SheetPrimitive.Overlay>,
 	React.ComponentPropsWithoutRef<typeof SheetPrimitive.Overlay>
->(({ className, ...props }, ref) => (
+>(({ className, ...props }, ref) => {
+  const backdropRef = useModalBackdrop(ref);
+  return (
 	<SheetPrimitive.Overlay
 		className={cn(
-			"fixed inset-0 z-50 bg-black/80 data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0",
+			"fixed inset-0 z-50 bg-black/80 data-[dimmed=false]:bg-transparent data-[state=open]:animate-in data-[state=open]:fade-in-0",
 			className,
 		)}
 		{...props}
-		ref={ref}
+		ref={backdropRef}
+    data-modal-backdrop=""
 	/>
-));
+); });
 SheetOverlay.displayName = SheetPrimitive.Overlay.displayName;
 
 const sheetVariants = cva(
-	"fixed z-50 gap-4 overflow-y-auto bg-background p-4 shadow-xs transition ease-in-out data-[state=closed]:duration-300 data-[state=open]:duration-500 data-[state=open]:animate-in data-[state=closed]:animate-out sm:p-6",
+	"fixed z-50 gap-4 overflow-y-auto bg-card p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-xs transition-opacity duration-200 data-[state=open]:animate-in sm:p-6",
 	{
 		variants: {
 			side: {
-				top: "inset-x-0 top-0 border-b data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top",
+				top: "inset-x-0 top-0 border-b data-[state=open]:slide-in-from-top",
 				bottom:
-					"inset-x-0 bottom-0 border-t data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom",
-				left: "inset-y-0 start-0 h-full w-[calc(100%-1rem)] border-e data-[state=closed]:slide-out-to-left data-[state=open]:slide-in-from-left sm:max-w-md",
+					"inset-x-0 bottom-0 border-t data-[state=open]:slide-in-from-bottom",
+				left: "inset-y-0 start-0 h-dvh w-full border-e data-[state=open]:slide-in-from-left rtl:data-[state=open]:slide-in-from-right sm:max-w-md",
 				right:
-					"inset-y-0 end-0 h-full w-[calc(100%-1rem)] border-s data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right sm:max-w-md",
+					"inset-y-0 end-0 h-dvh w-full border-s data-[state=open]:slide-in-from-right rtl:data-[state=open]:slide-in-from-left sm:max-w-md",
 			},
 		},
 		defaultVariants: {
@@ -45,27 +60,36 @@ const sheetVariants = cva(
 
 interface SheetContentProps
 	extends React.ComponentPropsWithoutRef<typeof SheetPrimitive.Content>,
-		VariantProps<typeof sheetVariants> {}
+		VariantProps<typeof sheetVariants> {
+  container?: HTMLElement | null;
+  hideClose?: boolean;
+}
 
 const SheetContent = React.forwardRef<
 	React.ElementRef<typeof SheetPrimitive.Content>,
 	SheetContentProps
->(({ side = "right", className, children, ...props }, ref) => (
-	<SheetPortal>
+>(({ side = "right", className, children, container, hideClose = false, ...props }, ref) => {
+ const { t } = useTranslation("common");
+ const returnFocus = useOverlayFocusReturn();
+ return (
+	<SheetPortal container={container}>
 		<SheetOverlay />
 		<SheetPrimitive.Content
 			ref={ref}
 			className={cn(sheetVariants({ side }), className)}
 			{...props}
+			onOpenAutoFocus={event => { returnFocus.capture(); props.onOpenAutoFocus?.(event); focusOverlayStart(event); }}
+			onCloseAutoFocus={event => { props.onCloseAutoFocus?.(event); returnFocus.restore(event); }}
+      onPointerDownOutside={event => { if (isToastInteraction(event)) { event.preventDefault(); return; } props.onPointerDownOutside?.(event); }}
 		>
 			{children}
-			<SheetPrimitive.Close className="absolute end-2 top-2 flex h-[44px] w-[44px] items-center justify-center rounded-md opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none sm:end-3 sm:top-3">
+			{!hideClose && <SheetPrimitive.Close data-overlay-close className="absolute z-10 end-2 top-2 flex h-[44px] w-[44px] items-center justify-center rounded-md opacity-70 ring-offset-background transition-opacity hover:opacity-100 focus:outline-hidden focus:ring-2 focus:ring-ring focus:ring-offset-2 disabled:pointer-events-none sm:end-3 sm:top-3">
 				<X className="h-4 w-4" />
-				<span className="sr-only">Close</span>
-			</SheetPrimitive.Close>
+				<span className="sr-only">{t("actions.close")}</span>
+			</SheetPrimitive.Close>}
 		</SheetPrimitive.Content>
 	</SheetPortal>
-));
+); });
 SheetContent.displayName = SheetPrimitive.Content.displayName;
 
 const SheetHeader = ({
@@ -74,7 +98,7 @@ const SheetHeader = ({
 }: React.HTMLAttributes<HTMLDivElement>) => (
 	<div
 		className={cn(
-			"flex flex-col space-y-2 text-center sm:text-start",
+			"flex flex-col gap-2 pe-10 text-start",
 			className,
 		)}
 		{...props}
@@ -101,8 +125,10 @@ const SheetTitle = React.forwardRef<
 	React.ComponentPropsWithoutRef<typeof SheetPrimitive.Title>
 >(({ className, ...props }, ref) => (
 	<SheetPrimitive.Title
+    data-overlay-title
+    tabIndex={-1}
 		ref={ref}
-		className={cn("text-lg font-semibold text-foreground", className)}
+		className={cn("text-lg font-semibold text-foreground focus:outline-hidden", className)}
 		{...props}
 	/>
 ));

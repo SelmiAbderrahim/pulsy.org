@@ -1,4 +1,5 @@
-import { sql } from "drizzle-orm";
+import { randomUUID } from "node:crypto";
+import { and, eq, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { beforeEach } from "vitest";
 import { createHash } from "node:crypto";
@@ -24,8 +25,42 @@ import {
 
 export { db };
 
+/** Read private engine state explicitly in integration tests, never through an owner DTO. */
+export async function storedMonitorSnapshot(monitorId: string, ownerId: string) {
+	const monitor = await db.query.uptimeMonitor.findFirst({
+		where: and(eq(uptimeMonitor.uptimeMonitorId, monitorId), eq(uptimeMonitor.userId, ownerId)),
+		with: { incidents: true },
+	});
+	if (!monitor) throw new Error("Owned fixture monitor missing");
+	return monitor;
+}
+
 // Every table the suite writes to, in an order safe for TRUNCATE ... CASCADE.
 const ALL_TABLES = [
+	"uptime_heartbeat_run",
+	"uptime_heartbeat",
+	"uptime_deferred_alert",
+	"uptime_maintenance",
+	"uptime_incident_event",
+	"uptime_incident_escalation",
+	"uptime_incident_response",
+	"uptime_incident_group",
+	"uptime_reliability_annotation",
+	"uptime_reliability_cursor",
+	"uptime_reliability_day",
+	"uptime_reliability_policy",
+	"uptime_server_metric",
+	"uptime_server",
+	"uptime_status_mail_job",
+	"uptime_status_mail_gate",
+	"uptime_status_subscriber",
+	"uptime_status_subscription_config",
+	"uptime_status_announcement",
+	"uptime_monitor_view",
+	"uptime_monitor_template",
+	"uptime_monitor_channel_binding",
+	"uptime_check_day",
+
 	"uptime_notification_log",
 	"uptime_status_change",
 	"uptime_check_log",
@@ -229,7 +264,7 @@ export async function createTestStatusPage(
 	const [row] = await db
 		.insert(uptimeStatusPage)
 		.values({
-			slug: overrides.slug ?? `page-${nanoid()}`,
+			slug: overrides.slug ?? `page-${randomUUID()}`,
 			title: overrides.title ?? "Test Status Page",
 			isPublished: overrides.isPublished ?? true,
 			...overrides,

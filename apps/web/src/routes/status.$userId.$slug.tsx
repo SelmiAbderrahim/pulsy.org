@@ -20,13 +20,13 @@ export const Route = createFileRoute("/status/$userId/$slug")({
 
 function NamedStatusPage() {
 	const { userId, slug } = Route.useParams();
-	const { data, isLoading, error } = usePublicStatusPageBySlug(userId, slug);
+	const { data, isLoading, error, refetch } = usePublicStatusPageBySlug(userId, slug);
 
 	return (
 		<PublicStatusContent
 			data={data}
 			isLoading={isLoading}
-			error={error}
+			error={error} onRetry={() => void refetch()}
 			errorKey="statusPage.notFound"
 		/>
 	);

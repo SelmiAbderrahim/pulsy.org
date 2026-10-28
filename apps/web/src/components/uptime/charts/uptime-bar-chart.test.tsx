@@ -10,24 +10,24 @@ describe("UptimeBarChart", () => {
 		const { container } = render(
 			<UptimeBarChart
 					data={[
-						{ date: "2024-01-01", status: "up", uptimePercent: 100 },
-						{ date: "2024-01-02", status: "down", uptimePercent: 0 },
-						{ date: "2024-01-03", status: "degraded", uptimePercent: 50 },
-						{ date: "2024-01-04", status: "partial", uptimePercent: 100 },
+						{ date: "2024-01-01", status: "up", uptimePercent: 100, totalChecks: 10 },
+						{ date: "2024-01-02", status: "down", uptimePercent: 0, totalChecks: 10 },
+						{ date: "2024-01-03", status: "degraded", uptimePercent: 50, totalChecks: 10 },
+						{ date: "2024-01-04", status: "partial", uptimePercent: 100, totalChecks: 10 },
 					]}
 				/>,
 		);
 		expect(container.querySelector(".bg-success")).toBeInTheDocument();
 		expect(container.querySelector(".bg-destructive")).toBeInTheDocument();
 		expect(container.querySelector(".bg-warning")).toBeInTheDocument();
-		expect(screen.getByText("Uptime (90 days)")).toBeInTheDocument();
+		expect(screen.getByText("overview.uptimeBar.windowTitle")).toBeInTheDocument();
 	});
 
 	it("uses the muted fallback only when no status matches and percent exceeds 100", () => {
 		// The `partial` status with percent >100 reaches the final bg-muted branch.
 		const { container } = render(
 			<UptimeBarChart
-				data={[{ date: "d-muted", status: "partial", uptimePercent: 101 }]}
+				data={[{ date: "2024-01-02", status: "partial", uptimePercent: 101, totalChecks: 10 }]}
 			/>,
 		);
 		expect(container.querySelector(".bg-muted")).toBeInTheDocument();
@@ -36,7 +36,7 @@ describe("UptimeBarChart", () => {
 	it("uses bg-warning for partial status below 100% uptime", () => {
 		const { container } = render(
 			<UptimeBarChart
-				data={[{ date: "d", status: "partial", uptimePercent: 99 }]}
+				data={[{ date: "2024-01-03", status: "partial", uptimePercent: 99, totalChecks: 10 }]}
 			/>,
 		);
 		expect(container.querySelector(".bg-warning")).toBeInTheDocument();

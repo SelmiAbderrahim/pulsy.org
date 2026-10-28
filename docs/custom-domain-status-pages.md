@@ -1,97 +1,150 @@
 # Custom-Domain Status Pages
 
-A **status page** is a public page that shows the live status of the monitors
-you choose. Pulsy lets you create several named pages, publish them
-independently, and — on a paid plan, or **free when you self-host** — serve each
-one from your own domain (e.g. `https://status.acme.com`).
+Every account can create named public status pages, publish them independently
+and attach its own domains. There is no account page or component count limit.
+Publication remains an explicit owner action.
 
 ## Pages, slugs, and URLs
 
-Each status page has a per-account **slug** and is reachable on the app host at:
+A page has an account-local slug and an application-host URL:
 
-```
+```text
 https://<your-pulsy-host>/status/<userId>/<slug>
 ```
 
-The page named `default` also backs the legacy account URL
-`https://<your-pulsy-host>/status/<userId>`. A page only resolves publicly once
-you **publish** it; unpublished and non-existent pages are indistinguishable
-(both return "not found").
+The `default` page also backs `/status/<userId>`. These addresses remain
+compatible; they are public identifiers rather than management credentials.
+New default pages start as drafts. Draft and missing pages return the same
+unavailable result. Publishing an empty page requires confirmation; API callers
+must explicitly send `confirmEmptyPublication: true`. A published empty page
+shows a neutral state, not a claim that services are healthy.
 
-A page exposes only safe, aggregate data — each monitor's name, current status,
-uptime %, last response time, the overall status, and incidents from the last 7
-days. URLs, TLS details, notification channels, credentials, and your account
-identity are never exposed.
+## Choose public components
 
-## Choosing what a page shows
+Open **Status pages**, select a page, and edit its selected owned monitors.
+Selection is explicit: future monitors matching a tag are not automatically
+included. Only active selected monitors appear publicly. Pausing hides a
+component without deleting its stored selection; deleting its monitor removes
+the relationship.
 
-Open **Status pages**, create or edit a page, and select the monitors to
-include. Membership is managed entirely from this screen — there is no longer a
-per-monitor "show on status page" toggle. Monitors you later delete or pause
-simply drop off the page.
+Use separate public names and descriptions when deployment names should stay
+private. Optional flat groups and edited ordering control presentation.
+Preview the exact public names, membership and publication state before
+applying. Concurrent changes invalidate stale previews. Applying changes to a
+published page immediately changes its public projection. Duplicating a page
+creates a draft without copying domains, announcements or subscribers.
 
-## Custom domain (CNAME + TXT verification)
+Public output contains audited display names, measured status, check-success
+percentage, recorded duration, last-check time and recent incident dates.
+Pending or missing observations stay unknown. Request URLs, credentials, TLS
+details, private notes, owner identity fields, provider configuration and
+subscriber information are excluded. The public page's `asOf` timestamp is
+snapshot generation time, distinct from the last observation.
 
-To serve a page from your own domain you create **two** DNS records — one to
-**route** traffic to the server, one to **prove ownership**:
+## Custom domain: routing and ownership
 
-1. **Attach the domain** on the page's **Custom domain** card (e.g.
-   `status.acme.com`). Pulsy shows both records to publish.
-2. **Point the domain at Pulsy** (the routing record). This is what makes the
-   hostname actually resolve — without it the browser gets "site can't be
-   reached". Use the target Pulsy shows:
+Attach a domain such as `status.example.com` on the page's **Custom domain**
+card. Publish the two records shown by Pulsy:
 
-   | Type  | Name              | Value                          |
-   |-------|-------------------|--------------------------------|
-   | CNAME | `status.acme.com` | `<routing target Pulsy shows>` |
+| Purpose | Record | Value |
+|---|---|---|
+| Route traffic | CNAME for `status.example.com` | The routing target shown by Pulsy |
+| Prove ownership | TXT for `_pulsy-verify.status.example.com` | The generated verification value |
 
-   Keep it **DNS-only** (e.g. Cloudflare grey cloud) so automatic certificate
-   issuance can reach the server over HTTP.
-3. **Add the TXT record** (ownership challenge) at your DNS provider:
+An A record can be used when the operator advertises `CUSTOM_DOMAIN_IP`
+instead of `CUSTOM_DOMAIN_CNAME_TARGET`. Click **Verify** after DNS propagation.
+Verification uses DNS TXT lookup, not an HTTP request to the supplied domain.
+Public domain resolution requires both verified ownership and publication.
 
-   | Type | Name                            | Value                     |
-   |------|---------------------------------|---------------------------|
-   | TXT  | `_pulsy-verify.status.acme.com` | *(the value Pulsy shows)* |
+Verification does not route traffic or install a certificate. Complete the
+routing record and TLS termination at your edge, preserving the original Host
+header for Pulsy's custom-domain lookup.
 
-4. Click **Verify**. Pulsy resolves the TXT record over DNS (no outbound HTTP
-   request is made to your domain). Once it matches, the domain is verified.
+## TLS and proxy setup
 
-After verification the **Custom domain** card shows the provisioning state:
-*Issuing TLS certificate…* → **Live**. If it stays pending or fails, the message
-tells you what to fix (usually the routing record not yet pointing at the
-server). **Detach** clears the domain, its verification, and the edge config.
+Pulsy does not run in-app ACME. Choose one of the existing deployment approaches:
 
-### TLS / certificates
+- Install the optional host-nginx/certbot integration in
+  [ops/custom-domains/README.md](../ops/custom-domains/README.md). Its root
+  systemd timer reconciles verified domains, owns their `pulsy-custom-*`
+  vhosts, obtains certificates using the HTTP-01 webroot flow and updates the
+  pending/active/failed provisioning state. Use DNS-only routing so the
+  challenge reaches that host. Certificate renewal reloads nginx through its
+  deploy hook; detaching a domain lets the next reconciliation remove its
+  managed vhost and certificate. Follow the integration's host installation
+  instructions separately from the application containers.
+- With Caddy, Traefik or another proxy, configure DNS and HTTPS there and
+  forward the original Host header. The optional nginx reconciler is not
+  required for these deployments.
 
-Verifying a domain proves you own it; it does not by itself serve traffic — the
-**routing record + TLS** do that.
+Configure `VITE_APP_URL` as the canonical application origin before building
+the web image. The SPA compares the browser host with that configured host to
+decide whether `/` should render a custom-domain status page. An empty or
+invalid value leaves the normal application entry flow. Vite values are baked
+into the bundle: changing only the runtime environment cannot update an
+existing web image. `PUBLIC_WEB_URL` supplies the canonical origin for
+server-generated links, including subscription email links.
 
-- **Managed host-nginx deployment** (the default cloud setup): TLS is fully
-  automated. Once a verified domain points at the server, a root systemd timer
-  (`ops/custom-domains/`) writes an nginx vhost it fully owns and obtains a Let's
-  Encrypt certificate via `certbot certonly --webroot`, then marks the page
-  **Live**. Certificates **auto-renew** (the system certbot timer + a deploy hook
-  that reloads nginx), and detaching a domain removes its vhost and certificate —
-  no manual certbot steps. See `ops/custom-domains/README.md` for installation and
-  the required env (`CUSTOM_DOMAIN_CNAME_TARGET` / `CUSTOM_DOMAIN_IP`,
-  `CERTBOT_EMAIL`).
-- **Self-hosted / other proxies** (Traefik, Caddy, manual nginx): Pulsy runs no
-  in-app ACME. Terminate TLS for `status.acme.com` at your proxy, and ensure it
-  **forwards the original `Host` header** to the Pulsy server so the page
-  resolves by domain.
+## Announcements, feeds and optional history
 
-## Plans
+Use the page's communication controls to create a private draft with separate
+public text and exact affected components. Save, preview and explicitly publish.
+Published announcements are immutable; a follow-up is another reviewed update.
+Private incident notes and maintenance reasons are not copied. Public maintenance
+notices select a verified schedule occurrence and require their own publication;
+later recurrences do not publish automatically.
 
-| Capability                         | Self-hosted (payments off) | Free | Pro | Team |
-|------------------------------------|:-------------------------:|:----:|:---:|:----:|
-| Number of status pages             | No plan cap               | 1    | 5   | 25   |
-| Custom domains                     | ✓                         | —    | ✓   | ✓    |
+Each published page exposes these credential-free projections, where
+`<publicKey>` is the page's non-secret public identifier:
 
-When payments are disabled (the default for self-hosting), Pulsy may return the
-`team_yearly` row as compatibility metadata, but it bypasses the numeric and
-capability guards. All status-page features are available without a plan cap.
+```text
+/api/status/pages/<publicKey>/feed.rss
+/api/status/pages/<publicKey>/feed.atom
+/api/status/pages/<publicKey>/status.json
+/api/status/pages/<publicKey>/badge.svg
+/api/status/pages/<publicKey>/history.json
+```
 
-App-host detection uses `VITE_APP_URL`, which is baked into the web bundle at
-build time: any host other than that is treated as a custom status-page domain.
-It **must** be set for custom domains to render — if it's empty, every host
-(including custom ones) falls through to the normal app entry flow.
+Feeds carry escaped published announcements. JSON version 1 and the badge use
+stored state; fetching them does not run checks. Badge labels follow
+Accept-Language across the five supported locales. Compact history additionally
+requires explicit enablement and exposes seven completed UTC days of
+availability, coverage and typed duration, with separately enabled maintenance
+adjustment. It excludes private goals, monitor IDs and annotations.
+
+These GET/HEAD projections use `Access-Control-Allow-Origin: *`,
+`Cache-Control: no-store`, no query parameters, and uniform unavailable 404s
+for missing/draft pages. They share a 240-request/IP/minute budget with public
+subscription requests. These routes run before general auth/JSON handling and
+add no public tRPC procedures.
+
+## Email subscriptions
+
+Enable subscriptions using an owned, verified, usable email provider with
+complete decryptable credentials. Set up the provider and publish the page
+before inviting subscribers. Alert recipients are not imported automatically.
+The owner sees private counts and safe failure categories rather than a public
+subscriber directory.
+
+Visitors select the whole page or exact components and confirm their address
+within 24 hours. New subscribers receive future matching published updates,
+not historical messages. Reconfirmation is required for a changed selection.
+Removing and readding a component creates a new key, so it cannot silently
+replace a visitor's selected component.
+
+Public POSTs to `/api/status/pages/<publicKey>/subscribe` and `/subscription`
+accept at most 16 KiB of uncompressed JSON. They require an exact Origin from
+the configured `PUBLIC_WEB_URL` origin or the page's verified domain origin;
+their CORS response allows that origin, without credentialed cookies. Tokens
+are accepted only in the JSON body, never query parameters. Confirmation and
+unsubscribe email links always use `PUBLIC_WEB_URL` with fragment capabilities
+removed before router/analytics initialization. The visitor must explicitly
+redeem the action. Unsubscribe remains possible after unpublication.
+
+Addresses and capabilities remain encrypted at rest, with page-specific email
+hashes for deduplication. Public responses do not disclose whether an address
+exists. Changing the provider, disabling delivery or changing delivery settings
+cancels unsent jobs from the old configuration; already-started sends may finish.
+Provider acceptance records an outbound receipt rather than guaranteed inbox
+placement. See the [communication guide](uptime/status-communication.md) for
+the complete owner and subscriber workflow.

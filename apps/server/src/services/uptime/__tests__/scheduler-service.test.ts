@@ -164,7 +164,10 @@ beforeEach(async () => {
 	});
 });
 
-afterEach(() => {
+afterEach(async () => {
+	// A scheduled callback returns before its database writes finish. Drain it
+	// before the next test's TRUNCATE, which otherwise races those transactions.
+	await shutdownScheduler(5000);
 	vi.restoreAllMocks();
 	vi.useRealTimers();
 });
@@ -376,6 +379,38 @@ describe("executeCheck", () => {
 		expect(performHttpCheckMock).toHaveBeenCalledTimes(1);
 	});
 
+	it("records the latest timing without duplicating a concurrent recovery", async () => {
+		const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+		const m = await createTestMonitor(userId, {
+			active: true,
+			status: "down",
+			url: "http://example.com",
+		});
+		// While our probe runs, a concurrent (manual) check wins the down→up
+		// transition. The later completion must update timing without repeating recovery.
+		performHttpCheckMock.mockImplementationOnce(async () => {
+			await db
+				.update(uptimeMonitor)
+				.set({ status: "up", consecutiveFailures: 0 })
+				.where(eq(uptimeMonitor.uptimeMonitorId, m.uptimeMonitorId));
+			return { status: "up", httpStatus: 200, responseTime: 30 };
+		});
+
+		await executeCheck(m.uptimeMonitorId);
+
+		expect(warnSpy).not.toHaveBeenCalled();
+    const current = await db.query.uptimeMonitor.findFirst({ where: eq(uptimeMonitor.uptimeMonitorId, m.uptimeMonitorId) });
+    expect(current?.responseTime).toBe(30);
+    expect(current?.lastCheckedAt).not.toBeNull();
+		const changes = await db
+			.select()
+			.from(uptimeStatusChange)
+			.where(eq(uptimeStatusChange.uptimeMonitorId, m.uptimeMonitorId));
+		expect(changes).toHaveLength(0);
+		expect(resolveIncidentMock).not.toHaveBeenCalled();
+		expect(dispatchNotificationsMock).not.toHaveBeenCalled();
+	});
+
 	it("records a down transition, opens an incident, and dispatches notifications", async () => {
 		const m = await createTestMonitor(userId, {
 			active: true,
@@ -401,6 +436,7 @@ describe("executeCheck", () => {
 		expect(changes[0]?.statusAfter).toBe("down");
 		expect(getOngoingIncidentMock).toHaveBeenCalled();
 		expect(createIncidentMock).toHaveBeenCalled();
+    expect(createIncidentMock.mock.calls[0]?.[4]).toBe(changes[0]?.createdAt);
 		expect(dispatchNotificationsMock).toHaveBeenCalled();
 	});
 
@@ -437,11 +473,11 @@ describe("executeCheck", () => {
 		});
 
 		await executeCheck(m.uptimeMonitorId);
-		// The transaction executor is threaded through as the 2nd arg.
-		expect(resolveIncidentMock).toHaveBeenCalledWith(
-			m.uptimeMonitorId,
-			expect.anything(),
-		);
+		const [change] = await db.select().from(uptimeStatusChange).where(eq(uptimeStatusChange.uptimeMonitorId, m.uptimeMonitorId));
+		// Recovery keeps the same timestamp as its status transition.
+		expect(resolveIncidentMock).toHaveBeenCalled();
+    expect(resolveIncidentMock.mock.calls[0]?.[0]).toBe(m.uptimeMonitorId);
+    expect(resolveIncidentMock.mock.calls[0]?.[2]).toBe(change?.createdAt);
 		expect(dispatchNotificationsMock).toHaveBeenCalled();
 	});
 
@@ -519,6 +555,30 @@ describe("executeCheck", () => {
 		const updated = await readMonitor(m.uptimeMonitorId);
 		expect(updated?.status).toBe("down");
 		expect(updated?.consecutiveFailures).toBe(3);
+	});
+
+	it("alerts exactly once per state transition across repeated results and flapping (down, down, up, up, down, up)", async () => {
+		const m = await createTestMonitor(userId, {
+			active: true,
+			status: "up",
+			failureThreshold: 1,
+			consecutiveFailures: 0,
+			url: "http://example.com",
+		});
+		const down = { status: "down", httpStatus: 503, responseTime: 80, errorMessage: "5xx" };
+		const up = { status: "up", httpStatus: 200, responseTime: 30 };
+		for (const result of [down, down, up, up, down, up]) {
+			performHttpCheckMock.mockResolvedValueOnce(result);
+			await executeCheck(m.uptimeMonitorId);
+		}
+		const changes = await db
+			.select()
+			.from(uptimeStatusChange)
+			.where(eq(uptimeStatusChange.uptimeMonitorId, m.uptimeMonitorId))
+			.orderBy(uptimeStatusChange.createdAt);
+		expect(changes.map((c) => c.statusAfter)).toEqual(["down", "up", "down", "up"]);
+		expect(dispatchNotificationsMock).toHaveBeenCalledTimes(4);
+		expect(dispatchNotificationsMock.mock.calls.map((call) => (call[1] as { statusAfter: string }).statusAfter)).toEqual(["down", "up", "down", "up"]);
 	});
 
 	it("does NOT record an up transition out of the pending state", async () => {
@@ -609,6 +669,22 @@ describe("executeCheck", () => {
 		expect(JSON.stringify(consoleSpy.mock.calls)).not.toContain("notify boom");
 	});
 
+  it("does not probe or notify TLS when monitoring is disabled", async () => {
+    const monitor = await createTestMonitor(userId,{active:true,status:"up",url:"https://disabled.example.test",tlsMonitoringEnabled:false});
+    await executeCheck(monitor.uptimeMonitorId);
+    expect(checkTlsCertificateMock).not.toHaveBeenCalled(); expect(dispatchTlsExpiryNotificationsMock).not.toHaveBeenCalled();
+  });
+  it("discards an in-flight TLS observation when the owner disables monitoring", async () => {
+    const monitor = await createTestMonitor(userId,{active:true,status:"up",url:"https://race.example.test"});
+    checkTlsCertificateMock.mockImplementationOnce(async () => {
+      await db.update(uptimeMonitor).set({tlsMonitoringEnabled:false,tlsExpiresAt:null,tlsExpiresInDays:null}).where(eq(uptimeMonitor.uptimeMonitorId,monitor.uptimeMonitorId));
+      return {expiresAt:"2099-01-01T00:00:00Z",expiresInDays:365};
+    });
+    await executeCheck(monitor.uptimeMonitorId);
+    expect((await readMonitor(monitor.uptimeMonitorId))?.tlsExpiresAt).toBeNull();
+    expect(dispatchTlsExpiryNotificationsMock).not.toHaveBeenCalled();
+  });
+
 	it("runs the TLS check for https monitors and dispatches expiry notifications", async () => {
 		const m = await createTestMonitor(userId, {
 			active: true,
@@ -684,6 +760,16 @@ describe("executeCheck", () => {
 // ---------------------------------------------------------------------------
 
 describe("concurrency slots", () => {
+  it("never queues a second tick for the same monitor while its first check waits for capacity", async () => {
+    const monitors = await Promise.all(Array.from({ length: 25 }, (_, i) => createTestMonitor(userId, { name: `Waiting ${i}`, active: true, url: "http://example.com" })));
+    let release!: () => void; const gate = new Promise<void>(resolve => { release = resolve; });
+    performHttpCheckMock.mockImplementation(async () => { await gate; return { status: "up", httpStatus: 200, responseTime: 5 }; });
+    for (const monitor of monitors) { scheduleMonitorCheck(fakeMonitor({ uptimeMonitorId: monitor.uptimeMonitorId })); scheduledJobs[`uptime-${monitor.uptimeMonitorId}`]?.fn(); }
+    await vi.waitFor(() => expect(performHttpCheckMock.mock.calls.length).toBe(20));
+    for (const monitor of monitors) scheduledJobs[`uptime-${monitor.uptimeMonitorId}`]?.fn();
+    release(); await shutdownScheduler(5000);
+    expect(performHttpCheckMock).toHaveBeenCalledTimes(25);
+  });
 	it("queues runs beyond CHECK_CONCURRENCY and drains them all", async () => {
 		const monitors = await Promise.all(
 			Array.from({ length: 25 }, (_, i) =>
@@ -720,6 +806,8 @@ describe("concurrency slots", () => {
 		await vi.waitFor(() => {
 			expect(performHttpCheckMock.mock.calls.length).toBe(25);
 		});
+		await shutdownScheduler(5000);
+		expect(await db.select().from(uptimeCheckLog)).toHaveLength(25);
 	});
 });
 
@@ -769,10 +857,14 @@ describe("shutdownScheduler", () => {
 			url: "http://example.com",
 		});
 
-		// A check that never resolves.
-		performHttpCheckMock.mockImplementationOnce(
-			() => new Promise<never>(() => {}),
-		);
+		// Keep the check pending through the timeout assertion, then release it
+		// during cleanup so no work leaks into another test's database reset.
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		performHttpCheckMock.mockImplementationOnce(async () => {
+			await gate;
+			return { status: "up", httpStatus: 200, responseTime: 5 };
+		});
 
 		scheduleMonitorCheck(fakeMonitor({ uptimeMonitorId: m.uptimeMonitorId }));
 		scheduledJobs[`uptime-${m.uptimeMonitorId}`]?.fn();
@@ -781,6 +873,43 @@ describe("shutdownScheduler", () => {
 		});
 
 		// A tiny timeout makes the race resolve via the timeout branch quickly.
-		await expect(shutdownScheduler(20)).resolves.toBeUndefined();
+		try {
+			await expect(shutdownScheduler(20)).resolves.toBeUndefined();
+			expect(await db.select().from(uptimeCheckLog)).toHaveLength(0);
+		} finally {
+			release();
+		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// First check: create / resume / retarget run at once; paused monitors never do
+// ---------------------------------------------------------------------------
+
+describe("scheduleMonitorCheck — first check", () => {
+	it("checks a due active monitor within the first-result budget", async () => {
+		const m = await createTestMonitor(userId, { active: true, interval: 300, nextCheckAt: new Date().toISOString() });
+		scheduleMonitorCheck(m, { checkIfDue: true });
+		await vi.waitFor(() => expect(performHttpCheckMock).toHaveBeenCalledTimes(1), { timeout: 5_000 });
+	});
+
+	it("does not check a paused monitor, even when its nextCheckAt is due", async () => {
+		const m = await createTestMonitor(userId, { active: false, interval: 300, nextCheckAt: new Date().toISOString() });
+		scheduleMonitorCheck(m, { checkIfDue: true });
+		await new Promise((resolve) => setTimeout(resolve, 150));
+		expect(performHttpCheckMock).not.toHaveBeenCalled();
+	});
+
+	it("waits for the cron boundary when nextCheckAt is a full interval away", async () => {
+		const m = await createTestMonitor(userId, { active: true, interval: 300, nextCheckAt: new Date(Date.now() + 300_000).toISOString() });
+		scheduleMonitorCheck(m, { checkIfDue: true });
+		await new Promise((resolve) => setTimeout(resolve, 150));
+		expect(performHttpCheckMock).not.toHaveBeenCalled();
+	});
+
+	it("resume (rescheduleMonitorCheck) checks a monitor immediately", async () => {
+		const m = await createTestMonitor(userId, { active: true, interval: 300, nextCheckAt: new Date().toISOString() });
+		rescheduleMonitorCheck(m);
+		await vi.waitFor(() => expect(performHttpCheckMock).toHaveBeenCalledTimes(1), { timeout: 5_000 });
 	});
 });

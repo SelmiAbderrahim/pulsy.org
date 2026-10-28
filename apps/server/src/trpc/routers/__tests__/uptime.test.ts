@@ -183,7 +183,7 @@ describe("uptimeMonitor.monitor.create", () => {
 		const created = await ownerCaller().uptimeMonitor.monitor.create(
 			validMonitorInput,
 		);
-		expect(created.userId).toBe(owner.id);
+		expect((await db.query.uptimeMonitor.findFirst({ where: eq(uptimeMonitor.uptimeMonitorId, created.uptimeMonitorId) }))?.userId).toBe(owner.id);
 		expect(created.status).toBe("pending");
 		expect(scheduleMonitorCheck).toHaveBeenCalledTimes(1);
 	});
@@ -220,11 +220,11 @@ describe("uptimeMonitor.monitor.createBulk", () => {
 		const created = await ownerCaller().uptimeMonitor.monitor.createBulk({
 			monitors: [
 				{ ...validMonitorInput, name: "A", active: true },
-				{ ...validMonitorInput, name: "B", active: false },
+				{ ...validMonitorInput, url: "https://example.com/second", name: "B", active: false },
 			],
 		});
 		expect(created).toHaveLength(2);
-		expect(created.every((m) => m.userId === owner.id)).toBe(true);
+		for (const monitor of created) expect((await db.query.uptimeMonitor.findFirst({ where: eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId) }))?.userId).toBe(owner.id);
 		// Only the active monitor is scheduled.
 		expect(scheduleMonitorCheck).toHaveBeenCalledTimes(1);
 	});
@@ -273,7 +273,7 @@ describe("uptimeMonitor.monitor.updateBulk", () => {
 	it("applies the patch to every selected monitor and reschedules active ones", async () => {
 		const a = await createTestMonitor(owner.id, { active: true, timeout: 10_000 });
 		const b = await createTestMonitor(owner.id, { active: true, timeout: 10_000 });
-		const updated = await ownerCaller().uptimeMonitor.monitor.updateBulk({
+		const { updated } = await ownerCaller().uptimeMonitor.monitor.updateBulk({
 			monitorIds: [a.uptimeMonitorId, b.uptimeMonitorId],
 			patch: { timeout: 5_000 },
 		});
@@ -296,7 +296,7 @@ describe("uptimeMonitor.monitor.updateBulk", () => {
 
 	it("replaces tags rather than merging", async () => {
 		const m = await createTestMonitor(owner.id, { tags: ["old"] });
-		const [updated] = await ownerCaller().uptimeMonitor.monitor.updateBulk({
+		const { updated: [updated] } = await ownerCaller().uptimeMonitor.monitor.updateBulk({
 			monitorIds: [m.uptimeMonitorId],
 			patch: { tags: ["new"] },
 		});
@@ -305,7 +305,7 @@ describe("uptimeMonitor.monitor.updateBulk", () => {
 
 	it("runs the interval gate when the patch changes the interval", async () => {
 		const m = await createTestMonitor(owner.id, { active: true, interval: 300 });
-		const [updated] = await ownerCaller().uptimeMonitor.monitor.updateBulk({
+		const { updated: [updated] } = await ownerCaller().uptimeMonitor.monitor.updateBulk({
 			monitorIds: [m.uptimeMonitorId],
 			patch: { interval: 60 },
 		});
@@ -416,7 +416,7 @@ describe("uptimeMonitor.monitor.checkNow", () => {
 
 		await expect(
 			runManualCheck({ ...monitor, userId: attacker.id }),
-		).rejects.toThrow("Failed to update uptime monitor");
+		).rejects.toMatchObject({ code: "NOT_FOUND" });
 
 		const [unchanged] = await db
 			.select()
@@ -779,14 +779,14 @@ describe("uptimeMonitor.checkLog.stats", () => {
 		expect(stats.uptimePercentage).toBeCloseTo(66.67, 1);
 	});
 
-	it("returns zeros when there are no checks in the window", async () => {
+	it("keeps averages unknown when there are no checks in the window", async () => {
 		const m = await createTestMonitor(owner.id);
 		const stats = await ownerCaller().uptimeMonitor.checkLog.stats({
 			uptimeMonitorId: m.uptimeMonitorId,
 		});
 		expect(stats.totalChecks).toBe(0);
-		expect(stats.uptimePercentage).toBe(0);
-		expect(stats.avgResponseTime).toBe(0);
+		expect(stats.uptimePercentage).toBeNull();
+		expect(stats.avgResponseTime).toBeNull();
 		expect(stats.incidentCount).toBe(0);
 	});
 
@@ -948,8 +948,13 @@ describe("uptimeMonitor.incident.search", () => {
 
 	it("respects the result limit", async () => {
 		const m = await createTestMonitor(owner.id, { name: "Prod" });
+		await seedIncident(m.uptimeMonitorId, {
+			status: "resolved",
+			resolvedAt: new Date().toISOString(),
+			durationSeconds: 0,
+		});
 		await seedIncident(m.uptimeMonitorId);
-		await seedIncident(m.uptimeMonitorId);
+		expect(await ownerCaller().uptimeMonitor.incident.search({ query: "prod" })).toHaveLength(2);
 		const results = await ownerCaller().uptimeMonitor.incident.search({
 			query: "prod",
 			limit: 1,
@@ -1340,7 +1345,7 @@ describe("uptimeMonitor.channel", () => {
 		const m = await createTestMonitor(owner.id);
 		const channel = await createTestChannel(m.uptimeMonitorId, {
 			channelType: "slack",
-			webhookUrl: "https://hooks.slack.com/services/x",
+			webhookUrl: "https://hooks.slack.com/services/T/B/token",
 		});
 		const res = await ownerCaller().uptimeMonitor.channel.test({
 			channelId: channel.channelId,
@@ -1353,7 +1358,7 @@ describe("uptimeMonitor.channel", () => {
 		const m = await createTestMonitor(owner.id);
 		const channel = await createTestChannel(m.uptimeMonitorId, {
 			channelType: "discord",
-			webhookUrl: "https://discord.com/api/webhooks/x",
+			webhookUrl: "https://discord.com/api/webhooks/123/token",
 		});
 		const res = await ownerCaller().uptimeMonitor.channel.test({
 			channelId: channel.channelId,
@@ -1677,7 +1682,9 @@ describe("uptimeMonitor.channel defaults", () => {
 			tlsExpiryThresholdDays: 14,
 		});
 		expect(created.uptimeMonitorId).toBeNull();
-		expect(created.userId).toBe(owner.id);
+		expect(created).not.toHaveProperty("userId");
+		const stored = await db.query.uptimeNotificationChannel.findFirst({ where: eq(uptimeNotificationChannel.channelId, created.channelId) });
+		expect(stored?.userId).toBe(owner.id);
 		expect(created.hasWebhookUrl).toBe(true);
 		expect(created).not.toHaveProperty("webhookUrl");
 		expect(created).not.toHaveProperty("webhookHeaders");
@@ -1826,7 +1833,7 @@ describe("uptimeMonitor.channel defaults", () => {
 
 describe("uptimeMonitor.dashboard.summary", () => {
 	it("tallies statuses, uptime, response time, and ongoing incidents", async () => {
-		await createTestMonitor(owner.id, {
+		const up = await createTestMonitor(owner.id, {
 			status: "up",
 			active: true,
 			uptimePercentage: 99,
@@ -1846,12 +1853,15 @@ describe("uptimeMonitor.dashboard.summary", () => {
 			startedAt: new Date().toISOString(),
 		});
 
+		await db.insert(uptimeCheckLog).values([up, down].flatMap((monitor, index) => Array.from({ length: 100 }, (_, i) => ({ uptimeMonitorId: monitor.uptimeMonitorId, status: i < (index === 0 ? 99 : 50) ? "up" as const : "down" as const, createdAt: new Date().toISOString() }))));
 		const summary = await ownerCaller().uptimeMonitor.dashboard.summary();
 		expect(summary.totalMonitors).toBe(4);
 		expect(summary.activeMonitors).toBe(3);
 		expect(summary.monitorsUp).toBe(1);
 		expect(summary.monitorsDown).toBe(1);
-		expect(summary.monitorsDegraded).toBe(1);
+		expect(summary.monitorsDegraded).toBe(0);
+		expect(summary.monitorsPaused).toBe(1);
+		expect(summary.monitorsUp + summary.monitorsDown + summary.monitorsDegraded + summary.monitorsPending + summary.monitorsPaused).toBe(summary.totalMonitors);
 		expect(summary.monitorsPending).toBe(1);
 		expect(summary.ongoingIncidents).toBe(1);
 		expect(summary.avgUptimePercentage).toBe(74.5);
@@ -1878,14 +1888,13 @@ describe("uptimeMonitor.dashboard.summary", () => {
 // ===========================================================================
 
 describe("uptimeMonitor.public.status", () => {
-	it("returns operational status with no public monitors", async () => {
-		const res = await publicCaller().uptimeMonitor.public.status({
-			userId: owner.id,
-		});
-		expect(res.overallStatus).toBe("operational");
-		expect(res.monitors).toHaveLength(0);
-		expect(res.recentIncidents).toHaveLength(0);
-	});
+  it("returns unknown status for an explicitly published empty default page", async () => {
+    await createTestStatusPage(owner.id, { slug: "default", isPublished: true });
+    const res = await publicCaller().uptimeMonitor.public.status({ userId: owner.id });
+    expect(res.overallStatus).toBe("unknown");
+    expect(res.monitors).toHaveLength(0);
+    expect(res.recentIncidents).toHaveLength(0);
+  });
 
 	it("exposes the default page's monitors and recent incidents without leaking URLs", async () => {
 		const page = await createTestStatusPage(owner.id, { slug: "default" });
@@ -1915,7 +1924,7 @@ describe("uptimeMonitor.public.status", () => {
 			userId: owner.id,
 		});
 		expect(res.monitors).toHaveLength(2);
-		expect(res.overallStatus).toBe("outage");
+		expect(res.overallStatus).toBe("partial");
 		expect(res.recentIncidents).toHaveLength(1);
 		expect(res.recentIncidents[0]?.monitorName).toBe("Public Down");
 		// No sensitive fields leak.

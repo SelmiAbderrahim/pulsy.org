@@ -1,10 +1,12 @@
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { renderWithQueryClient as render } from "@/test/query-wrapper";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reactI18nextMock } from "@/test/i18n-mock";
 import { MonitorCreateDialog } from "./monitor-create-dialog";
 
 vi.mock("react-i18next", () => reactI18nextMock());
+vi.mock("@/hooks/uptime/useUptimeMonitors", () => ({ useUptimeMonitors: () => ({ data: [] }) }));
 
 const mutateAsync = vi.fn();
 const useCreateUptimeMonitor = vi.fn();
@@ -19,7 +21,7 @@ vi.mock("@tanstack/react-router", () => ({
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
-vi.mock("sonner", () => ({
+vi.mock("@/lib/toast", () => ({
 	toast: {
 		success: (m: unknown, opts?: unknown) => toastSuccess(m, opts),
 		error: (m: unknown) => toastError(m),
@@ -43,15 +45,17 @@ describe("MonitorCreateDialog submit", () => {
 		render(<MonitorCreateDialog open onOpenChange={onOpenChange} />);
 		await fillRequired();
 		await userEvent.click(
-			screen.getByRole("button", { name: "New Monitor" }),
+			screen.getByRole("button", { name: "Create monitor" }),
 		);
 		await waitFor(() => expect(mutateAsync).toHaveBeenCalled());
 		expect(mutateAsync).toHaveBeenCalledWith({
 			name: "My API",
-			url: "https://api.example.com",
+			url: "https://api.example.com/",
 			method: "GET",
 			interval: 300,
 			expectedStatus: 200,
+      expectedStatuses: null,
+      tlsMonitoringEnabled: true,
 			timeout: 10000,
 			failureThreshold: 3,
 			tags: undefined,
@@ -64,11 +68,11 @@ describe("MonitorCreateDialog submit", () => {
 		mutateAsync.mockResolvedValue({ uptimeMonitorId: "m2" });
 		render(<MonitorCreateDialog open onOpenChange={vi.fn()} />);
 		await fillRequired();
-		const tagInput = screen.getByPlaceholderText("Add a tag...");
+		const tagInput = screen.getByPlaceholderText("Example: production");
 		await userEvent.type(tagInput, "prod{Enter}");
 		await userEvent.type(tagInput, "api{Enter}");
 		await userEvent.click(
-			screen.getByRole("button", { name: "New Monitor" }),
+			screen.getByRole("button", { name: "Create monitor" }),
 		);
 		await waitFor(() =>
 			expect(mutateAsync).toHaveBeenCalledWith(
@@ -84,25 +88,27 @@ describe("MonitorCreateDialog submit", () => {
 		expect(navigate).toHaveBeenCalledWith({
 			to: "/dashboard/uptime/$monitorId",
 			params: { monitorId: "m2" },
-			search: { tab: "notifications" },
+			search: { tab: "alerts" },
 		});
 	});
 
-	it("shows an error toast on failure", async () => {
+	it("keeps actionable error feedback and the draft on failure", async () => {
 		mutateAsync.mockRejectedValue(new Error("nope"));
 		render(<MonitorCreateDialog open onOpenChange={vi.fn()} />);
 		await fillRequired();
 		await userEvent.click(
-			screen.getByRole("button", { name: "New Monitor" }),
+			screen.getByRole("button", { name: "Create monitor" }),
 		);
-		await waitFor(() => expect(toastError).toHaveBeenCalledWith("nope"));
+		expect(await screen.findByRole("alert")).toHaveTextContent("nope");
+    expect(screen.getByLabelText("Name")).toHaveValue("My API");
+    expect(screen.getByLabelText("URL")).toHaveValue("https://api.example.com/");
 	});
 });
 
 describe("MonitorCreateDialog tags", () => {
 	it("ignores blank, duplicate, and over-limit tags", async () => {
 		render(<MonitorCreateDialog open onOpenChange={vi.fn()} />);
-		const tagInput = screen.getByPlaceholderText("Add a tag...");
+		const tagInput = screen.getByPlaceholderText("Example: production");
 
 		// Blank tag (just whitespace) is ignored
 		await userEvent.type(tagInput, "   {Enter}");
@@ -122,7 +128,7 @@ describe("MonitorCreateDialog tags", () => {
 
 	it("adds a tag on blur", async () => {
 		render(<MonitorCreateDialog open onOpenChange={vi.fn()} />);
-		const tagInput = screen.getByPlaceholderText("Add a tag...");
+		const tagInput = screen.getByPlaceholderText("Example: production");
 		await userEvent.type(tagInput, "viablur");
 		fireEvent.blur(tagInput);
 		expect(screen.getByText("viablur")).toBeInTheDocument();
@@ -130,7 +136,7 @@ describe("MonitorCreateDialog tags", () => {
 
 	it("removes a tag via its remove button", async () => {
 		render(<MonitorCreateDialog open onOpenChange={vi.fn()} />);
-		const tagInput = screen.getByPlaceholderText("Add a tag...");
+		const tagInput = screen.getByPlaceholderText("Example: production");
 		await userEvent.type(tagInput, "removeme{Enter}");
 		expect(screen.getByText("removeme")).toBeInTheDocument();
 		await userEvent.click(
@@ -150,7 +156,7 @@ describe("MonitorCreateDialog controls", () => {
 			await userEvent.click(methodTrigger);
 		await userEvent.click(screen.getByRole("option", { name: "HEAD" }));
 		await userEvent.click(
-			screen.getByRole("button", { name: "New Monitor" }),
+			screen.getByRole("button", { name: "Create monitor" }),
 		);
 		await waitFor(() =>
 			expect(mutateAsync).toHaveBeenCalledWith(
@@ -163,8 +169,9 @@ describe("MonitorCreateDialog controls", () => {
 		mutateAsync.mockResolvedValue({ uptimeMonitorId: "m5" });
 		render(<MonitorCreateDialog open onOpenChange={vi.fn()} />);
 		await fillRequired();
-		const [expected, timeout, threshold] =
-			screen.getAllByRole("spinbutton");
+		const expected = screen.getByLabelText("Expected Status");
+    const timeout = screen.getByLabelText("Timeout");
+    const threshold = screen.getByLabelText("Threshold");
 		if (!expected || !timeout || !threshold) {
 			throw new Error("Create numeric fields not found");
 		}
@@ -175,7 +182,7 @@ describe("MonitorCreateDialog controls", () => {
 		await userEvent.clear(threshold);
 		await userEvent.type(threshold, "5");
 		await userEvent.click(
-			screen.getByRole("button", { name: "New Monitor" }),
+			screen.getByRole("button", { name: "Create monitor" }),
 		);
 		await waitFor(() =>
 			expect(mutateAsync).toHaveBeenCalledWith(
@@ -197,7 +204,7 @@ describe("MonitorCreateDialog controls", () => {
 		await userEvent.click(intervalTrigger);
 		await userEvent.click(screen.getByRole("option", { name: "1 minute" }));
 		await userEvent.click(
-			screen.getByRole("button", { name: "New Monitor" }),
+			screen.getByRole("button", { name: "Create monitor" }),
 		);
 		await waitFor(() =>
 			expect(mutateAsync).toHaveBeenCalledWith(
@@ -217,7 +224,7 @@ describe("MonitorCreateDialog controls", () => {
 		useCreateUptimeMonitor.mockReturnValue({ mutateAsync, isPending: true });
 		render(<MonitorCreateDialog open onOpenChange={vi.fn()} />);
 		expect(
-			screen.getByRole("button", { name: "New Monitor" }),
+			screen.getByRole("button", { name: "Create monitor" }),
 		).toBeDisabled();
 	});
 });

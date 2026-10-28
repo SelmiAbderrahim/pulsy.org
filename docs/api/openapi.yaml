@@ -7,23 +7,71 @@ info:
 
     **Authentication.** Every request carries a Bearer API key:
     `Authorization: Bearer pul_…`. Create and revoke keys in the dashboard
-    (Settings → API keys). The plaintext key is shown exactly once at creation;
+    (Dashboard → API Keys, `/dashboard/api-keys`). The plaintext key is shown exactly once at creation;
     Pulsy stores only its SHA-256 hash, so a lost key must be revoked and
     regenerated. Keys authenticate the REST API only — never the session cookie.
 
-    **Access.** Every account has full read and write access — Pulsy has no
-    plans or per-key access levels.
+    **Key scopes.** Read endpoints accept `read` and `full` keys; write
+    endpoints require `full` scope. Every account can use the entire API.
+    Dashboard creation defaults to `read`. Keys created before scopes were
+    introduced retain `full` access. Optional dashboard expiry selects a UTC date
+    strictly after today and expires at 23:59:59.999 UTC on that date. Invalid,
+    expired, revoked or removed keys and unavailable/banned owners return 401.
+    Revoke before removing a key from the dashboard list; removal keeps audit
+    timestamps. All accounts share a technical ceiling of 20 live, unexpired
+    keys, bounding independent rate-limit buckets.
 
-    **Errors.** All errors return `{ "error": { "code", "message" } }`. The
+    **Errors.** REST errors return `{ "error": { "code", "message" } }`. The
     `message` is localized from the request's `Accept-Language` header. Stable
-    HTTP statuses: 401 (missing/invalid/revoked key), 404 (not found / not
-    owned), 422 (invalid body or query), 429 (rate limited).
+    HTTP statuses: 401 (missing/invalid/expired/revoked key), 403 (insufficient
+    key scope), 404 (not found / not owned), 409 (stale configuration review),
+    422 (invalid body or query), 429
+    (rate limited). Malformed JSON, an oversized body or unsupported
+    encoding/charset is answered with HTTP 400, 413 or 415 and the code
+    `validation_error`. Public status/subscription errors instead return an `outcome`.
 
     **Rate limiting.** Requests are limited per key in a fixed window
-    (`API_RATE_LIMIT_PER_MIN`, default 60/min). Every response includes
-    `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset`; a
-    429 also includes `Retry-After`. The limiter is in-memory and therefore
-    per-replica — Pulsy runs a single server process.
+    (`API_RATE_LIMIT_PER_MIN`, default 60/min). Every response to an
+    authenticated request includes `X-RateLimit-Limit`,
+    `X-RateLimit-Remaining`, and `X-RateLimit-Reset` (a 401 does not); a 429
+    from the limiter also includes `Retry-After`. The limiter is in-memory and therefore
+    per-replica: with several server replicas each counts separately.
+
+    **Pagination.** List endpoints take `limit` (1–100, default 20) and an opaque
+    `cursor`. Responses are `{ "data": [...], "nextCursor": "…" }`; pass
+    `nextCursor` back as `cursor` until it is `null`. Cursors are not stable
+    identifiers — never build or store them. Annotation lists default to 25 and
+    also require a from/to window.
+
+    **Monitor types.** `POST /monitors` and `PATCH /monitors/{id}` create and
+    edit HTTP monitors. Every type also supports PATCH with active for pause/resume.
+    DNS, TCP, heartbeat and Linux server-agent monitors are
+    created and updated with a configuration manifest: send it to
+    `POST /configuration/preview`, check the planned `entries`, then send the
+    same text with the returned `revision` to `POST /configuration/apply`. The
+    `MonitorManifest` schema and the preview examples show one monitor of every
+    type. Heartbeat and server monitors created this way stay paused until you
+    rotate their token or agent credential in the dashboard, because those
+    credentials are never accepted or returned through the API.
+
+    **Notification channels.** Channels (Email, Webhook, Slack, Discord,
+    Telegram) and email providers are created in the dashboard. The
+    API references them only by id (`channelIds` on HTTP create and in
+    manifests); unknown or foreign ids return 404. Channel destinations,
+    headers, provider credentials and webhook signing secrets are write-only:
+    no API response, export or log includes them. See `docs/api/webhooks.md` for
+    the signed Webhook payload. The dashboard generates signing credentials
+    locally; channel create/rotate responses never return plaintext or ciphertext.
+
+    **Status pages.** Status pages are edited and published in the dashboard.
+    Published pages expose read-only, unauthenticated JSON, SVG and feed
+    projections under `/api/status/pages/{publicKey}/…` (see the
+    `Status pages` tag); they never include private monitor URLs, credentials, subscribers or
+    internal notes. Public-history JSON requires explicit enablement. The
+    subscription POSTs use Origin validation and body-only page capabilities,
+    not API keys or session cookies. They share the public per-IP request budget.
+    Heartbeat and server-agent ingress use separate monitor credentials, documented
+    in `docs/uptime/heartbeat.md` and `docs/uptime/server-monitoring.md`.
   license:
     name: AGPL-3.0-or-later
 servers:
@@ -35,11 +83,46 @@ servers:
 security:
   - bearerAuth: []
 tags:
+  - name: Configuration
+    description: Portable monitor configuration (export, preview, apply).
   - name: Monitors
     description: Uptime monitor configuration and current state.
   - name: Monitor data
-    description: Read-only check logs, incidents, and aggregate stats.
+    description: Check logs, incidents, aggregate stats, observed availability and annotations.
+  - name: Status pages
+    description: Public published projections and opt-in email subscription actions. No API-key authority; shared per-IP budget of 240 requests per minute.
 paths:
+  /metrics:
+    get:
+      tags: [Monitor data]
+      summary: Read account-scoped Prometheus metrics
+      description: |
+        Requires existing API-read access. Reads stored state only, never probes.
+        At most 1000 monitors per scrape; larger self-hosted installations can
+        partition requests using monitorIds. Only monitor_id labels are emitted.
+        Status is -1 unknown, 0 down, 1 up, 2 degraded. Freshness is separate:
+        known health, active and age between zero and twice the interval plus timeout.
+        Heartbeats also require a stored deadline record and any next deadline
+        must be no more than ten seconds overdue. Durations describe HTTP requests,
+        DNS resolution or TCP connections; heartbeats and servers have NaN duration.
+        TLS expiry is only applicable to HTTP monitors.
+        Missing timings/timestamps are NaN. Durations are seconds, timestamps
+        are Unix seconds. Responses are private and never cached.
+      parameters:
+        - in: query
+          name: monitorIds
+          schema: { type: string, maxLength: 13000 }
+          description: Optional comma-separated selection of 1–200 owned monitor IDs.
+      responses:
+        '200':
+          description: Prometheus text exposition, version 0.0.4
+          content:
+            text/plain:
+              schema: { type: string }
+        '401': { description: Missing or invalid API key }
+        '403': { description: API-read access unavailable }
+        '422': { description: Invalid selection or more than 1000 monitors; partition using monitorIds }
+        '429': { description: Existing per-key API rate limit exceeded }
   /monitors:
     get:
       tags: [Monitors]
@@ -64,11 +147,12 @@ paths:
                     type: [string, "null"]
                     description: Pass back as `cursor` to fetch the next page; null when no more.
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "429": { $ref: "#/components/responses/RateLimited" }
     post:
       tags: [Monitors]
       summary: Create a monitor
-      description: Creates a monitor owned by the key's account.
+      description: Requires `full` key scope. Uses the same input validation and technical interval floor as the dashboard.
       requestBody:
         required: true
         content:
@@ -84,6 +168,7 @@ paths:
                 properties:
                   data: { $ref: "#/components/schemas/Monitor" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "422": { $ref: "#/components/responses/ValidationError" }
         "429": { $ref: "#/components/responses/RateLimited" }
   /monitors/{id}:
@@ -102,12 +187,13 @@ paths:
                 properties:
                   data: { $ref: "#/components/schemas/Monitor" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "429": { $ref: "#/components/responses/RateLimited" }
     patch:
       tags: [Monitors]
       summary: Update a monitor
-      description: Requires `full` access. Partial config update; status-page fields are not editable via the REST API.
+      description: Requires `full` key scope. Partial config update; status-page fields are not editable via the REST API.
       requestBody:
         required: true
         content:
@@ -123,13 +209,14 @@ paths:
                 properties:
                   data: { $ref: "#/components/schemas/Monitor" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422": { $ref: "#/components/responses/ValidationError" }
         "429": { $ref: "#/components/responses/RateLimited" }
     delete:
       tags: [Monitors]
       summary: Delete a monitor
-      description: Requires `full` access. Cancels its scheduled checks and cascades its history.
+      description: Requires `full` key scope. Cancels its scheduled checks and cascades its history.
       responses:
         "200":
           description: Deletion acknowledgement.
@@ -144,6 +231,7 @@ paths:
                       id: { type: string }
                       deleted: { type: boolean, const: true }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "429": { $ref: "#/components/responses/RateLimited" }
   /monitors/{id}/check-now:
@@ -152,7 +240,7 @@ paths:
     post:
       tags: [Monitors]
       summary: Run a check now
-      description: Requires `full` access. Runs a synchronous check; updates status and may open/resolve an incident. The monitor must be active.
+      description: Requires `full` key scope. Runs a synchronous HTTP, DNS or TCP check; updates status and may open/resolve an incident. The monitor must be active. Passive heartbeat and server monitors reject this operation with 422.
       responses:
         "200":
           description: The monitor after the check.
@@ -163,6 +251,7 @@ paths:
                 properties:
                   data: { $ref: "#/components/schemas/Monitor" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "422":
           description: The monitor is inactive.
@@ -193,6 +282,7 @@ paths:
                   nextCursor:
                     type: [string, "null"]
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "429": { $ref: "#/components/responses/RateLimited" }
   /monitors/{id}/incidents:
@@ -218,6 +308,7 @@ paths:
                   nextCursor:
                     type: [string, "null"]
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "429": { $ref: "#/components/responses/RateLimited" }
   /monitors/{id}/stats:
@@ -240,16 +331,337 @@ paths:
                 properties:
                   data: { $ref: "#/components/schemas/MonitorStats" }
         "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
         "404": { $ref: "#/components/responses/NotFound" }
         "429": { $ref: "#/components/responses/RateLimited" }
+  /monitors/{id}/reliability:
+    parameters:
+      - $ref: "#/components/parameters/MonitorId"
+      - name: from
+        in: query
+        required: true
+        description: Window start, ISO 8601 with offset.
+        schema: { type: string, format: date-time }
+      - name: to
+        in: query
+        required: true
+        description: Window end, ISO 8601 with offset. After `from`; requested span at most 730 days and no longer than `CHECK_LOG_RETENTION_DAYS`. The result clips future ends to now and treats time outside retention as unknown.
+        schema: { type: string, format: date-time }
+    get:
+      tags: [Monitor data]
+      summary: Get observed availability and coverage
+      description: >-
+        Duration-weighted view of the window: how much of the *observed time* was up (`availabilityPercent`)
+        and how much of the window was observed at all (`coveragePercent`). Gaps stay unknown. This is separate
+        from the per-check ratio in `/stats`. Requires `read` or `full` key scope.
+      responses:
+        "200":
+          description: Totals for the window, a daily series and the policy versions that applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Reliability" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /monitors/{id}/annotations:
+    parameters:
+      - $ref: "#/components/parameters/MonitorId"
+    get:
+      tags: [Monitor data]
+      summary: List annotations
+      description: Private deployment/change markers for the monitor, newest first. Requires `read` or `full` key scope. The half-open from/to window must span at most 730 days; reads clip its start to retained history.
+      parameters:
+        - { name: from, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: to, in: query, required: true, schema: { type: string, format: date-time } }
+        - { name: limit, in: query, schema: { type: integer, minimum: 1, maximum: 100, default: 25 } }
+        - { name: cursor, in: query, description: "Opaque cursor from the previous `nextCursor`.", schema: { type: string, maxLength: 512 } }
+      responses:
+        "200":
+          description: A page of annotations.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { $ref: "#/components/schemas/Annotation" }
+                  nextCursor: { type: [string, "null"] }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+    post:
+      tags: [Monitor data]
+      summary: Add an annotation
+      description: Requires `full` key scope. At most 1,000 annotations per monitor. Annotations are private and never appear on public status pages or feeds.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/AnnotationCreate" }
+      responses:
+        "201":
+          description: The stored annotation.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data: { $ref: "#/components/schemas/Annotation" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /configuration/export:
+    post:
+      tags: [Configuration]
+      summary: Export monitor configuration
+      description: >-
+        Returns a portable manifest for the selected monitors. Secrets (request headers, bodies, authentication,
+        heartbeat tokens, server credentials, channel destinations) are never included; entries that need them list `needsReentry`.
+        Linux server-agent export is unavailable; configure those monitors through import or the dashboard.
+        Requires `read` or `full` key scope. Bodies up to 1 MB.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [monitorIds]
+              additionalProperties: false
+              properties:
+                monitorIds: { type: array, minItems: 1, maxItems: 200, uniqueItems: true, items: { type: string, minLength: 1, maxLength: 64 } }
+      responses:
+        "200":
+          description: The manifest and any warnings.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigurationExport" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /configuration/preview:
+    post:
+      tags: [Configuration]
+      summary: Preview applying a manifest
+      description: >-
+        Validates the manifest text against your account and reports exactly what an apply would create, update
+        or reject. Changes nothing. The returned `revision` must be sent to `/configuration/apply`.
+        Requires `read` or `full` key scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text]
+              additionalProperties: false
+              properties:
+                text: { type: string, minLength: 1, maxLength: 262144, description: "The manifest as JSON text; see MonitorManifest." }
+            examples:
+              allTypes:
+                summary: One monitor of every type
+                description: The `text` value is the MonitorManifest example serialized as JSON.
+                value:
+                  text: '{"format":"pulsy-monitor-configuration","version":1,"monitors":[{"key":"api-health","type":"http","name":"API health","url":"https://api.example.com/health","method":"GET","expectedStatus":200,"timeout":10000,"interval":60,"failureThreshold":3,"redirectPolicy":"follow","active":true,"tags":["api"],"channelIds":["ch_ops_email"]},{"key":"dns-www","type":"dns","name":"www A record","configuration":{"type":"dns","hostname":"www.example.com","recordType":"A","mode":"matches","expected":["203.0.113.10"]},"timeout":10000,"interval":300,"failureThreshold":2,"active":true,"tags":["dns"]},{"key":"tcp-postgres","type":"tcp","name":"Postgres port","configuration":{"type":"tcp","hostname":"db.example.com","port":5432},"timeout":5000,"interval":60,"failureThreshold":3,"active":true,"tags":["db"]},{"key":"nightly-backup","type":"heartbeat","name":"Nightly backup","interval":86400,"graceSeconds":1800,"active":true,"tags":["cron"]},{"key":"web-01","type":"server","name":"web-01","interval":60,"active":true,"tags":["linux"],"thresholds":{"cpu":90,"memory":85,"disk":80},"excludedFilesystems":["/snap"]}]}'
+      responses:
+        "200":
+          description: Planned changes.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ConfigurationPreview" }
+              example:
+                manifest: { format: pulsy-monitor-configuration, version: 1, monitors: [] }
+                warnings:
+                  - { key: nightly-backup, field: heartbeatActivation }
+                  - { key: web-01, field: serverToken }
+                revision: 3f1c9a7e2b8d4f6a0c5e1b9d7a3f2e8c4b6d0a9f1e7c3b5d8a2f4e6c0b9d1a7e
+                counts: { create: 5, update: 0, unchanged: 0, rejected: 0 }
+                entries:
+                  - { key: api-health, action: create, changes: [], reasons: [] }
+                  - { key: dns-www, action: create, changes: [], reasons: [] }
+                  - { key: tcp-postgres, action: create, changes: [], reasons: [] }
+                  - { key: nightly-backup, action: create, changes: [], reasons: [] }
+                  - { key: web-01, action: create, changes: [], reasons: [] }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /configuration/apply:
+    post:
+      tags: [Configuration]
+      summary: Apply a previewed manifest
+      description: >-
+        Applies exactly the changes reported by a preview. Send the preview's `revision`; if your account changed
+        in the meantime the request fails with 409 and nothing is applied. The same validation and
+        destination policy used for normal creation apply. Requires `full` key scope.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [text, revision]
+              additionalProperties: false
+              properties:
+                text: { type: string, minLength: 1, maxLength: 262144 }
+                revision: { type: string, pattern: "^[a-f0-9]{64}$" }
+      responses:
+        "200":
+          description: Counts of what was applied.
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  counts: { $ref: "#/components/schemas/ConfigurationCounts" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+        "409":
+          description: The account changed since the preview; run a new preview.
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Error" }
+        "422": { $ref: "#/components/responses/ValidationError" }
+        "429": { $ref: "#/components/responses/RateLimited" }
+  /status/pages/{publicKey}/{format}:
+    servers:
+      - url: "{baseUrl}/api"
+        variables:
+          baseUrl:
+            default: https://pulsy.example.com
+    get:
+      tags: [Status pages]
+      summary: Read a published status page
+      description: >-
+        Unauthenticated, read-only projections of a published status page. `publicKey` is the page's non-secret
+        public identifier shown in the status-page editor. Draft and missing pages return 404; history.json also requires
+        explicit public-history enablement. Query parameters are
+        rejected with 400. Responses send `Cache-Control: no-store` and allow any origin.
+      security: []
+      parameters:
+        - { name: publicKey, in: path, required: true, schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$" } }
+        - { name: format, in: path, required: true, schema: { type: string, enum: [status.json, history.json, badge.svg, feed.rss, feed.atom] } }
+      responses:
+        "200":
+          description: "`status.json` (version 1: title, description, overallStatus, published monitors with public availability, announcements; abbreviated below), `history.json` (published daily history), a localized SVG badge, or an RSS/Atom feed of announcements."
+          content:
+            application/json:
+              schema: { type: object }
+              example: { version: 1, title: Example status, description: null, overallStatus: operational, monitors: [], announcements: [] }
+            image/svg+xml: {}
+            application/rss+xml: {}
+            application/atom+xml: {}
+        "400": { description: Query parameters are not accepted. }
+        "404": { description: The page is missing, unpublished, history is disabled, or the format is unknown. All return the same unavailable outcome. }
+        "429":
+          description: More than 240 requests per minute from one client address.
+          headers:
+            Retry-After: { schema: { type: integer } }
+        "503":
+          description: Temporarily busy.
+          headers:
+            Retry-After: { schema: { type: integer } }
+  /status/pages/{publicKey}/subscribe:
+    servers:
+      - url: "{baseUrl}/api"
+        variables:
+          baseUrl:
+            default: https://pulsy.example.com
+    post:
+      tags: [Status pages]
+      summary: Request an email subscription confirmation
+      description: >-
+        A published page with enabled subscriptions and an owned, usable verified email provider can request
+        confirmation for the whole page (empty componentIds) or exact published component IDs. No API key or
+        session is used. Requires an allowed Origin and at most 16 KiB of uncompressed JSON. Query parameters
+        are rejected. Shares the feeds' 240 requests per IP per minute. Valid requests return a neutral accepted
+        outcome, including when an address is already registered or no email can be sent. Confirmation expires
+        after 24 hours; another request is eligible after 15 minutes. Email links require an explicit action.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/PublicPageKey"
+        - $ref: "#/components/parameters/SubscriptionOrigin"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StatusSubscriptionRequest" }
+            example: { email: reader@example.com, componentIds: [], language: en }
+      responses:
+        "202": { $ref: "#/components/responses/SubscriptionAccepted" }
+        "400": { description: Invalid body or query parameters; outcome invalid. }
+        "403": { description: Origin is missing or not allowed; outcome forbidden. }
+        "404": { description: Missing or unpublished page; outcome unavailable. }
+        "413": { description: Body exceeds 16 KiB; outcome invalid. }
+        "415": { description: JSON content type required; compressed bodies and unsupported charsets are rejected; outcome invalid. }
+        "429": { $ref: "#/components/responses/PublicRateLimited" }
+        "503": { $ref: "#/components/responses/PublicBusy" }
+  /status/pages/{publicKey}/subscription:
+    servers:
+      - url: "{baseUrl}/api"
+        variables:
+          baseUrl:
+            default: https://pulsy.example.com
+    post:
+      tags: [Status pages]
+      summary: Confirm or unsubscribe using a page-bound capability
+      description: >-
+        Redeems a capability only from the JSON body, never from a URL, query, Authorization header or GET.
+        No API-key or session authority is used. Requires an allowed Origin, no query parameters and at most
+        16 KiB of uncompressed JSON. Shares the feeds' 240 requests per IP per minute. Valid requests return
+        the same neutral accepted outcome for unknown, expired or already-used tokens. Unsubscribe remains
+        available after page unpublication; confirmation still requires publication and enabled subscriptions.
+        Old tokens cannot change a later confirmed opt-in. Token values and subscriber addresses are never returned.
+      security: []
+      parameters:
+        - $ref: "#/components/parameters/PublicPageKey"
+        - $ref: "#/components/parameters/SubscriptionOrigin"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/StatusSubscriptionRedeem" }
+      responses:
+        "202": { $ref: "#/components/responses/SubscriptionAccepted" }
+        "400": { description: Invalid body or query parameters; outcome invalid. }
+        "403": { description: Origin is missing or not allowed; outcome forbidden. }
+        "404": { description: Page does not exist; outcome unavailable. }
+        "413": { description: Body exceeds 16 KiB; outcome invalid. }
+        "415": { description: JSON content type required; compressed bodies and unsupported charsets are rejected; outcome invalid. }
+        "429": { $ref: "#/components/responses/PublicRateLimited" }
+        "503": { $ref: "#/components/responses/PublicBusy" }
 components:
   securitySchemes:
     bearerAuth:
+      description: "Account API keys have read or full scope; all accounts can use the entire API. Dashboard creation defaults to read. Invalid, expired, revoked or removed keys and unavailable/banned owners return 401; insufficient scope returns 403. Optional expiry selects a UTC date after today and expires at 23:59:59.999 UTC. A revoked key can be removed from the dashboard list. Every account has a technical ceiling of 20 live, unexpired keys."
       type: http
       scheme: bearer
       bearerFormat: "pul_<random>"
-      description: "Pulsy API key. Header: `Authorization: Bearer pul_…`."
   parameters:
+    PublicPageKey:
+      name: publicKey
+      in: path
+      required: true
+      description: Non-secret public page identifier. Grants no owner or configuration access.
+      schema: { type: string, pattern: "^[A-Za-z0-9_-]{1,64}$" }
+    SubscriptionOrigin:
+      name: Origin
+      in: header
+      required: true
+      description: Must match the configured PUBLIC_WEB_URL origin or the page's verified custom-domain origin.
+      schema: { type: string, format: uri }
     MonitorId:
       name: id
       in: path
@@ -267,31 +679,94 @@ components:
       description: Opaque pagination cursor returned as `nextCursor`.
       schema: { type: string }
   responses:
+    SubscriptionAccepted:
+      description: Neutral outcome; does not reveal address registration or whether a token changed anything.
+      content:
+        application/json:
+          schema:
+            type: object
+            required: [outcome]
+            additionalProperties: false
+            properties:
+              outcome: { const: accepted }
+          example: { outcome: accepted }
+    PublicRateLimited:
+      description: Shared public-page per-IP request budget exceeded; outcome limited.
+      headers:
+        Retry-After: { schema: { type: integer } }
+    PublicBusy:
+      description: Temporary public-route failure or process concurrency bound; outcome unavailable or busy.
+      headers:
+        Retry-After: { schema: { type: integer } }
     Unauthorized:
-      description: Missing, invalid, or revoked API key.
+      description: Missing, invalid, expired, revoked or removed API key, or unavailable/banned owner.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: unauthorized, message: "The provided API key is invalid." } }
+    Forbidden:
+      description: A read-only key cannot call a write endpoint. Use a key with full scope to make changes.
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: forbidden, message: "This API key does not permit this operation." } }
     NotFound:
-      description: Resource not found or not owned by the caller.
+      description: Resource not found or not owned by the caller. Both cases return the same body.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: not_found, message: "Monitor not found" } }
     ValidationError:
-      description: Invalid request body or query parameters.
+      description: Invalid request body or parameters.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+          examples:
+            invalidBody:
+              summary: Body failed validation
+              value: { error: { code: validation_error, message: "Invalid input: interval: Interval must be 30, 60, 300, 600, 1800, or 3600 seconds" } }
+            manifest:
+              summary: Manifest rejected
+              value: { error: { code: validation_error, message: "Review the configuration manifest and its rejected entries. Nothing was applied." } }
     RateLimited:
       description: Per-key rate limit exceeded.
       headers:
         Retry-After:
           schema: { type: integer }
           description: Seconds until the window resets.
+        X-RateLimit-Limit:
+          schema: { type: integer }
+          description: Requests allowed per window.
+        X-RateLimit-Remaining:
+          schema: { type: integer }
+          description: Requests left in the current window (0 here).
+        X-RateLimit-Reset:
+          schema: { type: integer }
+          description: Unix time (seconds) when the window resets.
       content:
         application/json:
           schema: { $ref: "#/components/schemas/Error" }
+          example: { error: { code: rate_limited, message: "Too many requests. Retry after 42 seconds." } }
   schemas:
+    StatusSubscriptionRequest:
+      type: object
+      required: [email, componentIds]
+      additionalProperties: false
+      properties:
+        email: { type: string, format: email, maxLength: 254, writeOnly: true, description: Trimmed and lowercased for per-page deduplication; never returned. }
+        componentIds:
+          type: array
+          uniqueItems: true
+          description: Empty follows the whole page, including future explicitly published components; otherwise exact page component IDs.
+          items: { type: string, minLength: 1, maxLength: 64 }
+        language: { type: string, enum: [en, ar, fr, de, es], default: en }
+    StatusSubscriptionRedeem:
+      type: object
+      required: [action, token]
+      additionalProperties: false
+      properties:
+        action: { type: string, enum: [confirm, unsubscribe] }
+        token: { type: string, pattern: "^[A-Za-z0-9_-]{43}$", writeOnly: true, description: Page-bound capability accepted only in this JSON body. }
     Error:
       type: object
       required: [error]
@@ -302,21 +777,45 @@ components:
           properties:
             code:
               type: string
-              enum: [unauthorized, not_found, validation_error, rate_limited, internal]
+              enum: [unauthorized, forbidden, not_found, conflict, validation_error, rate_limited, internal]
             message:
               type: string
               description: Localized human-readable message.
+    LatencyPolicy:
+      type: [object, "null"]
+      description: Null preserves legacy behavior. Paired null thresholds disable latency while retaining quiet recovery and importance. Numeric recovery threshold must be at or below thresholdMs. See docs/uptime/latency-alerts.md.
+      additionalProperties: false
+      required: [thresholdMs, slowCount, recoveryThresholdMs, recoveryCount]
+      properties:
+        thresholdMs: { type: [integer, "null"], minimum: 1, maximum: 60000 }
+        slowCount: { type: integer, minimum: 1, maximum: 10 }
+        recoveryThresholdMs: { type: [integer, "null"], minimum: 0, maximum: 60000 }
+        recoveryCount: { type: integer, minimum: 1, maximum: 10 }
+        importance: { type: string, enum: [critical, warning, informational], default: critical }
+        cooldownSeconds: { type: integer, minimum: 0, maximum: 3600, default: 0 }
     Monitor:
       type: object
       properties:
         id: { type: string }
         name: { type: string }
-        url: { type: string, format: uri }
+        monitorType: { type: string, enum: [http, heartbeat, dns, tcp, server], description: "Stored monitor type. POST/PATCH /monitors create and edit HTTP monitors; create and update the other types with /configuration/preview and /configuration/apply (see MonitorManifest)." }
+        url: { type: string, description: HTTP destination. Empty for heartbeat and server monitors. }
         method: { type: string, enum: [GET, HEAD, POST] }
         expectedStatus: { type: integer }
+        expectedStatuses: { type: [string, "null"], maxLength: 128, example: "200,204", description: "Optional accepted-status expression: comma-separated codes, classes such as 2xx, or ascending ranges such as 200-299. Null uses expectedStatus. Updating the numeric field alone clears this rule." }
+        tlsMonitoringEnabled: { type: boolean, default: true, description: "Collect HTTPS certificate expiry and dispatch eligible TLS alerts. Disabling clears stored certificate observations; HTTP transport verification remains enabled." }
+        httpAssertions:
+          type: array
+          items: { $ref: "#/components/schemas/HttpAssertion" }
+          description: Response rules that must also pass for a check to be up. Empty when none are configured.
+        redirectPolicy: { type: string, enum: [follow, manual, error] }
+        requestConfigured: { type: boolean, description: "True when custom request headers, body or authentication are stored. Their values are write-only and never returned." }
         timeout: { type: integer, description: Request timeout in ms. }
         interval: { type: integer, description: Check interval in seconds. }
         failureThreshold: { type: integer }
+        latencyPolicy: { $ref: "#/components/schemas/LatencyPolicy" }
+        consecutiveSlow: { type: integer }
+        consecutiveHealthy: { type: integer }
         active: { type: boolean }
         status: { type: string, enum: [up, down, degraded, pending] }
         httpStatus: { type: [integer, "null"] }
@@ -326,25 +825,45 @@ components:
         tlsExpiresAt: { type: [string, "null"], format: date-time }
         tlsExpiresInDays: { type: [integer, "null"] }
         consecutiveFailures: { type: integer }
-        uptimePercentage: { type: [number, "null"] }
+        uptimePercentage:
+          type: [number, "null"]
+          description: >-
+            Rolling 30-day check success, in percent with 2 decimals: recorded checks with
+            status up divided by all recorded checks (degraded and down both count as not up).
+            null when there are no recorded checks. This is not duration-weighted availability;
+            the field name is kept for compatibility.
         tags:
           type: array
           items: { type: string }
         createdAt: { type: string, format: date-time }
     MonitorCreate:
       type: object
-      required: [name, url]
+      required: [url]
       properties:
-        name: { type: string, minLength: 1, maxLength: 255 }
+        name: { type: string, maxLength: 255, default: "", description: "Trimmed; omission or an empty name uses the destination hostname." }
         url: { type: string, format: uri }
         method: { type: string, enum: [GET, HEAD, POST], default: GET }
         expectedStatus: { type: integer, minimum: 100, maximum: 599, default: 200 }
+        expectedStatuses: { type: [string, "null"], maxLength: 128, example: "200,204", description: "Optional accepted-status expression: comma-separated codes, classes such as 2xx, or ascending ranges such as 200-299. Null uses expectedStatus. Updating the numeric field alone clears this rule." }
+        tlsMonitoringEnabled: { type: boolean, default: true, description: "Collect HTTPS certificate expiry and dispatch eligible TLS alerts. Disabling clears stored certificate observations; HTTP transport verification remains enabled." }
+        httpAssertions:
+          type: array
+          maxItems: 20
+          items: { $ref: "#/components/schemas/HttpAssertion" }
+        redirectPolicy: { type: string, enum: [follow, manual, error] }
+        requestConfig: { $ref: "#/components/schemas/HttpRequestConfig" }
+        channelIds:
+          type: array
+          maxItems: 20
+          items: { type: string, minLength: 1, maxLength: 64 }
+          description: Existing notification channel IDs to bind. Unknown or foreign IDs are rejected with 404.
         timeout: { type: integer, minimum: 1000, maximum: 60000, default: 10000 }
         interval:
           type: integer
           enum: [30, 60, 300, 600, 1800, 3600]
           default: 300
-          description: Check interval in seconds.
+          description: Check interval in seconds. The technical floor is 30 seconds for every account.
+        latencyPolicy: { $ref: "#/components/schemas/LatencyPolicy" }
         failureThreshold: { type: integer, minimum: 1, maximum: 10, default: 3 }
         active: { type: boolean, default: true }
         tags:
@@ -353,20 +872,276 @@ components:
           items: { type: string, minLength: 1, maxLength: 50 }
     MonitorUpdate:
       type: object
-      description: All fields optional; only provided fields change. Status-page fields are not editable here.
+      description: All fields optional; only provided fields change. Every monitor type supports active pause/resume. HTTP-only fields are rejected for other types; use configuration manifests for their settings. Status-page fields are not editable here.
       properties:
         name: { type: string, minLength: 1, maxLength: 255 }
         url: { type: string, format: uri }
         method: { type: string, enum: [GET, HEAD, POST] }
         expectedStatus: { type: integer, minimum: 100, maximum: 599 }
+        expectedStatuses: { type: [string, "null"], maxLength: 128, example: "200,204", description: "Optional accepted-status expression: comma-separated codes, classes such as 2xx, or ascending ranges such as 200-299. Null uses expectedStatus. Updating the numeric field alone clears this rule." }
+        tlsMonitoringEnabled: { type: boolean, default: true, description: "Collect HTTPS certificate expiry and dispatch eligible TLS alerts. Disabling clears stored certificate observations; HTTP transport verification remains enabled." }
+        httpAssertions:
+          type: array
+          maxItems: 20
+          items: { $ref: "#/components/schemas/HttpAssertion" }
+        redirectPolicy: { type: string, enum: [follow, manual, error] }
+        requestConfig:
+          description: "Omit to keep the stored request configuration; send null to clear it."
+          oneOf:
+            - { $ref: "#/components/schemas/HttpRequestConfig" }
+            - { type: "null" }
         timeout: { type: integer, minimum: 1000, maximum: 60000 }
         interval: { type: integer, enum: [30, 60, 300, 600, 1800, 3600] }
+        latencyPolicy: { $ref: "#/components/schemas/LatencyPolicy" }
         failureThreshold: { type: integer, minimum: 1, maximum: 10 }
         active: { type: boolean }
         tags:
           type: array
           maxItems: 10
           items: { type: string, minLength: 1, maxLength: 50 }
+    HttpAssertion:
+      description: One response rule. The fields depend on `type`.
+      oneOf:
+        - type: object
+          required: [type, value]
+          additionalProperties: false
+          properties: { type: { const: body_contains }, value: { type: string, minLength: 1, maxLength: 1000 } }
+        - type: object
+          required: [type, value]
+          additionalProperties: false
+          properties: { type: { const: body_not_contains }, value: { type: string, minLength: 1, maxLength: 1000 } }
+        - type: object
+          required: [type, name, value]
+          additionalProperties: false
+          properties: { type: { const: header_equals }, name: { type: string, maxLength: 128 }, value: { type: string, maxLength: 1000 } }
+        - type: object
+          required: [type, name, value]
+          additionalProperties: false
+          properties: { type: { const: header_contains }, name: { type: string, maxLength: 128 }, value: { type: string, minLength: 1, maxLength: 1000 } }
+        - type: object
+          required: [type, path, op]
+          additionalProperties: false
+          description: "`value` is required unless `op` is `exists`, and must be a number for lt/lte/gt/gte."
+          properties:
+            type: { const: json }
+            path: { type: string, maxLength: 256, description: "Dotted path starting with $, e.g. $.status or $.items[0].ok." }
+            op: { type: string, enum: [exists, equals, not_equals, lt, lte, gt, gte] }
+            value: {}
+    HttpRequestConfig:
+      type: object
+      additionalProperties: false
+      description: Write-only custom request settings. Values are stored encrypted and never returned; reads only show `requestConfigured`.
+      properties:
+        headers:
+          type: array
+          maxItems: 20
+          items:
+            type: object
+            required: [name, value]
+            additionalProperties: false
+            properties: { name: { type: string, maxLength: 128 }, value: { type: string, maxLength: 4096 } }
+        body: { type: string, maxLength: 65536 }
+        contentType: { type: string, maxLength: 128 }
+        auth:
+          oneOf:
+            - { type: object, required: [type, username, password], additionalProperties: false, properties: { type: { const: basic }, username: { type: string }, password: { type: string } } }
+            - { type: object, required: [type, token], additionalProperties: false, properties: { type: { const: bearer }, token: { type: string } } }
+    ReliabilityTotals:
+      type: object
+      description: Durations are milliseconds. Percentages are 0–100 or null when there is nothing to divide by.
+      properties:
+        windowMs: { type: integer }
+        observedMs: { type: integer }
+        unknownMs: { type: integer }
+        excludedMs: { type: integer }
+        upMs: { type: integer }
+        downMs: { type: integer }
+        degradedMs: { type: integer }
+        latencyEligibleMs: { type: integer }
+        latencyMetMs: { type: integer }
+        availabilityPercent: { type: [number, "null"], description: Observed availability = upMs / observedMs. }
+        coveragePercent: { type: [number, "null"], description: Observed coverage = observedMs / (windowMs − excludedMs). }
+        latencyPercent: { type: [number, "null"] }
+        allowedDowntimeMs: { type: [number, "null"] }
+        consumedDowntimeMs: { type: integer }
+        remainingBudgetMs: { type: [number, "null"] }
+        overBudgetMs: { type: [number, "null"] }
+    Reliability:
+      type: object
+      properties:
+        monitorId: { type: string }
+        monitorType: { type: string, enum: [http, heartbeat, dns, tcp, server] }
+        from: { type: string, format: date-time }
+        to: { type: string, format: date-time, description: Clipped to the time of the request. }
+        asOf: { type: string, format: date-time }
+        retainedFrom: { type: string, format: date-time, description: Earliest instant `CHECK_LOG_RETENTION_DAYS` retention still covers. }
+        retentionClipped: { type: boolean }
+        boundaryLimited: { type: boolean }
+        raw: { $ref: "#/components/schemas/ReliabilityTotals" }
+        maintenanceAdjusted:
+          description: Same totals with maintenance windows excluded; null unless the monitor's policy enables the adjustment.
+          oneOf:
+            - { $ref: "#/components/schemas/ReliabilityTotals" }
+            - { type: "null" }
+        checks: { type: integer, description: Recorded checks in the window. }
+        checkSuccessPercent: { type: [number, "null"], description: Per-check ratio for the same window (see /stats). }
+        averageTimingMs: { type: [number, "null"] }
+        policyIds: { type: array, items: { type: string } }
+        policy: { type: [object, "null"], description: The measurement policy in effect (targets, maintenance exclusion). }
+        series: { type: array, items: { type: object }, description: Daily rows (UTC days) with the same measures. }
+    Annotation:
+      type: object
+      properties:
+        id: { type: string }
+        monitorId: { type: string }
+        at: { type: string, format: date-time }
+        environment: { type: string, maxLength: 100 }
+        version: { type: string, maxLength: 100 }
+        text: { type: string, maxLength: 1000 }
+        link: { type: [string, "null"], description: HTTP(S) link without credentials, query or fragment. }
+        createdAt: { type: string, format: date-time }
+    AnnotationCreate:
+      type: object
+      required: [at, text]
+      additionalProperties: false
+      properties:
+        at: { type: string, format: date-time, description: Not in the future and within `CHECK_LOG_RETENTION_DAYS` retention. }
+        environment: { type: string, maxLength: 100, default: "" }
+        version: { type: string, maxLength: 100, default: "" }
+        text: { type: string, minLength: 1, maxLength: 1000 }
+        link: { type: [string, "null"], maxLength: 2048, default: null, description: "HTTP(S) URL without credentials, query or fragment; configured secret-bearing links are rejected." }
+    ConfigurationCounts:
+      type: object
+      properties:
+        create: { type: integer }
+        update: { type: integer }
+        unchanged: { type: integer }
+        rejected: { type: integer }
+    ConfigurationExport:
+      type: object
+      properties:
+        manifest:
+          type: object
+          description: "`{ format: \"pulsy-monitor-configuration\", version: 1, monitors: [...] }`. Send it back as JSON text to `/configuration/preview`."
+        warnings: { type: array, items: { type: object } }
+    ConfigurationPreview:
+      type: object
+      properties:
+        manifest: { type: object }
+        warnings: { type: array, items: { type: object } }
+        revision: { type: string, pattern: "^[a-f0-9]{64}$", description: Pass to /configuration/apply. }
+        counts: { $ref: "#/components/schemas/ConfigurationCounts" }
+        entries: { type: array, items: { type: object }, description: One entry per manifest monitor with the planned action. }
+    MonitorManifest:
+      type: object
+      required: [format, version, monitors]
+      additionalProperties: false
+      description: "Portable monitor configuration. Keys are unique; an existing monitor with the same key is updated, otherwise a new one is created. Secret-bearing fields are stripped on import and reported in `warnings`."
+      properties:
+        format: { const: pulsy-monitor-configuration }
+        version: { const: 1 }
+        monitors:
+          type: array
+          minItems: 1
+          maxItems: 200
+          items:
+            oneOf:
+              - { $ref: "#/components/schemas/ManifestHttpMonitor" }
+              - { $ref: "#/components/schemas/ManifestNetworkMonitor" }
+              - { $ref: "#/components/schemas/ManifestHeartbeatMonitor" }
+              - { $ref: "#/components/schemas/ManifestServerMonitor" }
+      example:
+        format: pulsy-monitor-configuration
+        version: 1
+        monitors:
+          - { key: api-health, type: http, name: API health, url: "https://api.example.com/health", method: GET, expectedStatus: 200, timeout: 10000, interval: 60, failureThreshold: 3, redirectPolicy: follow, active: true, tags: [api], channelIds: [ch_ops_email] }
+          - { key: dns-www, type: dns, name: www A record, configuration: { type: dns, hostname: www.example.com, recordType: A, mode: matches, expected: [203.0.113.10] }, timeout: 10000, interval: 300, failureThreshold: 2, active: true, tags: [dns] }
+          - { key: tcp-postgres, type: tcp, name: Postgres port, configuration: { type: tcp, hostname: db.example.com, port: 5432 }, timeout: 5000, interval: 60, failureThreshold: 3, active: true, tags: [db] }
+          - { key: nightly-backup, type: heartbeat, name: Nightly backup, interval: 86400, graceSeconds: 1800, active: true, tags: [cron] }
+          - { key: web-01, type: server, name: web-01, interval: 60, active: true, tags: [linux], thresholds: { cpu: 90, memory: 85, disk: 80 }, excludedFilesystems: [/snap] }
+    ManifestCommon:
+      type: object
+      required: [key, name, interval, active, tags]
+      properties:
+        key: { type: string, pattern: "^[A-Za-z0-9][A-Za-z0-9_.:-]*$", maxLength: 100, description: Your stable identifier for this monitor. }
+        previousKey: { type: string, maxLength: 100, description: Rename an existing monitor's key. }
+        name: { type: string, minLength: 1, maxLength: 255 }
+        interval: { type: integer, description: "Seconds. HTTP/DNS/TCP: 30, 60, 300, 600, 1800 or 3600. Heartbeat: expected ping period, 30–604800. Server: reporting interval, 60–3600." }
+        active: { type: boolean }
+        tags: { type: array, maxItems: 50, items: { type: string, minLength: 1, maxLength: 64 }, description: "HTTP/DNS/TCP entries use the narrower type-specific bounds below." }
+        needsReentry: { type: array, maxItems: 5, items: { type: string, enum: [request, url, assertions, heartbeatToken, serverToken] } }
+        channelIds: { type: array, maxItems: 20, items: { type: string, minLength: 1, maxLength: 64 }, description: Existing notification channel ids to bind. }
+    ManifestHttpMonitor:
+      allOf:
+        - { $ref: "#/components/schemas/ManifestCommon" }
+        - type: object
+          required: [type, url, method, expectedStatus, timeout, failureThreshold, redirectPolicy]
+          properties:
+            type: { const: http }
+            tags: { type: array, maxItems: 10, items: { type: string, minLength: 1, maxLength: 50 } }
+            url: { type: [string, "null"], description: "http(s) URL without credentials, query or fragment. null keeps an existing monitor's URL." }
+            method: { type: string, enum: [GET, HEAD, POST] }
+            expectedStatus: { type: integer, minimum: 100, maximum: 599 }
+            expectedStatuses: { type: [string, "null"], maxLength: 128 }
+            tlsMonitoringEnabled: { type: boolean }
+            timeout: { type: integer, minimum: 1000, maximum: 60000 }
+            failureThreshold: { type: integer, minimum: 1, maximum: 10 }
+            redirectPolicy: { type: string, enum: [follow, manual, error] }
+            httpAssertions: { type: array, items: { $ref: "#/components/schemas/HttpAssertion" } }
+            latencyPolicy: { $ref: "#/components/schemas/LatencyPolicy" }
+    ManifestNetworkMonitor:
+      allOf:
+        - { $ref: "#/components/schemas/ManifestCommon" }
+        - type: object
+          required: [type, configuration, timeout, failureThreshold]
+          properties:
+            type: { type: string, enum: [dns, tcp] }
+            tags: { type: array, maxItems: 10, items: { type: string, minLength: 1, maxLength: 50 } }
+            configuration:
+              description: "`configuration.type` must equal `type`."
+              oneOf:
+                - type: object
+                  required: [type, hostname, recordType, mode]
+                  additionalProperties: false
+                  properties:
+                    type: { const: dns }
+                    hostname: { type: string, maxLength: 253 }
+                    recordType: { type: string, enum: [A, AAAA, CNAME, MX, TXT] }
+                    mode: { type: string, enum: [exists, matches], description: "`matches` requires at least one expected answer." }
+                    expected: { type: array, maxItems: 50, items: {}, description: "IPv4/IPv6 addresses, hostnames, `{ exchange, priority }` MX records or TXT strings, matching recordType." }
+                - type: object
+                  required: [type, hostname, port]
+                  additionalProperties: false
+                  properties:
+                    type: { const: tcp }
+                    hostname: { type: string, maxLength: 253, description: Hostname or IPv6 literal. }
+                    port: { type: integer, minimum: 1, maximum: 65535 }
+            timeout: { type: integer, minimum: 1000, maximum: 60000 }
+            failureThreshold: { type: integer, minimum: 1, maximum: 10 }
+            latencyPolicy: { $ref: "#/components/schemas/LatencyPolicy" }
+    ManifestHeartbeatMonitor:
+      allOf:
+        - { $ref: "#/components/schemas/ManifestCommon" }
+        - type: object
+          required: [type, graceSeconds]
+          properties:
+            type: { const: heartbeat }
+            graceSeconds: { type: integer, minimum: 0, maximum: 604800, description: "A ping is Late at the expected time and Down after this grace period." }
+    ManifestServerMonitor:
+      allOf:
+        - { $ref: "#/components/schemas/ManifestCommon" }
+        - type: object
+          required: [type]
+          properties:
+            type: { const: server }
+            thresholds:
+              type: object
+              additionalProperties: false
+              properties:
+                cpu: { type: number, minimum: 0, maximum: 100, default: 90 }
+                memory: { type: number, minimum: 0, maximum: 100, default: 90 }
+                disk: { type: number, minimum: 0, maximum: 100, default: 90 }
+            excludedFilesystems: { type: array, maxItems: 32, items: { type: string, pattern: "^/", maxLength: 512 } }
     CheckLog:
       type: object
       properties:
@@ -374,7 +1149,9 @@ components:
         status: { type: string, enum: [up, down, degraded] }
         httpStatus: { type: [integer, "null"] }
         responseTime: { type: [integer, "null"] }
-        errorMessage: { type: [string, "null"] }
+        errorMessage: { type: [string, "null"], description: Stored check-failure code (legacy rows may hold English text). }
+        errorCode: { type: [string, "null"], description: "Check-failure taxonomy code, e.g. dns_not_found, connection_refused, response_timeout, blocked_target, unexpected_status." }
+        errorLabel: { type: [string, "null"], description: Label for errorCode in the request language. }
         createdAt: { type: string, format: date-time }
     Incident:
       type: object
@@ -385,13 +1162,20 @@ components:
         resolvedAt: { type: [string, "null"], format: date-time }
         durationSeconds: { type: [integer, "null"] }
         cause: { type: [string, "null"] }
+        causeCode: { type: [string, "null"], description: Check-failure taxonomy code behind cause. }
+        causeLabel: { type: [string, "null"], description: Label for cause in the request language. }
+        expectedAt: { type: [string, "null"], format: date-time, description: "Heartbeat incidents: when the missed ping was due. startedAt is expectedAt + grace." }
+        notifiedAt: { type: [string, "null"], format: date-time, description: First delivered outage alert. }
     MonitorStats:
       type: object
       properties:
         totalChecks: { type: integer }
         successfulChecks: { type: integer }
-        failedChecks: { type: integer }
+        failedChecks: { type: integer, description: Checks with status down. }
+        degradedChecks: { type: integer, description: "Checks with status degraded. successfulChecks + degradedChecks + failedChecks = totalChecks." }
         avgResponseTime: { type: [number, "null"] }
         minResponseTime: { type: [number, "null"] }
         maxResponseTime: { type: [number, "null"] }
-        uptimePercentage: { type: number }
+        uptimePercentage:
+          type: [number, "null"]
+          description: Check success for the window, successfulChecks divided by totalChecks in percent; null without checks.

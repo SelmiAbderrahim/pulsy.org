@@ -1,0 +1,72 @@
+# Disposable acceptance network; no host ports, repository mounts or production DB.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: acceptance
+      POSTGRES_PASSWORD: disposable-test-only
+      POSTGRES_DB: acceptance
+    tmpfs: [/var/lib/postgresql/data]
+    healthcheck:
+      test: [CMD-SHELL, pg_isready -U acceptance]
+      interval: 1s
+      retries: 40
+  fixture:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.agent-install-test
+      target: e2e
+    cap_add: [SYS_ADMIN]
+    security_opt: [seccomp=unconfined, apparmor=unconfined]
+    cgroup: private
+    tmpfs: [/run, /run/lock, /tmp, /sys/fs/cgroup]
+    volumes:
+      - fixture:/fixture
+  server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server
+      target: dev
+    init: true
+    entrypoint: [node, /app/tests/server-health-e2e/backend.mjs]
+    environment:
+      DATABASE_URL: postgres://acceptance:disposable-test-only@postgres:5432/acceptance
+      PUBLIC_WEB_URL: https://pulsy-e2e
+      BETTER_AUTH_URL: https://pulsy-e2e
+      REQUIRE_EMAIL_VERIFICATION: 'false'
+      MONITOR_ALLOW_PRIVATE_NETWORKS: 'true'
+      TRUST_PROXY_HOPS: '1'
+    volumes:
+      - fixture:/fixture
+    depends_on:
+      postgres: {condition: service_healthy}
+      fixture: {condition: service_started}
+  web:
+    depends_on: [server]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.web
+      args:
+        VITE_APP_URL: https://pulsy-e2e
+        # Unit tests run separately in the default web build; this is the browser fixture.
+        RUN_WEB_TESTS: '0'
+  proxy:
+    depends_on: [web]
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server-health-e2e-proxy
+    volumes:
+      - fixture:/fixture:ro
+    networks:
+      default:
+        aliases: [pulsy-e2e]
+  browser:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile.server-health-e2e
+    volumes:
+      - evidence:/evidence
+    shm_size: 1gb
+volumes:
+  fixture:
+  evidence:

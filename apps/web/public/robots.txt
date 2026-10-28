@@ -1,11 +1,9 @@
 User-agent: *
 Disallow: /dashboard
 Disallow: /superadmin
-Disallow: /pricing
 Disallow: /login
 Disallow: /signup
 Disallow: /forgot-password
 Disallow: /reset-password
 Disallow: /share/
-Disallow: /invite/
 Disallow: /api/

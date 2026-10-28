@@ -132,6 +132,9 @@ export function useDeleteUptimeNotificationChannel() {
       uptimeMonitorId: string | null;
     }) => UptimeService.deleteChannel(params.channelId),
     onSuccess: (_data, params) => {
+      queryClient.invalidateQueries({ queryKey: uptimeKeys.monitors.all() });
+      queryClient.invalidateQueries({ queryKey: uptimeKeys.incidents.all() });
+      queryClient.invalidateQueries({ queryKey: [...uptimeKeys.all(), "templateChannels"] });
       if (params.uptimeMonitorId === null) {
         queryClient.invalidateQueries({
           queryKey: uptimeKeys.channels.defaults(),

@@ -1,3 +1,4 @@
+import { addCachedMonitors, changeCachedMonitors } from "./optimistic-cache";
 /**
  * Uptime Monitor Hooks - React Query hooks for monitor CRUD
  *
@@ -6,7 +7,7 @@
  * @module hooks/uptime/useUptimeMonitors
  */
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
+import { useIsFetching, useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { UptimeService } from "@/services/uptime/uptimeService";
 import { uptimeKeys } from "./queryKeys";
 import type {
@@ -15,6 +16,7 @@ import type {
   UpdateUptimeMonitorInput,
   BulkUpdateUptimeMonitorsInput,
 } from "@/types/uptime";
+import { isAwaitingFirstCheck } from "@/lib/uptime/format";
 
 /**
  * Hook to list all uptime monitors
@@ -25,8 +27,19 @@ export function useUptimeMonitors(options?: { enabled?: boolean }) {
     queryFn: () => UptimeService.listMonitors(),
     enabled: options?.enabled !== false,
     staleTime: 1000 * 30, // 30 seconds
-    refetchInterval: 1000 * 60, // Refetch every minute for status updates
+    retry: false,
+    // Poll briefly while a first check runs so "Checking…" turns into a result within seconds.
+    refetchInterval: query => query.state.data?.some(isAwaitingFirstCheck) ? 3000 : 1000 * 60,
   });
+}
+
+/**
+ * True while an invalidated monitor list (after a write) is being refetched.
+ * Routine polling does not count, so the counters only say "Updating…" when
+ * a mutation has made the current snapshot provisional.
+ */
+export function useMonitorListUpdating() {
+  return useIsFetching({ queryKey: uptimeKeys.monitors.lists(), predicate: query => query.state.isInvalidated }) > 0;
 }
 
 /**
@@ -41,7 +54,7 @@ export function useUptimeMonitor(
     queryFn: () => UptimeService.getMonitor(uptimeMonitorId),
     enabled: options?.enabled !== false && Boolean(uptimeMonitorId),
     staleTime: 1000 * 15, // 15 seconds
-    refetchInterval: 1000 * 30, // Refetch every 30 seconds for live status
+    refetchInterval: query => query.state.data && isAwaitingFirstCheck(query.state.data) ? 3000 : 1000 * 30,
   });
 }
 
@@ -54,7 +67,8 @@ export function useCreateUptimeMonitor() {
   return useMutation({
     mutationFn: (input: CreateUptimeMonitorInput) =>
       UptimeService.createMonitor(input),
-    onSuccess: () => {
+    onSuccess: (created) => {
+      addCachedMonitors(queryClient, [created]);
       queryClient.invalidateQueries({
         queryKey: uptimeKeys.monitors.lists(),
       });
@@ -74,7 +88,8 @@ export function useCreateUptimeMonitorsBulk() {
   return useMutation({
     mutationFn: (monitors: CreateUptimeMonitorInput[]) =>
       UptimeService.createMonitorsBulk(monitors),
-    onSuccess: () => {
+    onSuccess: (created) => {
+      addCachedMonitors(queryClient, created);
       queryClient.invalidateQueries({
         queryKey: uptimeKeys.monitors.lists(),
       });
@@ -106,9 +121,12 @@ export function useUpdateUptimeMonitor() {
       );
 
       if (previousData) {
+        // Private replacements belong only to this form/request, never the shared cache.
+        const optimistic = { ...input };
+        delete optimistic.requestConfig;
         queryClient.setQueryData(
           uptimeKeys.monitors.detail(input.uptimeMonitorId),
-          { ...previousData, ...input }
+          { ...previousData, ...optimistic }
         );
       }
 
@@ -145,13 +163,11 @@ export function useBulkUpdateUptimeSettings() {
   return useMutation({
     mutationFn: (input: BulkUpdateUptimeMonitorsInput) =>
       UptimeService.updateMonitorsBulk(input),
-    onSuccess: () => {
+    onSuccess: (_data, input) => {
       queryClient.invalidateQueries({
         queryKey: uptimeKeys.monitors.lists(),
       });
-      queryClient.invalidateQueries({
-        queryKey: uptimeKeys.monitors.details(),
-      });
+      for (const id of input.monitorIds) queryClient.invalidateQueries({queryKey:uptimeKeys.monitors.detail(id)});
       queryClient.invalidateQueries({
         queryKey: uptimeKeys.dashboard.summary(),
       });
@@ -168,6 +184,8 @@ export function useDeleteUptimeMonitor() {
   return useMutation({
     mutationFn: ({ uptimeMonitorId }: { uptimeMonitorId: string }) =>
       UptimeService.deleteMonitor(uptimeMonitorId),
+    onMutate: ({uptimeMonitorId}) => changeCachedMonitors(queryClient,[uptimeMonitorId],()=>null),
+    onError: (_error,_input,rollback) => rollback?.(),
     onSuccess: (_data, { uptimeMonitorId }) => {
       queryClient.removeQueries({
         queryKey: uptimeKeys.monitors.detail(uptimeMonitorId),
@@ -191,32 +209,8 @@ export function useToggleUptimeMonitor() {
   return useMutation({
     mutationFn: ({ uptimeMonitorId }: { uptimeMonitorId: string }) =>
       UptimeService.toggleActive(uptimeMonitorId),
-    onMutate: async ({ uptimeMonitorId }) => {
-      await queryClient.cancelQueries({
-        queryKey: uptimeKeys.monitors.detail(uptimeMonitorId),
-      });
-
-      const previousData = queryClient.getQueryData<UptimeMonitor>(
-        uptimeKeys.monitors.detail(uptimeMonitorId)
-      );
-
-      if (previousData) {
-        queryClient.setQueryData(
-          uptimeKeys.monitors.detail(uptimeMonitorId),
-          { ...previousData, active: !previousData.active }
-        );
-      }
-
-      return { previousData };
-    },
-    onError: (_error, { uptimeMonitorId }, context) => {
-      if (context?.previousData) {
-        queryClient.setQueryData(
-          uptimeKeys.monitors.detail(uptimeMonitorId),
-          context.previousData
-        );
-      }
-    },
+    onMutate: ({uptimeMonitorId}) => changeCachedMonitors(queryClient,[uptimeMonitorId],row=>({...row,active:!row.active})),
+    onError: (_error,_input,rollback) => rollback?.(),
     onSettled: (_data, _error, { uptimeMonitorId }) => {
       queryClient.invalidateQueries({
         queryKey: uptimeKeys.monitors.detail(uptimeMonitorId),
@@ -241,6 +235,8 @@ export function useCheckNow() {
     mutationFn: ({ uptimeMonitorId }: { uptimeMonitorId: string }) =>
       UptimeService.checkNow(uptimeMonitorId),
     onSuccess: (_data, { uptimeMonitorId }) => {
+      queryClient.invalidateQueries({ queryKey: uptimeKeys.slaReports.details(uptimeMonitorId) });
+      queryClient.invalidateQueries({ queryKey: uptimeKeys.incidents.list(uptimeMonitorId) });
       queryClient.invalidateQueries({
         queryKey: uptimeKeys.monitors.detail(uptimeMonitorId),
       });
@@ -252,6 +248,9 @@ export function useCheckNow() {
       });
       queryClient.invalidateQueries({
         queryKey: uptimeKeys.checkLogs.stats(uptimeMonitorId),
+      });
+      queryClient.invalidateQueries({
+        queryKey: uptimeKeys.checkLogs.daily(uptimeMonitorId),
       });
       queryClient.invalidateQueries({
         queryKey: uptimeKeys.statusChanges.list(uptimeMonitorId),

@@ -1,14 +1,17 @@
-import { fireEvent, render, screen } from "@testing-library/react";
+import { renderWithQueryClient as render } from "@/test/query-wrapper";
+vi.mock("@/components/account-timezone", () => ({ useAccountTimezone: () => "UTC" }));
+import { fireEvent, screen } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { reactI18nextMock } from "@/test/i18n-mock";
 import type { SlaReport, SlaReportSubscription } from "@/types/uptime";
 import { SlaReportTab } from "./sla-report-tab";
 
+vi.mock("./email-providers-section", () => ({ EmailProvidersSection: () => <div>Provider setup</div> }));
 vi.mock("react-i18next", () => reactI18nextMock());
 
 const toastSuccess = vi.fn();
 const toastError = vi.fn();
-vi.mock("sonner", () => ({
+vi.mock("@/lib/toast", () => ({
 	toast: {
 		success: (...a: unknown[]) => toastSuccess(...a),
 		error: (...a: unknown[]) => toastError(...a),
@@ -22,6 +25,7 @@ vi.mock("@/services/uptime/uptimeService", () => ({
 	},
 }));
 
+const download = vi.fn();
 const useUptimeSlaReport = vi.fn();
 const useUptimeSlaReportSubscriptions = vi.fn();
 const useUptimeEmailProviders = vi.fn();
@@ -33,7 +37,8 @@ const useRemove = vi.fn();
 const useSendNow = vi.fn();
 
 vi.mock("@/hooks/uptime", () => ({
-	useUptimeSlaReport: (id: string, days: number) => useUptimeSlaReport(id, days),
+	useDownloadUptimeSlaReport: () => ({ mutate: download, isPending: false }),
+  useUptimeSlaReport: (id: string, days: number) => useUptimeSlaReport(id, days),
 	useUptimeSlaReportSubscriptions: () => useUptimeSlaReportSubscriptions(),
 	useUptimeEmailProviders: () => useUptimeEmailProviders(),
 	useUpsertUptimeSlaReportSubscription: () => useUpsert(),
@@ -54,6 +59,7 @@ function report(overrides: Partial<SlaReport> = {}): SlaReport {
 		stats: {
 			totalChecks: 100,
 			successfulChecks: 99,
+      degradedChecks: 0,
 			failedChecks: 1,
 			avgResponseTime: 120,
 			minResponseTime: 80,
@@ -89,11 +95,11 @@ beforeEach(() => {
 		isLoading: false,
 	});
 	useUptimeEmailProviders.mockReturnValue({
-		data: [{ emailProviderId: "p1", name: "Resend Prod" }],
+		data: [{ emailProviderId: "p1", name: "Resend Prod", verified: true }],
 	});
 	upsertMutate.mockImplementation((_input, opts) => opts?.onSuccess?.());
 	removeMutate.mockImplementation((_id, opts) => opts?.onSuccess?.());
-	sendNowMutate.mockImplementation((_id, opts) => opts?.onSuccess?.());
+	sendNowMutate.mockImplementation((_id, opts) => opts?.onSuccess?.({ skipped: false, monitorsReported: 1, emailsSent: 1 }));
 	useUpsert.mockReturnValue({ mutate: upsertMutate, isPending: false });
 	useRemove.mockReturnValue({ mutate: removeMutate, isPending: false });
 	useSendNow.mockReturnValue({ mutate: sendNowMutate, isPending: false });
@@ -128,13 +134,14 @@ describe("SlaReportTab — content", () => {
 		expect(screen.getByText("slaReport.empty")).toBeInTheDocument();
 	});
 
-	it("renders stats and the PDF download link", () => {
+	it("renders stats and downloads the server PDF snapshot", () => {
 		render(<SlaReportTab monitorId="m1" />);
-		expect(screen.getByText("99%")).toBeInTheDocument();
+		expect(screen.getByText("99.00%")).toBeInTheDocument();
 		expect(screen.getByText("120 ms")).toBeInTheDocument(); // avg
 		expect(screen.getByText("350 ms")).toBeInTheDocument(); // p95
 		const link = screen.getByTestId("sla-download");
-		expect(link).toHaveAttribute("href", "/api/reports/sla/m1.pdf?days=30");
+		fireEvent.click(link);
+    expect(download).toHaveBeenCalledOnce();
 	});
 
 	it("tolerates undefined subscriptions and providers", () => {
@@ -154,6 +161,7 @@ describe("SlaReportTab — content", () => {
 				stats: {
 					totalChecks: 0,
 					successfulChecks: 0,
+          degradedChecks: 0,
 					failedChecks: 0,
 					avgResponseTime: null,
 					minResponseTime: null,

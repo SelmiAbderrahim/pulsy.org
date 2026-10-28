@@ -1,26 +1,40 @@
+import { appendIncidentAlert } from "./incident-timeline";
+import { channelTargetError } from "./channel-target";
+import { buildWebhookBody, webhookHeaders } from "./webhook-contract";
+import { getTranslator } from "../../lib/i18n";
+import { checkErrorCodeOf, type CheckErrorCode } from "@pulsy/db/check-error";
+import { describeCheckReason } from "./check-error";
+import { ensureWebhookSecret } from "./notification-channel-secrets";
+import { uptimeDeferredAlert, uptimeIncidentEscalation, uptimeMonitor, type DbExecutor } from "@pulsy/db";
+import { createHash } from "node:crypto";
+import { deferSuppressedAlert, recoveryDeliveryTargets } from "./maintenance-service";
+import { incidentRecoveryDelivery } from "./incident-delivery";
+import { safeChannelError } from "./notification-channel-secrets";
 import {
 	db,
 	uptimeNotificationChannel,
+  uptimeMonitorChannelBinding,
 	uptimeNotificationLog,
 } from "@pulsy/db";
-import { and, eq, isNull, or } from "drizzle-orm";
+import { and, eq, gt, inArray, isNull, or } from "drizzle-orm";
 import { escapeHtml } from "../../lib/html";
 import {
 	NotificationSendError,
+	isTransientSendError,
 	withRetry,
 	type RetryResult,
 } from "../../lib/retry";
 import { safeFetch } from "../../lib/ssrf";
-import { safeErrorSummary } from "../../lib/safe-error";
 import { findEmailProviderById, sendViaProvider } from "./email-provider-service";
 import { decryptNotificationChannelSecrets } from "./notification-channel-secrets";
 import type { TlsCertificateInfo } from "./tls-checker-service";
 import type { UptimeMonitor } from "./monitor-service";
+import { serverHealthNotice } from "./server-health-notice";
 
 const COMPANY_NAME = "Pulsy";
 const ERROR_MAX_LENGTH = 500;
 
-type NotificationEvent = "down" | "recovery" | "tls_expiry";
+type NotificationEvent = "down" | "degraded" | "recovery" | "tls_expiry";
 
 /**
  * Test seam for retry timing. Production callers pass nothing (real 30s/2m/10m
@@ -29,9 +43,23 @@ type NotificationEvent = "down" | "recovery" | "tls_expiry";
 export interface DispatchOptions {
 	delaysMs?: readonly number[];
 	sleep?: (ms: number) => Promise<void>;
+	resumeSuppressed?: boolean;
+	deduplicate?: boolean;
+	strictAudit?: boolean;
+	finishedTargets?: string[];
+	deferredAlertId?: string;
+	sourceOutageId?: string;
+	escalationJobId?: string;
+	escalationLeaseToken?: string;
+	isIncidentCurrent?: () => Promise<boolean>;
+	allowedRecoveryTargets?: string[];
+	onSuppressed?: () => void;
+	onResult?: (result: { key: string; ok: boolean; retryable: boolean }) => void | Promise<void>;
 }
 
 interface StatusChangeRecord {
+  test?: boolean;
+  webhookEvent?: "monitor.tls_expiring";
 	statusChangeId: string;
 	uptimeMonitorId: string;
 	statusBefore: string;
@@ -43,6 +71,8 @@ interface StatusChangeRecord {
 }
 
 interface NotificationPayload {
+	reason?: string;
+  reasonCode?: CheckErrorCode;
 	monitorName: string;
 	url: string;
 	statusBefore: string;
@@ -57,6 +87,11 @@ function buildPayload(
 	statusChange: StatusChangeRecord,
 ): NotificationPayload {
 	return {
+    ...(monitor.monitorType === "server" ? { reason: serverHealthNotice(monitor, statusChange).reason } : statusChange.reason ? {
+      // Same code → label mapping as the dashboard; alert text is English until notification i18n lands.
+      reason: describeCheckReason(statusChange.reason, getTranslator("en"), { httpStatus: statusChange.httpStatus, timeoutMs: monitor.timeout })!,
+      ...(checkErrorCodeOf(statusChange.reason) ? { reasonCode: checkErrorCodeOf(statusChange.reason)! } : {}),
+    } : {}),
 		monitorName: monitor.name,
 		url: monitor.url,
 		statusBefore: statusChange.statusBefore,
@@ -170,7 +205,12 @@ async function loadApplicableChannels(
 		),
 	});
 
-	return channels.map(decryptNotificationChannelSecrets);
+	const referenced = await db.select({ channel: uptimeNotificationChannel }).from(uptimeMonitorChannelBinding)
+    .innerJoin(uptimeNotificationChannel, eq(uptimeMonitorChannelBinding.channelId, uptimeNotificationChannel.channelId))
+    .where(and(eq(uptimeMonitorChannelBinding.userId, monitor.userId), eq(uptimeMonitorChannelBinding.monitorId, monitor.uptimeMonitorId), eq(uptimeNotificationChannel.userId, monitor.userId))).limit(20);
+  const byId = new Map(channels.map(channel => [channel.channelId, channel]));
+  for (const { channel } of referenced) if (!byId.has(channel.channelId)) byId.set(channel.channelId, { ...channel, uptimeMonitorId: monitor.uptimeMonitorId });
+  return [...byId.values()].map(decryptNotificationChannelSecrets);
 }
 
 type NotificationChannelRow = typeof uptimeNotificationChannel.$inferSelect;
@@ -180,6 +220,7 @@ export function buildEmailContent(
 	monitor: UptimeMonitor,
 	statusChange: StatusChangeRecord,
 ): { subject: string; html: string } {
+	if (monitor.monitorType === "server") return serverHealthNotice(monitor, statusChange);
 	const payload = buildPayload(monitor, statusChange);
 	const emoji = getStatusEmoji(statusChange.statusAfter);
 	const subject = `${emoji} ${monitor.name} is ${statusChange.statusAfter.toUpperCase()}`;
@@ -196,6 +237,7 @@ export function buildEmailContent(
 					<td style="padding: 8px 12px; border: 1px solid #e2e8f0; font-weight: 600;">URL</td>
 					<td style="padding: 8px 12px; border: 1px solid #e2e8f0;">${escapeHtml(monitor.url)}</td>
 				</tr>
+                ${payload.reason ? `<tr><td style="padding: 8px 12px; border: 1px solid #e2e8f0; font-weight: 600;">Reason</td><td style="padding: 8px 12px; border: 1px solid #e2e8f0;">${escapeHtml(payload.reason)}</td></tr>` : ""}
 				<tr>
 					<td style="padding: 8px 12px; border: 1px solid #e2e8f0; font-weight: 600;">HTTP Status</td>
 					<td style="padding: 8px 12px; border: 1px solid #e2e8f0;">${payload.httpStatus ?? "N/A"}</td>
@@ -271,13 +313,16 @@ async function recordNotificationLog(entry: {
 	attempts: number;
 	providerMessageId: string | null;
 	error: string | null;
-}): Promise<void> {
+}, strict = false, dbc: DbExecutor = db, incidentId?: string): Promise<void> {
 	try {
-		await db.insert(uptimeNotificationLog).values(entry);
+    const write = async (tx: DbExecutor) => {
+      const [log] = await tx.insert(uptimeNotificationLog).values(entry).returning({ id: uptimeNotificationLog.notificationLogId });
+      if (log) await appendIncidentAlert(entry, log.id, tx, incidentId);
+    };
+    if (dbc === db) await db.transaction(write); else await write(dbc);
 	} catch (err) {
-		console.error(
-			`[uptime] Failed to write notification log: ${safeErrorSummary(err)}`,
-		);
+		console.error(`[uptime] Failed to write notification log for monitor ${entry.uptimeMonitorId}`);
+		if (strict) throw err;
 	}
 }
 
@@ -289,27 +334,59 @@ async function recordAndLog(
 	event: NotificationEvent,
 	statusChangeId: string | null,
 	result: RetryResult<string | null>,
+	opts: DispatchOptions = {},
+	key = `${channel.channelId}:${target}`,
 ): Promise<void> {
 	const outcome = result.ok ? "sent" : "failed";
 	const providerMessageId = result.ok ? (result.value ?? null) : null;
-	const error = result.ok ? null : toErrorMessage(result.error);
-	const consoleTarget =
-		channel.channelType === "email" ? "email recipient" : target;
+	const error = result.ok ? null : safeChannelError(new Error(toErrorMessage(result.error)), channel, { decrypted: true });
 
-	await recordNotificationLog({
-		userId: monitor.userId,
-		uptimeMonitorId: monitor.uptimeMonitorId,
-		channelId: channel.channelId,
-		channelType: channel.channelType,
-		target,
-		event,
-		statusChangeId,
-		outcome,
-		attempts: result.attempts,
-		providerMessageId,
-		error,
-	});
+	const retryable = !result.ok && isTransientSendError(result.error);
+	const entry = {
+		userId: monitor.userId, uptimeMonitorId: monitor.uptimeMonitorId, channelId: channel.channelId,
+		channelType: channel.channelType, target, event, statusChangeId, outcome,
+		attempts: result.attempts, providerMessageId, error,
+	} as const;
+  if (opts.escalationJobId) {
+    await db.transaction(async tx => {
+      // Cancellation/configuration lock parent before child. Match that order:
+      // inserting the audit takes a parent FK lock, so child-first can deadlock.
+      const [parent] = await tx.select({ id: uptimeMonitor.uptimeMonitorId }).from(uptimeMonitor)
+        .where(and(eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId), eq(uptimeMonitor.userId, monitor.userId))).for("update");
+      if (!parent) return; // Owner deletion deliberately removes its delivery history.
+      if (!opts.escalationLeaseToken) throw new Error("Escalation lease missing");
+      const where = and(eq(uptimeIncidentEscalation.id, opts.escalationJobId!), eq(uptimeIncidentEscalation.userId, monitor.userId),
+        eq(uptimeIncidentEscalation.monitorId, monitor.uptimeMonitorId), eq(uptimeIncidentEscalation.leaseToken, opts.escalationLeaseToken));
+      const [job] = await tx.select().from(uptimeIncidentEscalation).where(where).for("update");
+      if (!job || statusChangeId !== `incident-escalation-${job.id}`) throw new Error("Escalation delivery no longer exists");
+      await recordNotificationLog(entry, true, tx, job.incidentId);
+      await tx.update(uptimeIncidentEscalation).set({ finishedTargets: retryable ? job.finishedTargets : [...new Set([...job.finishedTargets, key])],
+        deliveredTargets: result.ok ? [...new Set([...job.deliveredTargets, key])] : job.deliveredTargets,
+        leaseUntil: job.state === "processing" ? new Date(Date.now() + 300_000).toISOString() : job.leaseUntil }).where(where);
+    });
+  } else if (opts.deferredAlertId) {
+		await db.transaction(async tx => {
+      // Monitor deletion cascades to this job, so acquire the parent first.
+      const [parent] = await tx.select({ id: uptimeMonitor.uptimeMonitorId }).from(uptimeMonitor)
+        .where(and(eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId), eq(uptimeMonitor.userId, monitor.userId))).for("update");
+      if (!parent) return;
+			const where = and(eq(uptimeDeferredAlert.id, opts.deferredAlertId!), eq(uptimeDeferredAlert.userId, monitor.userId), eq(uptimeDeferredAlert.statusChangeId, statusChangeId!));
+			const [job] = await tx.select().from(uptimeDeferredAlert).where(where).for("update");
+			if (!job) throw new Error("Deferred delivery no longer exists");
+			await recordNotificationLog(entry, true, tx);
+      if (result.ok && job.deliveredTargets.length === 0 && (event === "down" || event === "degraded")) {
+        await tx.update(uptimeMonitor).set({ lastOperationalAlertAt: new Date().toISOString(), lastOperationalAlertId: statusChangeId })
+          .where(and(eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId), eq(uptimeMonitor.userId, monitor.userId)));
+      }
+			await tx.update(uptimeDeferredAlert).set({
+				finishedTargets: retryable ? job.finishedTargets : [...new Set([...job.finishedTargets, key])],
+				deliveredTargets: result.ok ? [...new Set([...job.deliveredTargets, key])] : job.deliveredTargets,
+			}).where(where);
+		});
+	} else await recordNotificationLog(entry, opts.strictAudit);
+	await opts.onResult?.({ key, ok: result.ok, retryable });
 
+	const consoleTarget = channel.channelType === "email" ? "email recipient" : target;
 	if (result.ok) {
 		console.info(
 			`[uptime] Sent ${channel.channelType} notification to ${consoleTarget} for monitor ${monitor.uptimeMonitorId} (event=${event}, attempts=${result.attempts})`,
@@ -336,6 +413,70 @@ function makeOnRetry(
 	};
 }
 
+class SuppressedDelivery extends NotificationSendError {
+	constructor() { super("Alert suppressed by maintenance or snooze", 409); }
+}
+function deliveryTargetKey(channel: NotificationChannelRow, destination: string): string {
+	const value = channel.channelType === "email" ? destination.trim().toLowerCase() : destination;
+	return createHash("sha256").update(`${channel.channelId}\0${channel.channelType}\0${value}`).digest("hex");
+}
+function skipTarget(opts: DispatchOptions, key: string): boolean {
+	return Boolean(opts.finishedTargets?.includes(key) || (opts.allowedRecoveryTargets && !opts.allowedRecoveryTargets.includes(key)));
+}
+
+/** Every queued alert must still describe the current owned episode at send time. */
+async function ensureCurrentOperationalDelivery(monitor: UptimeMonitor, change: StatusChangeRecord, opts: DispatchOptions) {
+  if (opts.isIncidentCurrent && !await opts.isIncidentCurrent()) throw new SuppressedDelivery();
+  if (!opts.deferredAlertId) return;
+  const [current] = await db.select({ status: uptimeMonitor.status, active: uptimeMonitor.active,
+    outageId: uptimeMonitor.notificationOutageId, policy: uptimeMonitor.latencyPolicy, monitorType: uptimeMonitor.monitorType }).from(uptimeMonitor)
+    .where(and(eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId), eq(uptimeMonitor.userId, monitor.userId))).limit(1);
+  const expected = opts.sourceOutageId ?? monitor.notificationOutageId ?? change.statusChangeId;
+  if (!current || !current.active || current.status !== change.statusAfter || (current.outageId !== null && current.outageId !== expected) || current.policy?.importance === "informational" || change.statusAfter === "degraded" && !current.policy && current.monitorType !== "heartbeat" && current.monitorType !== "server") {
+    throw new SuppressedDelivery();
+  }
+}
+async function suppressedBeforeSend(monitor: UptimeMonitor, change: StatusChangeRecord, _opts: DispatchOptions) {
+  return deferSuppressedAlert(monitor, change, db, true);
+}
+
+// Durable jobs send at most four transports at a time and serialize email recipients.
+async function settleTargets<T>(targets: T[], send: (target: T) => Promise<void>, wave: number) {
+  const results: PromiseSettledResult<void>[] = [];
+  for (let offset = 0; offset < targets.length; offset += wave) {
+    results.push(...await Promise.allSettled(targets.slice(offset, offset + wave).map(send)));
+  }
+  return results;
+}
+
+/** Freeze one logical delivery before I/O, including retries by a fresh worker. */
+async function durableWebhookBody(channelId: string, monitor: UptimeMonitor, change: StatusChangeRecord, opts: DispatchOptions): Promise<string> {
+  if (opts.escalationJobId) {
+    return db.transaction(async tx => {
+      if (!opts.escalationLeaseToken) throw new Error("Escalation lease missing");
+      const where = and(eq(uptimeIncidentEscalation.id, opts.escalationJobId!), eq(uptimeIncidentEscalation.userId, monitor.userId),
+        eq(uptimeIncidentEscalation.monitorId, monitor.uptimeMonitorId), eq(uptimeIncidentEscalation.leaseToken, opts.escalationLeaseToken));
+      const [job] = await tx.select().from(uptimeIncidentEscalation).where(where).for("update");
+      if (!job?.snapshot || change.statusChangeId !== `incident-escalation-${job.id}`) throw new Error("Escalation snapshot missing");
+      if (job.snapshot.webhookBodies && Object.hasOwn(job.snapshot.webhookBodies, channelId)) return job.snapshot.webhookBodies[channelId]!;
+      const body = await buildWebhookBody(channelId, monitor, change);
+      await tx.update(uptimeIncidentEscalation).set({ snapshot: { ...job.snapshot, webhookBodies: { ...job.snapshot.webhookBodies, [channelId]: body } } }).where(where);
+      return body;
+    });
+  }
+  if (!opts.deferredAlertId) return buildWebhookBody(channelId, monitor, change);
+  return db.transaction(async tx => {
+    const where = and(eq(uptimeDeferredAlert.id, opts.deferredAlertId!), eq(uptimeDeferredAlert.userId, monitor.userId),
+      eq(uptimeDeferredAlert.monitorId, monitor.uptimeMonitorId), eq(uptimeDeferredAlert.statusChangeId, change.statusChangeId));
+    const [job] = await tx.select().from(uptimeDeferredAlert).where(where).for("update");
+    if (!job) throw new Error("Deferred delivery no longer exists");
+    if (job.snapshot.webhookBodies && Object.hasOwn(job.snapshot.webhookBodies, channelId)) return job.snapshot.webhookBodies[channelId]!;
+    const body = await buildWebhookBody(channelId, monitor, change);
+    await tx.update(uptimeDeferredAlert).set({ snapshot: { ...job.snapshot, webhookBodies: { ...job.snapshot.webhookBodies, [channelId]: body } } }).where(where);
+    return body;
+  });
+}
+
 /** Send one webhook-family channel with retry, then record the outcome. */
 async function dispatchWebhookFamilyChannel(
 	monitor: UptimeMonitor,
@@ -352,10 +493,16 @@ async function dispatchWebhookFamilyChannel(
 	}
 
 	const target = deriveWebhookTarget(channel, channel.webhookUrl);
+	const key = deliveryTargetKey(channel, channel.webhookUrl);
+	if (skipTarget(opts, key) || (opts.deduplicate && await alreadyDelivered(monitor, channel, target, statusChangeId))) return;
+	let webhookBody: string | undefined;
 	const send = async (): Promise<string | null> => {
+    await ensureCurrentOperationalDelivery(monitor, statusChange, opts);
+		if ((event === "down" || event === "degraded") && await suppressedBeforeSend(monitor, statusChange, opts)) throw new SuppressedDelivery();
 		switch (channel.channelType) {
 			case "webhook":
-				await sendWebhookNotification(channel, monitor, statusChange);
+				webhookBody ??= await durableWebhookBody(channel.channelId, monitor, statusChange, opts);
+				await sendWebhookNotification(channel, monitor, statusChange, webhookBody);
 				break;
 			case "slack":
 				await sendSlackNotification(channel, monitor, statusChange);
@@ -363,7 +510,6 @@ async function dispatchWebhookFamilyChannel(
 			case "discord":
 				await sendDiscordNotification(channel, monitor, statusChange);
 				break;
-			/* v8 ignore next 3 -- exhaustive: email is handled separately; only webhook-family reaches here */
 			case "telegram":
 				await sendTelegramNotification(channel, monitor, statusChange);
 				break;
@@ -376,7 +522,20 @@ async function dispatchWebhookFamilyChannel(
 		sleep: opts.sleep,
 		onRetry: makeOnRetry(monitor, channel, target),
 	});
-	await recordAndLog(monitor, channel, target, event, statusChangeId, result);
+	if (!result.ok && result.error instanceof SuppressedDelivery) { opts.onSuppressed?.(); return; }
+	await recordAndLog(monitor, channel, target, event, statusChangeId, result, opts, key);
+}
+
+async function alreadyDelivered(monitor: UptimeMonitor, channel: NotificationChannelRow, target: string, statusChangeId: string | null): Promise<boolean> {
+	if (!statusChangeId) return false;
+	return Boolean(await db.query.uptimeNotificationLog.findFirst({ where: and(
+		eq(uptimeNotificationLog.userId, monitor.userId), eq(uptimeNotificationLog.channelId, channel.channelId),
+		eq(uptimeNotificationLog.target, target), eq(uptimeNotificationLog.statusChangeId, statusChangeId), eq(uptimeNotificationLog.outcome, "sent"),
+	) }));
+}
+
+function assertDurableResults(results: PromiseSettledResult<unknown>[], opts: DispatchOptions): void {
+	if (opts.strictAudit && results.some(result => result.status === "rejected")) throw new Error("Delivery audit could not be saved");
 }
 
 /** Send one email channel per recipient with retry, then record each outcome. */
@@ -402,30 +561,37 @@ async function dispatchEmailChannel(
 	} catch (err) {
 		// Provider missing OR its stored credential failed to decrypt: record a
 		// failed row per recipient so the miss is visible, then stop.
-		await Promise.allSettled(
-			channel.recipientAddresses.map((recipient) =>
-				recordAndLog(monitor, channel, recipient, event, statusChangeId, {
+		const results = await settleTargets(channel.recipientAddresses, async (recipient) => {
+				const key = deliveryTargetKey(channel, recipient);
+				if (skipTarget(opts, key) || (opts.deduplicate && await alreadyDelivered(monitor, channel, recipient, statusChangeId))) return;
+				await recordAndLog(monitor, channel, recipient, event, statusChangeId, {
 					ok: false,
 					error: err,
 					attempts: 1,
-				}),
-			),
-		);
+				}, opts, key);
+			}, (opts.deferredAlertId || opts.escalationJobId) ? 1 : Math.max(channel.recipientAddresses.length, 1));
+		assertDurableResults(results, opts);
 		return;
 	}
 
 	const { subject, html } = buildEmailContent(monitor, statusChange);
 
-	await Promise.allSettled(
-		channel.recipientAddresses.map(async (recipient) => {
+	const results = await settleTargets(channel.recipientAddresses, async (recipient) => {
+			const key = deliveryTargetKey(channel, recipient);
+			if (skipTarget(opts, key) || (opts.deduplicate && await alreadyDelivered(monitor, channel, recipient, statusChangeId))) return;
 			const result = await withRetry(
-				() => sendViaProvider(provider, recipient, subject, html),
+				async () => {
+          await ensureCurrentOperationalDelivery(monitor, statusChange, opts);
+          if ((event === "down" || event === "degraded") && await suppressedBeforeSend(monitor, statusChange, opts)) throw new SuppressedDelivery();
+					return sendViaProvider(provider, recipient, subject, html);
+				},
 				{
 					delaysMs: opts.delaysMs,
 					sleep: opts.sleep,
 					onRetry: makeOnRetry(monitor, channel, recipient),
 				},
 			);
+			if (!result.ok && result.error instanceof SuppressedDelivery) { opts.onSuppressed?.(); return; }
 			await recordAndLog(
 				monitor,
 				channel,
@@ -433,9 +599,11 @@ async function dispatchEmailChannel(
 				event,
 				statusChangeId,
 				result,
+				opts,
+				key,
 			);
-		}),
-	);
+		}, (opts.deferredAlertId || opts.escalationJobId) ? 1 : Math.max(channel.recipientAddresses.length, 1));
+	assertDurableResults(results, opts);
 }
 
 /**
@@ -454,8 +622,7 @@ async function dispatchToChannels(
 	const statusChangeId =
 		event === "tls_expiry" ? null : statusChange.statusChangeId;
 
-	await Promise.allSettled(
-		channels.map((channel) =>
+	const results = await settleTargets(channels, (channel) =>
 			channel.channelType === "email"
 				? dispatchEmailChannel(
 						monitor,
@@ -472,9 +639,8 @@ async function dispatchToChannels(
 						event,
 						statusChangeId,
 						opts,
-					),
-		),
-	);
+					), (opts.deferredAlertId || opts.escalationJobId) ? 4 : Math.max(channels.length, 1));
+	assertDurableResults(results, opts);
 }
 
 export const dispatchNotifications = async (
@@ -482,34 +648,54 @@ export const dispatchNotifications = async (
 	statusChange: StatusChangeRecord,
 	opts: DispatchOptions = {},
 ): Promise<void> => {
-	const isDown = statusChange.statusAfter === "down";
-	const isRecovery =
-		statusChange.statusAfter === "up" &&
-		(statusChange.statusBefore === "down" ||
-			statusChange.statusBefore === "degraded");
-
-	if (!isDown && !isRecovery) {
-		return;
-	}
-
-	const event: NotificationEvent = isDown ? "down" : "recovery";
-
-	const channels = mergeChannelsForDispatch(
-		await loadApplicableChannels(monitor),
-	).filter(
-		(channel) =>
-			(isDown && channel.notifyOnDown) ||
-			(isRecovery && channel.notifyOnRecovery),
-	);
+  const isDown = statusChange.statusAfter === "down";
+  const isDegraded = statusChange.statusAfter === "degraded" && Boolean(monitor.latencyPolicy || (monitor.monitorType === "heartbeat" || monitor.monitorType === "server"));
+  const isRecovery = statusChange.statusAfter === "up" && (statusChange.statusBefore === "down" || statusChange.statusBefore === "degraded");
+  if (!isDown && !isDegraded && !isRecovery) return;
+  if (!opts.resumeSuppressed && (isDown || isDegraded || isRecovery) && await deferSuppressedAlert(monitor, statusChange)) return;
+  if (monitor.latencyPolicy?.importance === "informational") return;
+  const event: NotificationEvent = isDown ? "down" : isDegraded ? "degraded" : "recovery";
+  let channels = mergeChannelsForDispatch(await loadApplicableChannels(monitor)).filter(channel =>
+    isDown && channel.notifyOnDown || isDegraded && channel.notifyOnDegraded || isRecovery && channel.notifyOnRecovery);
+  if (isRecovery) {
+    const allowed = await recoveryDeliveryTargets(monitor, statusChange.createdAt);
+    const extra = await incidentRecoveryDelivery(monitor, statusChange.createdAt);
+    const restrict = (channel: NotificationChannel, targets: string[] | null): NotificationChannel | null => {
+      if (!targets) return channel;
+      if (channel.channelType === "email") {
+        const recipients = (channel.recipientAddresses ?? []).filter(recipient => targets.includes(deliveryTargetKey(channel, recipient)));
+        return recipients.length ? { ...channel, recipientAddresses: recipients } : null;
+      }
+      return channel.webhookUrl && targets.includes(deliveryTargetKey(channel, channel.webhookUrl)) ? channel : null;
+    };
+    const normal = channels.map(channel => restrict(channel, allowed)).filter((channel): channel is NotificationChannel => !!channel);
+    const candidates = extra.channelIds.length ? await db.select().from(uptimeNotificationChannel).where(and(eq(uptimeNotificationChannel.userId, monitor.userId), inArray(uptimeNotificationChannel.channelId, extra.channelIds), eq(uptimeNotificationChannel.notifyOnRecovery, true))).limit(2) : [];
+    const supplemental = candidates.map(decryptNotificationChannelSecrets).map(channel => restrict(channel, extra.targets)).filter((channel): channel is NotificationChannel => !!channel);
+    // Normal eligible targets have precedence; extras fill only unclaimed destinations.
+    channels = mergeChannelsForDispatch([...normal.map(channel => ({ ...channel, uptimeMonitorId: monitor.uptimeMonitorId })), ...supplemental.map(channel => ({ ...channel, uptimeMonitorId: null }))]);
+    if (!channels.length) return;
+    if (allowed) opts = { ...opts, allowedRecoveryTargets: [...new Set([...allowed, ...extra.targets])] };
+  }
 
 	await dispatchToChannels(monitor, statusChange, event, channels, opts);
 };
+
+/** Send a reminder only through the explicitly selected owned channel. */
+export async function dispatchIncidentEscalation(monitor: UptimeMonitor, statusChange: StatusChangeRecord, channelId: string, opts: DispatchOptions) {
+  const event = statusChange.statusAfter === "degraded" ? "degraded" : "down";
+  const channels = await db.select().from(uptimeNotificationChannel).where(and(eq(uptimeNotificationChannel.userId, monitor.userId),
+    eq(uptimeNotificationChannel.channelId, channelId), eq(event === "down" ? uptimeNotificationChannel.notifyOnDown : uptimeNotificationChannel.notifyOnDegraded, true))).limit(1);
+  await dispatchToChannels(monitor, statusChange, event, channels.map(decryptNotificationChannelSecrets), opts);
+}
 
 export const dispatchTlsExpiryNotifications = async (
 	monitor: UptimeMonitor,
 	tlsInfo: TlsCertificateInfo,
 	opts: DispatchOptions = {},
 ): Promise<void> => {
+  if (monitor.tlsMonitoringEnabled === false) return;
+  const enabled = await db.query.uptimeMonitor.findFirst({ where: and(eq(uptimeMonitor.uptimeMonitorId, monitor.uptimeMonitorId), eq(uptimeMonitor.userId, monitor.userId), eq(uptimeMonitor.tlsMonitoringEnabled, true)), columns: { uptimeMonitorId: true } });
+  if (!enabled) return;
 	const channels = await loadApplicableChannels(monitor);
 
 	// Eligibility runs BEFORE the merge so a monitor channel that opted out of
@@ -526,7 +712,26 @@ export const dispatchTlsExpiryNotifications = async (
 		return;
 	}
 
+
+	// Durable 24h dedup via the delivery log: the scheduler's in-memory probe
+	// throttle is wiped by every restart and every monitor edit, which used to
+	// re-send an identical TLS alert each time.
+	const dedupCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
+	const recentlySent = await db.query.uptimeNotificationLog.findFirst({
+		where: and(
+			eq(uptimeNotificationLog.uptimeMonitorId, monitor.uptimeMonitorId),
+      eq(uptimeNotificationLog.userId, monitor.userId),
+			eq(uptimeNotificationLog.event, "tls_expiry"),
+			eq(uptimeNotificationLog.outcome, "sent"),
+			gt(uptimeNotificationLog.createdAt, dedupCutoff),
+		),
+	});
+	if (recentlySent) {
+		return;
+	}
+
 	const statusChange: StatusChangeRecord = {
+		webhookEvent: "monitor.tls_expiring",
 		statusChangeId: `tls-${monitor.uptimeMonitorId}-${Date.now()}`,
 		uptimeMonitorId: monitor.uptimeMonitorId,
 		statusBefore: monitor.status,
@@ -550,28 +755,24 @@ export const sendWebhookNotification = async (
 	channel: typeof uptimeNotificationChannel.$inferSelect,
 	monitor: UptimeMonitor,
 	statusChange: StatusChangeRecord,
+  preparedBody?: string,
 ): Promise<void> => {
 	if (!channel.webhookUrl) {
 		return;
 	}
 
-	const payload = buildPayload(monitor, statusChange);
-
-	const headers: Record<string, string> = {
-		"Content-Type": "application/json",
-		"User-Agent": "Pulsy-Uptime/1.0",
-	};
-
-	if (channel.webhookHeaders) {
-		for (const [key, value] of Object.entries(channel.webhookHeaders)) {
-			headers[key] = value;
-		}
-	}
+	const signingSecret = await ensureWebhookSecret(channel);
+	const body = preparedBody ?? await buildWebhookBody(channel.channelId, monitor, statusChange);
+	const headers: Record<string, string> = {};
+  for (const [key, value] of Object.entries(channel.webhookHeaders ?? {})) {
+    if (!["content-type", "user-agent", "idempotency-key"].includes(key.toLowerCase()) && !key.toLowerCase().startsWith("x-pulsy-")) headers[key] = value;
+  }
+  Object.assign(headers, webhookHeaders(body, signingSecret));
 
 	const response = await safeFetch(channel.webhookUrl, {
 		method: "POST",
 		headers,
-		body: JSON.stringify(payload),
+		body,
 		signal: AbortSignal.timeout(10000),
 	});
 
@@ -591,6 +792,9 @@ export const sendSlackNotification = async (
 	if (!channel.webhookUrl) {
 		return;
 	}
+
+  const targetError = channelTargetError(channel);
+  if (targetError) throw new NotificationSendError(getTranslator("en")(targetError));
 
 	const payload = buildPayload(monitor, statusChange);
 	const emoji = getStatusEmoji(statusChange.statusAfter);
@@ -624,6 +828,7 @@ export const sendSlackNotification = async (
 								type: "mrkdwn",
 								text: `*Status Change:*\n${statusChange.statusBefore} → ${statusChange.statusAfter}`,
 							},
+							...(payload.reason ? [{ type: "mrkdwn", text: `*Reason:*\n${payload.reason}` }] : []),
 							{
 								type: "mrkdwn",
 								text: `*HTTP Status:*\n${payload.httpStatus ?? "N/A"}`,
@@ -650,8 +855,9 @@ export const sendSlackNotification = async (
 
 	const response = await safeFetch(channel.webhookUrl, {
 		method: "POST",
+    redirect: "error",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(slackPayload),
+		body: JSON.stringify(monitor.monitorType === "server" ? { blocks: [{ type: "section", text: { type: "plain_text", text: serverHealthNotice(monitor, statusChange).text } }] } : slackPayload),
 		signal: AbortSignal.timeout(10000),
 	});
 
@@ -671,6 +877,9 @@ export const sendDiscordNotification = async (
 	if (!channel.webhookUrl) {
 		return;
 	}
+
+  const targetError = channelTargetError(channel);
+  if (targetError) throw new NotificationSendError(getTranslator("en")(targetError));
 
 	const payload = buildPayload(monitor, statusChange);
 	const emoji = getStatusEmoji(statusChange.statusAfter);
@@ -697,6 +906,7 @@ export const sendDiscordNotification = async (
 						value: `${statusChange.statusBefore} → ${statusChange.statusAfter}`,
 						inline: true,
 					},
+					...(payload.reason ? [{ name: "Reason", value: payload.reason, inline: false }] : []),
 					{
 						name: "HTTP Status",
 						value: `${payload.httpStatus ?? "N/A"}`,
@@ -720,8 +930,9 @@ export const sendDiscordNotification = async (
 
 	const response = await safeFetch(channel.webhookUrl, {
 		method: "POST",
+    redirect: "error",
 		headers: { "Content-Type": "application/json" },
-		body: JSON.stringify(discordPayload),
+		body: JSON.stringify(monitor.monitorType === "server" ? { content: serverHealthNotice(monitor, statusChange).text, allowed_mentions: { parse: [] } } : discordPayload),
 		signal: AbortSignal.timeout(10000),
 	});
 
@@ -750,11 +961,12 @@ export const sendTelegramNotification = async (
 	const payload = buildPayload(monitor, statusChange);
 	const emoji = getStatusEmoji(statusChange.statusAfter);
 
-	const text = [
+	const text = monitor.monitorType === "server" ? escapeHtml(serverHealthNotice(monitor, statusChange).text) : [
 		`${emoji} <b>${escapeHtml(monitor.name)}</b> is <b>${statusChange.statusAfter.toUpperCase()}</b>`,
 		"",
 		`<b>URL:</b> ${escapeHtml(monitor.url)}`,
 		`<b>Status:</b> ${statusChange.statusBefore} → ${statusChange.statusAfter}`,
+    ...(payload.reason ? [`<b>Reason:</b> ${escapeHtml(payload.reason)}`] : []),
 		`<b>HTTP Status:</b> ${payload.httpStatus ?? "N/A"}`,
 		`<b>Response Time:</b> ${payload.responseTime ? `${payload.responseTime}ms` : "N/A"}`,
 		`<b>Time:</b> ${new Date(payload.timestamp).toUTCString()}`,
@@ -785,9 +997,10 @@ function parseTelegramTarget(
 	target: string,
 	headers: Record<string, string> | null,
 ): { botToken: string; chatId: string } {
-	if (target.startsWith("https://")) {
+	if (target.includes("://")) {
 		const parsed = new URL(target);
-		const urlMatch = parsed.hostname === "api.telegram.org"
+		const urlMatch = parsed.protocol === "https:" && parsed.hostname === "api.telegram.org"
+			&& !parsed.port && !parsed.username && !parsed.password
 			? parsed.pathname.match(/^\/bot([^/]+)(?:\/sendMessage)?$/)
 			: null;
 		const botToken = urlMatch?.[1] ?? "";
