@@ -256,6 +256,11 @@ try {
           await dialog.waitFor();
           await page.keyboard.press('Tab');
           assert.ok(await dialog.evaluate(element => element.contains(document.activeElement)), 'dialog keyboard focus');
+          // Axe snapshots computed styles, so wait for the opening fade to finish
+          // before it captures partially transparent text and backgrounds.
+          await dialog.evaluate(async element => {
+            await Promise.all(element.getAnimations({ subtree: true }).map(animation => animation.finished));
+          });
           await audit(locale, width, 'rotation');
           await screenshot(`${locale}-${width}-rotation`);
           await page.keyboard.press('Escape');
