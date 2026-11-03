@@ -6,13 +6,13 @@ best-effort and does not include a response-time guarantee.
 ## Questions and self-hosting help
 
 Use the repository's
-[question template](https://github.com/SelmiAbderrahim/pulsy/issues/new/choose)
+[question template](https://github.com/SelmiAbderrahim/pulsy.org/issues/new/choose)
 for setup questions and deployment advice. Before posting, check the
 [README](README.md) and documentation under [`docs/`](docs/).
 
 ## Bugs and feature requests
 
-Use [GitHub Issues](https://github.com/SelmiAbderrahim/pulsy/issues) for
+Use [GitHub Issues](https://github.com/SelmiAbderrahim/pulsy.org/issues) for
 reproducible bugs and scoped feature proposals. Search existing issues first
 and remove secrets, credentials, private URLs, and personal data from logs.
 

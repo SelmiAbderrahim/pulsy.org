@@ -6,11 +6,11 @@
   "license": "AGPL-3.0-or-later",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/SelmiAbderrahim/pulsy.git"
+    "url": "git+https://github.com/SelmiAbderrahim/pulsy.org.git"
   },
-  "homepage": "https://github.com/SelmiAbderrahim/pulsy#readme",
+  "homepage": "https://github.com/SelmiAbderrahim/pulsy.org#readme",
   "bugs": {
-    "url": "https://github.com/SelmiAbderrahim/pulsy/issues"
+    "url": "https://github.com/SelmiAbderrahim/pulsy.org/issues"
   },
   "type": "module",
   "engines": {

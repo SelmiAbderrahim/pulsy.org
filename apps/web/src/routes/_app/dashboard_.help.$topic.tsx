@@ -54,7 +54,7 @@ export function HelpPage({ topic }: { topic: string }) {
     {topic === "index" ? <>
       <h1 className="app-title">{t("help.title")}</h1>
       <div className="relative"><Search aria-hidden="true" className="pointer-events-none absolute start-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" /><Input className="ps-9" type="search" value={search} onChange={event => setSearch(event.target.value)} aria-label={t("help.search")} placeholder={t("help.search")} /></div>
-      {!links.some(matches) && <p role="status" className="grid gap-2">{t("help.noResults")} <a className="text-primary underline" href="https://github.com/SelmiAbderrahim/pulsy/issues">{t("help.reportIssue", "Report an issue")}</a></p>}
+      {!links.some(matches) && <p role="status" className="grid gap-2">{t("help.noResults")} <a className="text-primary underline" href="https://github.com/SelmiAbderrahim/pulsy.org/issues">{t("help.reportIssue", "Report an issue")}</a></p>}
       <div className="grid min-w-0 items-start gap-8 lg:grid-cols-[208px_minmax(0,1fr)]">
         <DocumentContents title={t("help.contents")} items={visibleGroups.map(entry => ({ id: `help-group-${entry.key}`, title: t(`help.groups.${entry.key}`) }))} />
         <div className="grid min-w-0 gap-6">{visibleGroups.map(entry => <section key={entry.key} aria-labelledby={`help-group-${entry.key}`} className="grid scroll-mt-[calc(var(--header-height)+1rem)] gap-2">

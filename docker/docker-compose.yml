@@ -73,7 +73,7 @@ services:
         # Free-text notice on the login page (demo instances).
         VITE_DEMO_NOTICE: ${VITE_DEMO_NOTICE:-}
         # Public corresponding source for this exact deployed build.
-        VITE_SOURCE_CODE_URL: ${VITE_SOURCE_CODE_URL:-https://github.com/SelmiAbderrahim/pulsy}
+        VITE_SOURCE_CODE_URL: ${VITE_SOURCE_CODE_URL:-https://github.com/SelmiAbderrahim/pulsy.org}
     container_name: pulsy-web
     volumes:
       - web_assets:/var/cache/pulsy
