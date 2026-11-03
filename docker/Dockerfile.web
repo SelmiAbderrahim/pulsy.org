@@ -30,7 +30,7 @@ ARG VITE_CUSTOM_DOMAIN_IP=""
 ARG VITE_DEMO_NOTICE=""
 # Public corresponding source for this build. Release builds override this
 # with their exact commit; source builds can override it through Compose.
-ARG VITE_SOURCE_CODE_URL="https://github.com/SelmiAbderrahim/pulsy"
+ARG VITE_SOURCE_CODE_URL="https://github.com/SelmiAbderrahim/pulsy.org"
 ENV VITE_SERVER_URL=$VITE_SERVER_URL
 ENV VITE_APP_URL=$VITE_APP_URL
 ENV VITE_CUSTOM_DOMAIN_CNAME_TARGET=$VITE_CUSTOM_DOMAIN_CNAME_TARGET

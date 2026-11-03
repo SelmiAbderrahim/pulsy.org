@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 
 /** Canonical upstream used when an operator does not set a build-specific URL. */
 export const DEFAULT_SOURCE_CODE_URL =
-	"https://github.com/SelmiAbderrahim/pulsy";
+	"https://github.com/SelmiAbderrahim/pulsy.org";
 
 /**
  * Resolve the public corresponding-source URL baked into this web build.

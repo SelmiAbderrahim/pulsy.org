@@ -197,5 +197,5 @@ snapshot also includes:
 - **Docker deployment** — Compose stack (postgres + server + web) with a `Makefile` for
   common workflows, plus a seed for a demo user and example monitors.
 
-[Unreleased]: https://github.com/SelmiAbderrahim/pulsy/compare/v0.1.0...master
-[0.1.0]: https://github.com/SelmiAbderrahim/pulsy/releases/tag/v0.1.0
+[Unreleased]: https://github.com/SelmiAbderrahim/pulsy.org/compare/v0.1.0...master
+[0.1.0]: https://github.com/SelmiAbderrahim/pulsy.org/releases/tag/v0.1.0

@@ -1,8 +1,8 @@
 # Pulsy
 
-[![CI](https://github.com/SelmiAbderrahim/pulsy/actions/workflows/ci.yml/badge.svg)](https://github.com/SelmiAbderrahim/pulsy/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/SelmiAbderrahim/pulsy/actions/workflows/codeql.yml/badge.svg)](https://github.com/SelmiAbderrahim/pulsy/actions/workflows/codeql.yml)
-[![Secret scan](https://github.com/SelmiAbderrahim/pulsy/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/SelmiAbderrahim/pulsy/actions/workflows/secret-scan.yml)
+[![CI](https://github.com/SelmiAbderrahim/pulsy.org/actions/workflows/ci.yml/badge.svg)](https://github.com/SelmiAbderrahim/pulsy.org/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/SelmiAbderrahim/pulsy.org/actions/workflows/codeql.yml/badge.svg)](https://github.com/SelmiAbderrahim/pulsy.org/actions/workflows/codeql.yml)
+[![Secret scan](https://github.com/SelmiAbderrahim/pulsy.org/actions/workflows/secret-scan.yml/badge.svg)](https://github.com/SelmiAbderrahim/pulsy.org/actions/workflows/secret-scan.yml)
 [![License: AGPL-3.0-or-later](https://img.shields.io/badge/license-AGPL--3.0--or--later-blue.svg)](LICENSE)
 [![Node](https://img.shields.io/badge/node-%3E%3D24-339933.svg?logo=node.js&logoColor=white)](.nvmrc)
 [![PRs welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](CONTRIBUTING.md)
@@ -45,19 +45,19 @@ user on every install.
 
 ### Dashboard
 
-![Pulsy dashboard with summary statistics and a monitor table](docs/screenshots/dashboard.png)
+![Pulsy Monitors page with a status summary and a table of up, degraded and down monitors](docs/screenshots/dashboard.png)
 
 ### Monitor detail
 
-![Pulsy monitor detail with uptime and response-time charts](docs/screenshots/monitor-detail.png)
+![Pulsy monitor Overview tab with check statistics, a 90-day check-success bar and a response-time chart](docs/screenshots/monitor-detail.png)
 
-### Notifications
+### Alerts
 
-![Pulsy monitor notification settings](docs/screenshots/notifications.png)
+![Pulsy monitor Alerts tab with notification channels, email providers and delivery history](docs/screenshots/notifications.png)
 
 ### Status page
 
-![Pulsy public status page](docs/screenshots/status-page.png)
+![Pulsy public status page with overall status, a service update, monitored components and recent incidents](docs/screenshots/status-page.png)
 
 ## Quick start
 
@@ -65,8 +65,8 @@ Pulsy's supported development and self-hosting workflow uses Docker Engine with
 the Compose plugin.
 
 ```bash
-git clone https://github.com/SelmiAbderrahim/pulsy.git
-cd pulsy
+git clone https://github.com/SelmiAbderrahim/pulsy.org.git
+cd pulsy.org
 cp .env.example .env
 chmod 600 .env
 ```

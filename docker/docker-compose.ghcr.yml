@@ -1,8 +1,8 @@
 # Pulsy — prebuilt images from GHCR (no build step, amd64 + arm64).
 #
 #   mkdir -p pulsy/docker && cd pulsy
-#   curl -fsSL https://raw.githubusercontent.com/SelmiAbderrahim/pulsy/main/docker/docker-compose.ghcr.yml -o docker/docker-compose.ghcr.yml
-#   curl -fsSL https://raw.githubusercontent.com/SelmiAbderrahim/pulsy/main/.env.example -o .env
+#   curl -fsSL https://raw.githubusercontent.com/SelmiAbderrahim/pulsy.org/master/docker/docker-compose.ghcr.yml -o docker/docker-compose.ghcr.yml
+#   curl -fsSL https://raw.githubusercontent.com/SelmiAbderrahim/pulsy.org/master/.env.example -o .env
 #   # edit .env: set POSTGRES_PASSWORD, ENCRYPTION_KEY, BETTER_AUTH_SECRET
 #   docker compose -f docker/docker-compose.ghcr.yml --env-file .env up -d
 #

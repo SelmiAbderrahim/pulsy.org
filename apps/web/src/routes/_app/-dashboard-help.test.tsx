@@ -126,7 +126,7 @@ it("filters Help articles with AND token matching across title and body", () => 
   expect([...container.querySelectorAll("section a")].some(match => match.textContent?.includes("Job heartbeat"))).toBe(true);
   fireEvent.change(screen.getByRole("searchbox",{name:"help.search"}),{target:{value:"heartbeat,zzzz"}});
   expect(screen.getByRole("status")).toBeInTheDocument();
-  expect(screen.getByRole("link",{name:"help.reportIssue"})).toHaveAttribute("href","https://github.com/SelmiAbderrahim/pulsy/issues");
+  expect(screen.getByRole("link",{name:"help.reportIssue"})).toHaveAttribute("href","https://github.com/SelmiAbderrahim/pulsy.org/issues");
 });
 
 it("links each article contents entry to its rendered heading", () => {
